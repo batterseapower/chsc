@@ -235,7 +235,7 @@ split' opt (cheapifyHeap -> Heap h (splitIdSupply -> (ids1, ids2))) k (entered_h
   where
     go must_resid_k_xs entered
       -- | traceRender ("split.go", entered, entered_k, xs_nonvalue_inlinings) False = undefined
-      | entered == entered'
+      | entered == entered' -- FIXME: very very suspicious, because the Once ids may change
       , must_resid_k_xs == must_resid_k_xs'
       = -- (\res -> traceRender ("split'", entered_hole, "==>", entered_k, "==>", entered', must_resid_k_xs, [x' | Tagged _ (Update x') <- k], M.keysSet floats_k_bound) res) $
         (\brack -> do
@@ -341,6 +341,7 @@ splitPureHeap h entered entered_k = -- traceRender ("splitPureHeap", (residualis
     h_inlineable = h_value `M.union` h_nonvalue_inlineable
 
 
+-- TODO: replace with a genuine evaluator
 cheapifyHeap :: Heap -> Heap
 cheapifyHeap (Heap h (splitIdSupply -> (ids, ids'))) = Heap (M.fromList floats `M.union` h') ids'
   where
