@@ -1,0 +1,28 @@
+#include "../Prelude.core"
+
+
+add'Nat x y = case x of 
+    Z   -> y
+    S x -> S (x `add'Nat` y)
+
+multiply'Nat x y = case y of
+    Z   -> Z
+    S y -> (x `multiply'Nat` y) `add'Nat` x
+
+fromInteger'Nat x = if x < 1 then Z else S (fromInteger'Nat (x-1))
+
+-- partain:sig
+--int :: Nat -> Int
+int n = case n of Z   -> 0
+                  S x -> 1 + int x
+
+(^^^) x y = case y of Z   -> S Z
+                      S y -> x `multiply'Nat` (x ^^^ y)
+
+root power = int ((fromInteger'Nat 3) ^^^ (fromInteger'Nat power))
+
+
+tests = [
+    (root 8, 6561),
+    (root 9, 19683)
+  ]

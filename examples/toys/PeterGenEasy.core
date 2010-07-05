@@ -1,0 +1,9 @@
+root nq = let gen n = case n of 0 -> []; _ -> (n, nq):gen (n-1)
+          in gen nq
+
+tests = [
+    (root 0, []),
+    (root 1, [(1, 1)]),
+    (root 2, [(2, 2), (1, 2)]),
+    (root 3, [(3, 3), (2, 3), (1, 3)])
+  ]

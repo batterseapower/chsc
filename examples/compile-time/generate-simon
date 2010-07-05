@@ -1,0 +1,8 @@
+#!/bin/bash
+
+N=$1
+
+for ((n=1; n<=$N; n++)); do
+	name=$(printf "%02d" $n)
+	./Generator-Simon.hs $n > Simon-$name.core
+done

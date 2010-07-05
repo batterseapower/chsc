@@ -1,0 +1,5 @@
+not x = if x then False else True
+
+russel u = case u of MkU p -> not (p u)
+
+root = russel (MkU russel)

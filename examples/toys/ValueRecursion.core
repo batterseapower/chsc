@@ -1,0 +1,9 @@
+#include "../Prelude.core"
+
+units = () : units
+
+root = map (\x -> (x, True)) units
+
+tests = [
+    (take 5 root, [((), True), ((), True), ((), True), ((), True), ((), True)])
+  ]

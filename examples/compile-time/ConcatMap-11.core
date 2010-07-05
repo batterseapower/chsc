@@ -1,0 +1,37 @@
+root = f1 0
+
+f1 x = concatMap f2 [y, y + 1]
+  where y = (x + 1) * 2
+f2 x = concatMap f3 [y, y + 1]
+  where y = (x + 1) * 2
+f3 x = concatMap f4 [y, y + 1]
+  where y = (x + 1) * 2
+f4 x = concatMap f5 [y, y + 1]
+  where y = (x + 1) * 2
+f5 x = concatMap f6 [y, y + 1]
+  where y = (x + 1) * 2
+f6 x = concatMap f7 [y, y + 1]
+  where y = (x + 1) * 2
+f7 x = concatMap f8 [y, y + 1]
+  where y = (x + 1) * 2
+f8 x = concatMap f9 [y, y + 1]
+  where y = (x + 1) * 2
+f9 x = concatMap f10 [y, y + 1]
+  where y = (x + 1) * 2
+f10 x = concatMap f11 [y, y + 1]
+  where y = (x + 1) * 2
+f11 x = [x + 1]
+
+(++) xs ys = case xs of
+    [] -> ys
+    (z:zs) -> z : (zs ++ ys)
+
+concatMap f xs = case xs of
+    [] -> []
+    (y:ys) -> f y ++ concatMap f ys
+
+null xs = case xs of [] -> True; (y:ys) -> False
+
+tests = [
+    (null root, False)
+  ]

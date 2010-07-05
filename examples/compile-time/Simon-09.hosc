@@ -1,0 +1,29 @@
+data List a = Nil | Cons a (List a);
+data Nat = S Nat | Z;
+
+f1 (fiddle Z)
+
+where
+
+f1 = \y -> append (f2 (fiddle y)) (f2 (fiddle (S y)));
+f2 = \y -> append (f3 (fiddle y)) (f3 (fiddle (S y)));
+f3 = \y -> append (f4 (fiddle y)) (f4 (fiddle (S y)));
+f4 = \y -> append (f5 (fiddle y)) (f5 (fiddle (S y)));
+f5 = \y -> append (f6 (fiddle y)) (f6 (fiddle (S y)));
+f6 = \y -> append (f7 (fiddle y)) (f7 (fiddle (S y)));
+f7 = \y -> append (f8 (fiddle y)) (f8 (fiddle (S y)));
+f8 = \y -> append (f9 (fiddle y)) (f9 (fiddle (S y)));
+f9 = \y -> append (f10 y) (f10 (S y));
+f10 = \x -> Cons (S x) Nil;
+
+fiddle = \x -> timestwo (S x);
+
+timestwo = \x -> case x of {
+    Z   -> Z;
+    S y -> S (S (timestwo y));
+};
+
+append = \xs -> \ys -> case xs of {
+    Nil -> ys;
+    Cons z zs -> Cons z (append zs ys);
+};

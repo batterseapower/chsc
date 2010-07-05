@@ -1,0 +1,21 @@
+#include "../Prelude.core"
+
+--suCC :: Int -> Int
+suCC x = x + 1
+
+--isdivs :: Int  -> Int -> Bool
+isdivs n x = mod x n /= 0
+
+--the_filter :: [Int] -> [Int]
+the_filter (n:ns) = filter (isdivs n) ns
+
+root n = primes !! n
+  where
+    -- NB: inside the lambda because in the original primes program, this list is used linearly
+    --primes :: [Int]
+    primes = map head (iterate the_filter (iterate suCC 2))
+
+tests = [
+    (root 1500, 12569),
+    (root 5500, 54001)
+  ]

@@ -1,0 +1,14 @@
+#include "../Prelude.core"
+
+-- FIXME: not optimised. ones residualised? Works if root = example1
+example1 = let ones = 1 : ones
+           in map (\x -> x + 1) ones
+
+example2 = map (\x -> x + 1) (repeat 1)
+
+root = (example1, example2)
+
+tests = [
+    (take 4 (fst root), [2, 2, 2, 2]),
+    (take 4 (snd root), [2, 2, 2, 2])
+  ]

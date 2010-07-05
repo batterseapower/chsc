@@ -1,0 +1,7 @@
+id x = x
+
+root = id ()
+
+tests = [
+    (root, ())
+  ]

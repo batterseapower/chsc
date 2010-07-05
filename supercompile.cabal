@@ -1,0 +1,23 @@
+Cabal-Version:      >= 1.2
+Build-Type:         Simple
+Name:               supercompile
+Version:            0.1
+Maintainer:         Max Bolingbroke <batterseapower@hotmail.com>
+Homepage:           http://www.github.com/batterseapower/supercompile
+License:            BSD3
+License-File:       LICENSE
+Author:             Max Bolingbroke
+Synopsis:           Call-by-need supercompiler in Haskell
+Category:           Language
+
+Executable supercompile
+    Main-Is:        Main.hs
+    Build-Depends:  base >= 4 && < 5, containers >= 0.3 && < 0.4, deepseq >= 1.1.0.0 && < 1.2,
+                    pretty >= 1.0.1.1 && < 1.1, prettyclass >= 1 && < 1.2,
+                    QuickCheck >= 1.2 && < 1.3,
+                    random >= 1.0 && < 1.1, process >= 1.0.1.2 && < 1.1,
+                    directory >= 1.0.1.0 && < 1.1, filepath >= 1.1.0.3 && < 1.2,
+                    time >= 1.1.4 && < 1.2,
+                    haskell-src-exts >= 1.9.0 && < 1.10.0, cpphs >= 1.11 && < 1.12
+    
+    Ghc-Options:    -fwarn-unused-binds -fwarn-unused-imports -fwarn-unused-matches -fwarn-incomplete-patterns

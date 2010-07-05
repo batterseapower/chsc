@@ -1,0 +1,11 @@
+#include "../Prelude.core"
+
+root n = case n of
+    S n' -> map (\ys -> False : ys) (root n') ++ map (\ys -> True : ys) (root n')
+    Z    -> [[]]
+
+tests = [
+    (root (S (S Z)), [[False, False], [False, True], [True, False], [True, True]]),
+    (root (S Z),     [[False], [True]]),
+    (root Z,         [[]])
+  ]

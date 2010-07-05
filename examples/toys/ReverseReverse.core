@@ -1,0 +1,8 @@
+reverse xs = reverseacc [] xs
+  where reverseacc ys xs = case xs of [] -> ys; (x:xs) -> reverseacc (x:ys) xs
+
+root = \xs -> reverse (reverse xs)
+
+tests = [
+    (root [1, 2, 3], [1, 2, 3])
+  ]

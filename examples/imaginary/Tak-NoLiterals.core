@@ -1,0 +1,17 @@
+#include "../Prelude.core"
+
+-- code of unknown provenance (partain 95/01/25)
+
+--tak :: Int -> Int -> Int -> Int
+tak x y z = if not (y `lt'Int` x)
+            then z
+            else tak (tak (x `subtract'Int` lit1'Int) y z)
+                     (tak (y `subtract'Int` lit1'Int) z x)
+                     (tak (z `subtract'Int` lit1'Int) x y)
+
+root x y z = tak x y z
+
+tests = [
+    (root 24 16 8, 9),
+    (root 33 17 8, 9)
+  ]

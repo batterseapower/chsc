@@ -1,0 +1,9 @@
+lefts xs = case xs of [] -> []; (x:xs) -> Left x : lefts xs
+
+(x, y) = (lefts [True, False, True], let loop = loop in loop)
+
+root = x
+
+tests = [
+    (root, [Left True, Left False, Left True])
+  ]

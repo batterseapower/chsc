@@ -1,0 +1,13 @@
+double y r = case y of Z   -> r
+                       S x -> double x (S (S r))
+
+even y = case y of Z -> True
+                   S z -> case z of Z   -> False
+                                    S x -> even x
+
+root x = even (double x Z)
+
+tests = [
+    (root Z, True),
+    (root (S Z), True)
+  ]

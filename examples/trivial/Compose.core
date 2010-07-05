@@ -1,0 +1,7 @@
+compose f g x = f (g x)
+
+root = compose Left Right ()
+
+tests = [
+    (root, Left (Right ()))
+  ]

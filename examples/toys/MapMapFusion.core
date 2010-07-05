@@ -1,0 +1,9 @@
+map f xs = case xs of
+    [] -> []
+    (x:xs) -> f x : map f xs
+
+root xs = map Left (map Right xs)
+
+tests = [
+    (root [1, 2, 3], [Left (Right 1), Left (Right 2), Left (Right 3)])
+  ]

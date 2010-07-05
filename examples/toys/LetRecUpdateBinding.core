@@ -1,0 +1,14 @@
+-- Simple demonstration
+example1 = \unk -> let x = unk + y
+                       y = case x of _ -> 2
+                   in y + 2
+
+-- Harder demonstration that illustrates the need for a fixed point
+example2 = \unk fact -> let a = fact 100
+                            y = unk + x
+                            w = fact z
+                            x = case y of _ -> w + 3
+                            z = case x of _ -> a + 3
+                        in z + w + a
+
+root = (example1, example2)

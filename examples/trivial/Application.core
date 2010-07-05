@@ -1,0 +1,7 @@
+($) f x = f x
+
+root = ($) Just ()
+
+tests = [
+    (root, Just ())
+  ]

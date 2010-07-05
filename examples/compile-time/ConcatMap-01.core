@@ -1,0 +1,17 @@
+root = f1 0
+
+f1 x = [x + 1]
+
+(++) xs ys = case xs of
+    [] -> ys
+    (z:zs) -> z : (zs ++ ys)
+
+concatMap f xs = case xs of
+    [] -> []
+    (y:ys) -> f y ++ concatMap f ys
+
+null xs = case xs of [] -> True; (y:ys) -> False
+
+tests = [
+    (null root, False)
+  ]

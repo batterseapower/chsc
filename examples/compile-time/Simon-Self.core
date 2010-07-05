@@ -1,0 +1,20 @@
+{-
+import Prelude hiding ((++), null)
+
+main = print (null root)
+-}
+
+root = f 0
+
+f x = if x <= 100 then f y ++ f (y + 1) else [x + 1]
+  where y = (x + 1) * 2
+
+(++) xs ys = case xs of
+    [] -> ys
+    (z:zs) -> z : (zs ++ ys)
+
+null xs = case xs of [] -> True; (y:ys) -> False
+
+tests = [
+    (null root, False)
+  ]

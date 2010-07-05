@@ -1,0 +1,11 @@
+#include "../Prelude.core"
+
+--nfib :: Double -> Double
+nfib n = if n `lte'Double` lit1'Double then lit1'Double else (nfib (n `subtract'Double` lit1'Double) `add'Double` nfib (n `subtract'Double` lit2'Double)) `add'Double` lit1'Double
+
+root n = nfib n
+
+tests = [
+    (show'Double (root (fromIntegral'Int'Double 30)), "2692537.0"),
+    (show'Double (root (fromIntegral'Int'Double 35)), "2.9860703e7")
+  ]

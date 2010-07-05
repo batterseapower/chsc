@@ -1,0 +1,7 @@
+#include "../Prelude.core"
+
+root xs ys zs = (xs ++ ys) ++ zs
+
+tests = [
+    let n = if cALL_BY_VALUE then 1000 else 10000000 in (length (root (replicate n 'x') (replicate n 'y') (replicate n 'z')), n * 3)
+  ]

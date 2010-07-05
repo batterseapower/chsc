@@ -1,0 +1,10 @@
+#include "../Prelude.core"
+
+root arg = round'Double'Int (realPart'Double (sum'ComplexDouble $ map f (enumFromTo 1 arg)))
+
+sum'ComplexDouble xs = foldl' add'ComplexDouble lit0'ComplexDouble xs
+
+tests = [
+    (root 10000, 10000),
+    (root 80000, 80000)
+  ]

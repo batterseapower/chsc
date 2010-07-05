@@ -1,0 +1,13 @@
+# Input/output pairs
+input/
+output/
+thrifty-output/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Cabal and Haskell stuff
+dist/
+*.hi
+*.o

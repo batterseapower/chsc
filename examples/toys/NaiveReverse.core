@@ -1,0 +1,13 @@
+#include "../Prelude.core"
+
+sillyReverse xs = case xs of
+    [] -> []
+    (y:ys) -> sillyReverse ys ++ [y]
+
+root xs = sillyReverse xs
+
+tests = [
+    (root [], []),
+    (root [1, 2, 3], [3, 2, 1]),
+    (root (enumFromTo 1 1000), (enumFromThenTo 1000 999 1))
+  ]

@@ -1,0 +1,32 @@
+-- Test case to reproduce a bug in the lazy supercompiler. We used to:
+--   1. Push the y binding down into the branches of the case
+--   2. Float it out again when we found it became boring
+--   3. Then got "x" as a free variable of the "f" specialisation, since there
+--      is no binding to match the free variable of "y"
+--
+-- The "correct" thing to do is to prevent floating bindings out due to laziness
+-- if they refer to a variable bound by an update frame before reduction.
+
+f unk z = let y = Just x
+              x = if unk then 10 else 20
+          in case x of _ -> (x, y, z)
+
+g unk w = let z = Just y -- Transitively refers to a "trapped" binding
+              y = Just x -- NB: not referred to except by z, so we need to be careful to spot it should not be floated
+              x = if unk then 10 else 20
+          in case x of _ -> (w, x, z)
+
+
+root unk = (f unk 30, g unk 40)
+
+tests = [
+    (root True,  ((10, Just 10, 30), (40, 10, Just (Just 10)))),
+    (root False, ((20, Just 20, 30), (40, 20, Just (Just 20))))
+  ]
+
+-- root unk = (f unk 30, f unk 40)
+--
+-- tests = [
+--     (root True,  ((10, Just 10, 30), (10, Just 10, 40))),
+--     (root False, ((20, Just 20, 30), (20, Just 20, 40)))
+--   ]

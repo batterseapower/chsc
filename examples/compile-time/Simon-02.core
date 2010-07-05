@@ -1,0 +1,15 @@
+root = f1 0
+
+f1 x = f2 y ++ f2 (y + 1)
+  where y = (x + 1) * 2
+f2 x = [x + 1]
+
+(++) xs ys = case xs of
+    [] -> ys
+    (z:zs) -> z : (zs ++ ys)
+
+null xs = case xs of [] -> True; (y:ys) -> False
+
+tests = [
+    (null root, False)
+  ]

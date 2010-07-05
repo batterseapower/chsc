@@ -1,0 +1,5 @@
+root = case Left (Right ()) of Left x -> case x of Right y -> y
+
+tests = [
+    (root, ())
+  ]

@@ -1,0 +1,16 @@
+#include "../Prelude.core"
+
+mapT f xs = case xs of Empty      -> Empty
+                       Node l a r -> Node (mapT f l) (f a) (mapT f r)
+
+zipT xs ys = case xs of Empty      -> Empty
+                        Node l a r -> case ys of Empty         -> Empty
+                                                 Node l' a' r' -> Node (zipT l l') (a, a') (zipT r r')
+
+root xt yt = zipT (mapT (\x -> Left x) xt) (mapT (\x -> Right x) yt)
+
+tests = [
+    (root Empty Empty, Empty),
+    (root (Node (Node Empty 1 Empty) 2 (Node Empty 3 Empty)) (Node (Node Empty 4 Empty) 5 (Node Empty 6 Empty)),
+     Node (Node Empty (Left 1, Right 4) Empty) (Left 2, Right 5) (Node Empty (Left 3, Right 6) Empty))
+  ]

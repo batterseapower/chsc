@@ -1,0 +1,31 @@
+#include "../Prelude.core"
+
+-- count the number of solutions to the "n queens" problem.
+-- (grabbed from LML dist)
+
+nsoln nq = length (gen nq)
+  where
+    safe x d qs = case qs of
+                    [] -> True
+                    (q:l) -> safer x d q && safe x (d+1) l
+
+    gen n = if n == 0
+             then [[]]
+             else concatMap (\b -> concatMap (\q -> if safe q 1 b then [(q:b)] else []) (enumFromTo 1 nq)) (gen (n - 1))
+
+root = nsoln
+
+--See \url{http://en.wikipedia.org/wiki/Eight_queens_puzzle}
+
+tests = [(root 1, 1), (root 4, 2), (root 5, 10), (root 6, 4)] -- Too slow: [(root 7, 40), (root 10, 724), (root 12, 14200)]
+
+-- Representative values for an unmodified program:
+-- 
+-- ### Test 1 of 4 ###
+-- Allocation: 28 constructors
+-- ### Test 2 of 4 ###
+-- Allocation: 896 constructors
+-- ### Test 3 of 4 ###
+-- Allocation: 3694 constructors
+-- ### Test 4 of 4 ###
+-- Allocation: 16440 constructors

@@ -1,0 +1,46 @@
+#include "../Prelude.core"
+
+-- Mark I lazy wheel-sieve.
+-- Colin Runciman (colin@cs.york.ac.uk); March 1996.
+-- See article "Lazy wheel sieves and spirals of primes" (to appear, JFP).
+
+--primes :: [Int]
+primes = sieve wheels primes squares
+
+sieve as ps qs = case as of
+                  (w:ws) ->
+                   case w of
+                    Wheel1 s ns ->
+                      --[n' | o <- s:[s*2,s*3..(head ps-1)*s],
+                      --      n <- ns,
+                      --      n'<- [n+o], noFactor n'] 
+                      (concatMap (\o -> concatMap (\n -> concatMap (\n' -> if noFactor n' then [n'] else []) [n + o]) ns) (s:enumFromThenTo (s*2) (s*3) ((head ps-1)*s))) ++ sieve ws (tail ps) (tail qs)
+                     where
+                      noFactor = if s<=2 then const True else notDivBy ps qs
+
+notDivBy as bs n = case as of
+                    (p:ps) ->
+                     case bs of
+                      (q:qs) ->
+                       q > n || n `mod` p > 0 && notDivBy ps qs n
+
+--squares :: [Int]
+squares = map (\p -> p*p) primes
+
+--wheels :: [Wheel]
+wheels = Wheel1 1 [1] : zipWith nextSize wheels primes 
+
+nextSize w p = case w of
+  Wheel1 s ns -> Wheel1 (s*p) ns'
+   where
+    --ns' = [n' | o <- [0,s..(p-1)*s],
+    --            n <- ns,
+    --            n' <- [n+o], n'`mod`p > 0]
+    ns' = concatMap (\o -> concatMap (\n -> concatMap (\n' -> if n' `mod` p > 0 then [n'] else []) [n + o]) ns) (enumFromThenTo 0 s ((p-1)*s))
+
+root n = primes !! n
+
+tests = [
+    (root 100000, 1299721),
+    (root 230000, 3196939)
+  ]

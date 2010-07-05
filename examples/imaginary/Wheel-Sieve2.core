@@ -1,0 +1,50 @@
+#include "../Prelude.core"
+
+-- Mark II lazy wheel-sieve.
+-- Colin Runciman (colin@cs.york.ac.uk); March 1996.
+-- See article "Lazy wheel sieves and spirals of primes" (to appear, JFP).
+
+--primes :: [Int]
+primes = spiral wheels primes squares
+
+spiral wss ps qs = case wss of
+  (w:ws) -> case w of
+    Wheel2 s ms ns -> foldr turn0 (roll s) ns
+      where
+        roll o = foldr (turn o) (foldr (turn o) (roll (o+s)) ns) ms
+        turn0  n rs =
+          if n<q then n:rs else sp
+        turn o n rs =
+          let n' = o+n in
+          if n'==2 || n'<q then n':rs else dropWhile (\x -> x<n') sp
+        sp = spiral ws (tail ps) (tail qs)
+        q = head qs
+
+--squares :: [Int]
+squares = map (\p -> p * p) primes
+
+
+--wheels :: [Wheel]
+wheels = Wheel2 1 [1] [] :
+         zipWith3 nextSize wheels primes squares 
+
+nextSize w p q = case w of
+    Wheel2 s ms ns -> Wheel2 (s*p) ms' ns'
+      where
+        xsns' = span (\x -> x<=q) (foldr turn0 (roll (p-1) s) ns)
+        ns' = snd xsns'
+        xs = fst xsns'
+        ms' = foldr turn0 xs ms
+        roll t o = case t of 0 -> []; _ -> foldr (turn o) (foldr (turn o) (roll (t-1) (o+s)) ns) ms
+        turn0  n rs =
+          if n`mod`p>0 then n:rs else rs
+        turn o n rs =
+          let n' = o+n in
+          if n'`mod`p>0 then n':rs else rs
+
+root n = primes !! n
+
+tests = [
+    (root 20000, 224743),
+    (root 30000, 350381)
+  ]

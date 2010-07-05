@@ -1,0 +1,45 @@
+#include "../Prelude.core"
+
+-- There was a lot of discussion about various ways of computing
+-- Bernouilli numbers (whatever they are) on haskell-cafe in March 2003
+-- Here's one of the programs.
+
+-- It's not a very good test, I suspect, because it manipulates big integers,
+-- and so probably spends most of its time in GMP.  
+
+-- powers = [[r^n | r<-[2..]] | n<-1..]
+-- type signature required for compilers lacking the monomorphism restriction
+--powers :: [[Integer]]
+powers = enumFrom'Integer lit2'Integer : map (zipWith multiply'Integer (head powers)) powers
+
+-- powers = [[(-1)^r * r^n | r<-[2..]] | n<-1..]
+-- type signature required for compilers lacking the monomorphism restriction
+--neg_powers :: [[Integer]]
+neg_powers = 
+  map (zipWith (\n x -> if n then x else negate'Integer x) (iterate not True)) powers
+
+--pascal:: [[Integer]]
+pascal = [lit1'Integer, lit2'Integer, lit1'Integer] : map (\line -> zipWith add'Integer (line ++ [lit0'Integer]) (lit0'Integer:line)) pascal
+
+
+--bernoulli :: Int -> Rational
+bernoulli n = case n == 0 of
+    True -> lit1'Integer `rational` lit1'Integer
+    False -> case n == 1 of
+        True -> lit_1'Integer `rational` lit2'Integer
+        False -> case odd n of
+            True -> lit0'Rational
+            False -> let ps = neg_powers !! (n - 1)
+                     in (lit_1'Integer `rational` lit2'Integer) `add'Rational` sum'Rational (zipWith (f ps) (enumFromTo 2 n) pascal)
+
+--f :: [Integer] -> Int -> [Integer] -> Rational
+f powers k combs = ((sum'Integer $ zipWith (multiply'Integer) powers (tail $ tail combs)) `subtract'Integer` fromIntegral'Int'Integer k) `rational` fromIntegral'Int'Integer (k + 1)
+
+--sum'Rational :: [Rational] -> Rational
+sum'Rational xs = foldr add'Rational lit0'Rational xs
+
+root = bernoulli
+
+tests = [
+    (show'Rational (root 500), "(-16596380640568557229852123088077134206658664302806671892352650993155331641220960084014956088135770921465025323942809207851857992860213463783252745409096420932509953165466735675485979034817619983727209844291081908145597829674980159889976244240633746601120703300698329029710482600069717866917229113749797632930033559794717838407415772796504419464932337498642714226081743688706971990010734262076881238322867559275748219588404488023034528296023051638858467185173202483888794342720837413737644410765563213220043477396887812891242952336301344808165757942109887803692579439427973561487863524556256869403384306433922049078300720480361757680714198044230522015775475287075315668886299978958150756677417180004362981454396613646612327019784141740499835461) % 8365830")
+  ]
