@@ -193,15 +193,15 @@ transitiveInline :: (PureHeap -> Bool) -> PureHeap -> PureHeap -> FreeVars -> Pu
 transitiveInline admissable = go
   where
     go h_inlineable h_output fvs
-        = if M.null h_inline then h_output else go h_inlineable' (h_inline `M.union` h_output) fvs'
+        = if M.null h_inline then h_output else go (h_inlineable' `M.union` h_not_inlined) (h_output `M.union` h_inline) fvs'
       where -- Generalisation heuristic: only inline those members of the heap which do not cause us to blow the whistle
             -- NB: we rely here on the fact that our caller will still be able to fill in bindings for stuff from h_inlineable
             -- even if we choose not to inline it into the State, and that such bindings will not be evaluated until they are
             -- actually demanded (or we could get work duplication by inlining into only *some* Once contexts).
-            consider_inlining x' in_e h_inline = if admissable h_inline' then h_inline' else h_inline
+            consider_inlining x' in_e (h_inline, h_not_inlined) = if admissable h_inline' then (h_inline', h_not_inlined) else (h_inline, M.insert x' in_e h_not_inlined)
               where h_inline' = M.insert x' in_e h_inline
-            h_inline | gENERALISATION = M.foldWithKey consider_inlining M.empty h_inline_candidates
-                     | otherwise      = h_inline_candidates
+            (h_inline, h_not_inlined) | gENERALISATION = M.foldWithKey consider_inlining (M.empty, M.empty) h_inline_candidates
+                                      | otherwise      = (h_inline_candidates, M.empty)
             (h_inline_candidates, h_inlineable') = M.partitionWithKey (\x' _ -> x' `S.member` fvs) h_inlineable
             fvs' = M.fold (\in_e fvs -> fvs `S.union` inFreeVars taggedTermFreeVars in_e) S.empty h_inline
 
