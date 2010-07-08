@@ -1,4 +1,4 @@
-{-# LANGUAGE ViewPatterns, TupleSections, PatternGuards #-}
+{-# LANGUAGE ViewPatterns, TupleSections, PatternGuards, DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 module Supercompile.Split (split) where
 
@@ -15,6 +15,8 @@ import Renaming
 import StaticFlags
 import Utilities
 
+import Data.Foldable (Foldable)
+import Data.Traversable (Traversable)
 import qualified Data.Map as M
 import qualified Data.Set as S
 
@@ -175,10 +177,7 @@ data Bracketed a = Bracketed {
     extra_fvs :: FreeVars,              -- Maximum free variables added by the residual wrapped around the holes
     transfer :: [FreeVars] -> FreeVars, -- Strips any variables bound by the residual out of the hole FVs
     fillers :: [a]                      -- Hole-fillers themselves. Usually State
-  }
-
-instance Functor Bracketed where
-    fmap f b = b { fillers = map f (fillers b) }
+  } deriving (Functor, Foldable, Traversable)
 
 optimiseBracketed :: Monad m
                   => (State -> m (FreeVars, Out Term))
@@ -189,9 +188,12 @@ optimiseBracketed opt b = do
     return (extra_fvs b `S.union` transfer b fvs', rebuild b es')
 
 -- We are going to use this helper function to inline any eligible inlinings to produce the expressions for driving
-transitiveInline :: (PureHeap -> Bool) -> PureHeap -> PureHeap -> FreeVars -> PureHeap
-transitiveInline admissable = go
+transitiveInline :: (State -> Bool) -> PureHeap -> State -> State
+transitiveInline admissable_state h_inlineable (Heap h ids, k, in_e) = (Heap (go (h_inlineable `M.union` h) M.empty (stateFreeVars (Heap M.empty ids, k, in_e))) ids, k, in_e)
   where
+    admissable h' = admissable_state (Heap h' ids, k, in_e)
+    
+    go :: PureHeap -> PureHeap -> FreeVars -> PureHeap
     go h_inlineable h_output fvs
         = if M.null h_inline then h_output else go (h_inlineable' `M.union` h_not_inlined) (h_output `M.union` h_inline) fvs'
       where -- Generalisation heuristic: only inline those members of the heap which do not cause us to blow the whistle
@@ -204,9 +206,6 @@ transitiveInline admissable = go
                                       | otherwise      = (h_inline_candidates, M.empty)
             (h_inline_candidates, h_inlineable') = M.partitionWithKey (\x' _ -> x' `S.member` fvs) h_inlineable
             fvs' = M.fold (\in_e fvs -> fvs `S.union` inFreeVars taggedTermFreeVars in_e) S.empty h_inline
-
-transitiveInline' :: (State -> Bool) -> PureHeap -> State -> State
-transitiveInline' admissable h_inlineable (Heap h ids, k, in_e) = (Heap (transitiveInline (\h' -> admissable (Heap h' ids, k, in_e)) (h_inlineable `M.union` h) M.empty (stateFreeVars (Heap M.empty ids, k, in_e))) ids, k, in_e)
 
 optimiseSplit :: Monad m
               => (State -> m (FreeVars, Out Term))
@@ -295,7 +294,7 @@ split' admissable (cheapifyHeap -> Heap h (splitIdSupply -> (ids1, ids2))) k (en
         entered_many' = toEnteredManyEnv entered'
         
         inlineBracketHeap :: Bracketed State -> Bracketed State
-        inlineBracketHeap = fmap (transitiveInline' admissable h_inlineable)
+        inlineBracketHeap = fmap (transitiveInline admissable h_inlineable)
 
     promoteToState :: In TaggedTerm -> State
     promoteToState in_e = (Heap M.empty ids2, [], in_e)
