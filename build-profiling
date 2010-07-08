@@ -1,0 +1,3 @@
+#!/bin/bash
+cabal configure --distdir dist-profiling --enable-executable-profiling
+cabal build --distdir dist-profiling
