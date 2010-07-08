@@ -352,7 +352,8 @@ splitPureHeap h was_entered_many entered_k = -- traceRender ("splitPureHeap", (r
     h_inlineable = h_value `M.union` h_nonvalue_inlineable
 
 
--- TODO: replace with a genuine evaluator
+-- TODO: replace with a genuine evaluator. However, think VERY hard about the termination implications of this!
+-- I think we can only do it when the splitter is being invoked by a non-whistling invocation of sc.
 cheapifyHeap :: Heap -> Heap
 cheapifyHeap (Heap h (splitIdSupply -> (ids, ids'))) = Heap (M.fromList floats `M.union` h') ids'
   where
