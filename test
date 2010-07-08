@@ -1,4 +1,4 @@
 #!/bin/bash
 
 cabal build || exit $?
-dist/build/supercompile/supercompile -v0 --testsuite --no-assertions $*
+dist/build/supercompile/supercompile -v0 --no-assertions $*
