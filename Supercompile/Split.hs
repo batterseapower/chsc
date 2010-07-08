@@ -63,7 +63,7 @@ split :: Monad m
       => (State -> m (FreeVars, Out Term))
       -> State
       -> m (FreeVars, Out Term)
-split opt (simplify -> (Heap h ids, k, qa)) = uncurry3 optimiseSplit (split' opt (Heap h ids) k (splitQA ids qa))
+split opt (simplify -> (Heap h ids, k, qa)) = uncurry (optimiseSplit opt) (split' (Heap h ids) k (splitQA ids qa))
 
 -- Non-expansive simplification that we can safely do just before splitting to make the splitter a bit simpler
 data QA = Question (Out Var)
@@ -197,13 +197,13 @@ transitiveInline' :: PureHeap -> State -> State
 transitiveInline' h_inlineable state@(Heap h ids, k, in_e) = (Heap (transitiveInline (h_inlineable `M.union` h) M.empty (stateFreeVars state)) ids, k, in_e)
 
 optimiseSplit :: Monad m
-              => (Bracketed PureState -> m (FreeVars, Out Term))
-              -> M.Map (Out Var) (Bracketed PureState)
-              -> Bracketed PureState
+              => (State -> m (FreeVars, Out Term))
+              -> M.Map (Out Var) (Bracketed State)
+              -> Bracketed State
               -> m (FreeVars, Out Term)
-optimiseSplit optimise_bracketed floats_h floats_compulsory = do
+optimiseSplit opt floats_h floats_compulsory = do
     -- 1) Recursively drive the compulsory floats
-    (fvs_compulsory', e_compulsory') <- optimise_bracketed floats_compulsory
+    (fvs_compulsory', e_compulsory') <- optimiseBracketed opt floats_compulsory
     
     -- 2) We now need to think about how we are going to residualise the letrec. We only want to drive (and residualise) as
     --    much as we actually refer to. This loop does this: it starts by residualising the free variables of the compulsory
@@ -213,7 +213,7 @@ optimiseSplit optimise_bracketed floats_h floats_compulsory = do
                              return (resid_fvs S.\\ resid_bvs, xes_resid)
           | otherwise = {- traceRender ("optimiseSplit", xs_resid') $ -} do
             -- Recursively drive the new residuals arising from the need to bind the resid_fvs
-            (S.unions -> extra_resid_fvs', es_resid') <- liftM unzip $ mapM optimise_bracketed bracks_resid
+            (S.unions -> extra_resid_fvs', es_resid') <- liftM unzip $ mapM (optimiseBracketed opt) bracks_resid
             -- Recurse, because we might now need to residualise and drive even more stuff (as we have added some more FVs and BVs)
             residualise (xes_resid ++ zip xs_resid' es_resid')
                         (resid_bvs `S.union` M.keysSet h_resid)
@@ -235,15 +235,12 @@ toEnteredManyEnv :: EnteredEnv -> EnteredManyEnv
 toEnteredManyEnv = M.map (not . isOnce)
 
 split'
-  :: Monad m
-  => (State -> m (FreeVars, Out Term))
-  -> Heap
+  :: Heap
   -> Stack
   -> (EnteredEnv, Bracketed PureState)
-  -> (Bracketed PureState -> m (FreeVars, Out Term),
-      M.Map (Out Var) (Bracketed PureState),
-      Bracketed PureState)
-split' opt (cheapifyHeap -> Heap h (splitIdSupply -> (ids1, ids2))) k (entered_hole, bracketed_hole)
+  -> (M.Map (Out Var) (Bracketed State),
+      Bracketed State)
+split' (cheapifyHeap -> Heap h (splitIdSupply -> (ids1, ids2))) k (entered_hole, bracketed_hole)
   = go S.empty (toEnteredManyEnv entered_hole)
   where
     go must_resid_k_xs entered_many
@@ -251,13 +248,8 @@ split' opt (cheapifyHeap -> Heap h (splitIdSupply -> (ids1, ids2))) k (entered_h
       | entered_many == entered_many'
       , must_resid_k_xs == must_resid_k_xs'
       = -- (\res -> traceRender ("split'", entered_hole, "==>", entered_k, "==>", entered', must_resid_k_xs, [x' | Tagged _ (Update x') <- k], M.keysSet floats_k_bound) res) $
-        (\brack -> do
-          (fvs', e') <- optimiseBracketed opt (fmap (\(h, k, in_e) -> transitiveInline' h_inlineable (Heap h ids2, k, in_e)) brack)
-          let _xs_upd_frames_pushed_down = S.fromList [x' | Tagged _ (Update x') <- k] S.\\ M.keysSet floats_k_bound
-          assertRender ("optimiseBracketed", fvs' `S.intersection` _xs_upd_frames_pushed_down) (S.null (fvs' `S.intersection` _xs_upd_frames_pushed_down)) $ return ()
-          return (fvs', e'),
-         M.map promoteToBracket (h `exclude` xs_nonvalue_inlinings) `M.union` floats_k_bound,
-         bracket_k)
+        (M.map (inlineBracketHeap . promoteToBracket) (h `exclude` xs_nonvalue_inlinings) `M.union` M.map inlineBracketHeap floats_k_bound,
+         inlineBracketHeap bracket_k)
       | otherwise = go must_resid_k_xs' entered_many'
       where
         -- Evaluation context splitting
@@ -283,6 +275,9 @@ split' opt (cheapifyHeap -> Heap h (splitIdSupply -> (ids1, ids2))) k (entered_h
         xs_nonvalue_inlinings = M.keysSet $ M.filterWithKey (\x (_, e) -> maybe False (/= Once Nothing) (M.lookup x entered') && not (taggedTermIsCheap e)) h_inlineable
         
         entered_many' = toEnteredManyEnv entered'
+        
+        inlineBracketHeap :: Bracketed PureState -> Bracketed State
+        inlineBracketHeap = fmap (\(h, k, in_e) -> transitiveInline' h_inlineable (Heap h ids2, k, in_e))
 
     promoteToPureState :: In TaggedTerm -> PureState
     promoteToPureState in_e = (M.empty, [], in_e)
