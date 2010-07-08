@@ -172,7 +172,7 @@ data Bracketed a = Bracketed {
     rebuild :: [Out Term] -> Out Term,  -- Rebuild the full output term given outputs to plug into each hole
     extra_fvs :: FreeVars,              -- Maximum free variables added by the residual wrapped around the holes
     transfer :: [FreeVars] -> FreeVars, -- Strips any variables bound by the residual out of the hole FVs
-    fillers :: [a]                      -- Hole-fillers themselves. Can be In TaggedTerm, State or DrivePureState
+    fillers :: [a]                      -- Hole-fillers themselves. Can be State or PureState
   }
 
 instance Functor Bracketed where
@@ -194,7 +194,7 @@ transitiveInline h_inlineable h_output fvs
         fvs' = M.fold (\in_e fvs -> fvs `S.union` inFreeVars taggedTermFreeVars in_e) S.empty h_inline
 
 transitiveInline' :: PureHeap -> State -> State
-transitiveInline' h_inlineable state@(Heap h ids, k, in_e) = (Heap (transitiveInline (h_inlineable `M.union` h) M.empty (stateFreeVars state)) ids, k, in_e)
+transitiveInline' h_inlineable (Heap h ids, k, in_e) = (Heap (transitiveInline (h_inlineable `M.union` h) M.empty (stateFreeVars (Heap M.empty ids, k, in_e))) ids, k, in_e)
 
 optimiseSplit :: Monad m
               => (State -> m (FreeVars, Out Term))
@@ -233,6 +233,10 @@ type EnteredManyEnv = M.Map (Out Var) Bool
 
 toEnteredManyEnv :: EnteredEnv -> EnteredManyEnv
 toEnteredManyEnv = M.map (not . isOnce)
+
+-- State with no Ids yet. Used only to delay filling in the Ids until we inline the inlineable parts of the Heap.
+-- TODO: remove the use of this type entirely.
+type PureState = (PureHeap, Stack, In TaggedTerm)
 
 split'
   :: Heap

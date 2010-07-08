@@ -3,7 +3,7 @@ module Evaluator.FreeVars (
     inFreeVars,
     pureHeapFreeVars, pureHeapOpenFreeVars,
     stackFreeVars, stackFrameFreeVars,
-    stateFreeVars, pureStateFreeVars
+    stateFreeVars
   ) where
 
 import Evaluator.Syntax
@@ -42,7 +42,4 @@ stackFrameFreeVars kf = case kf of
     Update x'               -> (S.singleton x', S.empty)
 
 stateFreeVars :: State -> FreeVars
-stateFreeVars (Heap h _, k, in_e) = pureStateFreeVars (h, k, in_e)
-
-pureStateFreeVars :: PureState -> FreeVars
-pureStateFreeVars (h, k, in_e) = pureHeapFreeVars h (stackFreeVars k (inFreeVars taggedTermFreeVars in_e))
+stateFreeVars (Heap h _, k, in_e) = pureHeapFreeVars h (stackFreeVars k (inFreeVars taggedTermFreeVars in_e))

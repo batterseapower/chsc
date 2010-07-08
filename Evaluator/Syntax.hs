@@ -8,8 +8,7 @@ import Utilities
 import qualified Data.Map as M
 
 
-type PureState = (PureHeap, Stack, In TaggedTerm)
-type State     = (Heap,     Stack, In TaggedTerm)
+type State = (Heap, Stack, In TaggedTerm)
 
 type PureHeap = M.Map (Out Var) (In TaggedTerm)
 data Heap = Heap PureHeap IdSupply
