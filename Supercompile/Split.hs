@@ -15,8 +15,8 @@ import Renaming
 import StaticFlags
 import Utilities
 
-import Data.Foldable (Foldable)
-import Data.Traversable (Traversable)
+import qualified Data.Foldable as Foldable
+import qualified Data.Traversable as Traversable
 import qualified Data.Map as M
 import qualified Data.Set as S
 
@@ -177,7 +177,7 @@ data Bracketed a = Bracketed {
     extra_fvs :: FreeVars,              -- Maximum free variables added by the residual wrapped around the holes
     transfer :: [FreeVars] -> FreeVars, -- Strips any variables bound by the residual out of the hole FVs
     fillers :: [a]                      -- Hole-fillers themselves. Usually State
-  } deriving (Functor, Foldable, Traversable)
+  } deriving (Functor, Foldable.Foldable, Traversable.Traversable)
 
 optimiseBracketed :: Monad m
                   => (State -> m (FreeVars, Out Term))
@@ -188,14 +188,18 @@ optimiseBracketed opt b = do
     return (extra_fvs b `S.union` transfer b fvs', rebuild b es')
 
 -- We are going to use this helper function to inline any eligible inlinings to produce the expressions for driving
-transitiveInline :: (State -> Bool) -> PureHeap -> State -> State
-transitiveInline admissable_state h_inlineable (Heap h ids, k, in_e) = (Heap (go (h_inlineable `M.union` h) M.empty (stateFreeVars (Heap M.empty ids, k, in_e))) ids, k, in_e)
+-- Returns (along with the augmented state) the names of those bindings in the input PureHeap that could have been inlined
+-- but were not due to generalisation.
+transitiveInline :: (State -> Bool) -> PureHeap -> State -> (FreeVars, State)
+transitiveInline admissable_state h_inlineable (Heap h ids, k, in_e) = (fvs', (Heap h' ids, k, in_e))
   where
+    (fvs', h') = go (h_inlineable `M.union` h) M.empty (stateFreeVars (Heap M.empty ids, k, in_e))
+    
     admissable h' = admissable_state (Heap h' ids, k, in_e)
     
-    go :: PureHeap -> PureHeap -> FreeVars -> PureHeap
+    go :: PureHeap -> PureHeap -> FreeVars -> (FreeVars, PureHeap)
     go h_inlineable h_output fvs
-        = if M.null h_inline then h_output else go (h_inlineable' `M.union` h_not_inlined) (h_output `M.union` h_inline) fvs'
+        = if M.null h_inline then (M.keysSet h_not_inlined, h_output) else go (h_inlineable' `M.union` h_not_inlined) (h_output `M.union` h_inline) fvs'
       where -- Generalisation heuristic: only inline those members of the heap which do not cause us to blow the whistle
             -- NB: we rely here on the fact that our caller will still be able to fill in bindings for stuff from h_inlineable
             -- even if we choose not to inline it into the State, and that such bindings will not be evaluated until they are
@@ -256,12 +260,12 @@ split' admissable (cheapifyHeap -> Heap h (splitIdSupply -> (ids1, ids2))) k (en
   = go S.empty (toEnteredManyEnv entered_hole)
   where
     go must_resid_k_xs entered_many
+      | traceRender ("split.go", gen_fvs) False = undefined
       -- | traceRender ("split.go", entered, entered_k, xs_nonvalue_inlinings) False = undefined
       | entered_many == entered_many'
       , must_resid_k_xs == must_resid_k_xs'
       = -- (\res -> traceRender ("split'", entered_hole, "==>", entered_k, "==>", entered', must_resid_k_xs, [x' | Tagged _ (Update x') <- k], M.keysSet floats_k_bound) res) $
-        (M.map (inlineBracketHeap . promoteToBracket) h `M.union` M.map inlineBracketHeap floats_k_bound,
-         inlineBracketHeap bracket_k)
+        (brackets_h `M.union` brackets_k_bound, bracket_k')
       | otherwise = go must_resid_k_xs' entered_many'
       where
         -- Evaluation context splitting
@@ -278,7 +282,7 @@ split' admissable (cheapifyHeap -> Heap h (splitIdSupply -> (ids1, ids2))) k (en
         -- ~~~~~~~~~~~~~~
         
         -- Guess which parts of the heap are safe for inlining based on the current Entered information
-        (h_inlineable, entered', must_resid_k_xs') = splitPureHeap h entered_many entered_k
+        (h_inlineable, entered', before_must_resid_k_xs') = splitPureHeap h entered_many entered_k
         
         -- NB: We must NOT take non-values that we have decided to inline and then bind them in the residual term. This does not
         -- usually happen because such things won't be free variables of the immediate output term, but with strict bindings the
@@ -291,10 +295,25 @@ split' admissable (cheapifyHeap -> Heap h (splitIdSupply -> (ids1, ids2))) k (en
         -- so it must be available to optimiseSplit if it turns out to be free.
         --xs_nonvalue_inlinings = M.keysSet $ M.filterWithKey (\x (_, e) -> maybe False (/= Once Nothing) (M.lookup x entered') && not (taggedTermIsCheap e)) h_inlineable
         
-        entered_many' = toEnteredManyEnv entered'
+        -- Generalisation
+        -- ~~~
         
-        inlineBracketHeap :: Bracketed State -> Bracketed State
-        inlineBracketHeap = fmap (transitiveInline admissable h_inlineable)
+        -- Generalising the final proposed floats may cause some bindings that we *thought* were going to be inlined to instead be
+        -- residualised. We need to account for this in the Entered information (for work-duplication purposes), and in that we will
+        -- also require any FVs of the new residualised things that are bound in the stack to residualise more frames.
+        inlineBracketHeap :: Bracketed State -> (FreeVars, Bracketed State)
+        inlineBracketHeap = mapAccumM (transitiveInline admissable h_inlineable)
+        
+        (gen_fvs_k',      bracket_k')       = inlineBracketHeap bracket_k
+        (gen_fvs_h,       brackets_h)       = mapAccumM (inlineBracketHeap . promoteToBracket) h
+        (gen_fvs_k_bound, brackets_k_bound) = mapAccumM inlineBracketHeap floats_k_bound
+        gen_fvs = gen_fvs_k' `S.union` gen_fvs_h `S.union` gen_fvs_k_bound
+        
+        -- FIXME: bit of a hack. At least needs some renaming. Basically just want to ensure that generalised variables are residualised,
+        -- and that the resulting modifications to the Entered information takes effect.
+        must_resid_k_xs' = gen_fvs `S.union` before_must_resid_k_xs'
+        
+        entered_many' = toEnteredManyEnv entered'
 
     promoteToState :: In TaggedTerm -> State
     promoteToState in_e = (Heap M.empty ids2, [], in_e)

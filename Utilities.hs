@@ -23,10 +23,12 @@ import Control.DeepSeq (NFData(..), rnf)
 import Control.Monad
 
 import Data.Maybe
+import Data.Monoid
 import Data.List
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Time.Clock.POSIX (getPOSIXTime)
+import qualified Data.Traversable as Traversable
 
 import Debug.Trace
 
@@ -312,6 +314,10 @@ zipWithEqual _ _ _ = fail "zipWithEqual"
 
 implies :: Bool -> Bool -> Bool
 implies cond consq = not cond || consq
+
+
+mapAccumM :: (Traversable.Traversable t, Monoid m) => (a -> (m, b)) -> t a -> (m, t b)
+mapAccumM f ta = Traversable.mapAccumL (\m a -> case f a of (m', b) -> (m `mappend` m', b)) mempty ta
 
 
 type Seconds = Double
