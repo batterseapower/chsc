@@ -175,21 +175,27 @@ data Bracketed a = Bracketed {
     fillers :: [a]                      -- Hole-fillers themselves. Can be In TaggedTerm, State or DrivePureState
   }
 
+instance Functor Bracketed where
+    fmap f b = b { fillers = map f (fillers b) }
+
 optimiseBracketed :: Monad m
                   => (State -> m (FreeVars, Out Term))
                   -> Heap
                   -> Bracketed PureState
                   -> m (FreeVars, Out Term)
 optimiseBracketed opt (Heap h_inlineable ids) b = do
-    let -- We are going to use this helper function to inline any eligible inlinings to produce the expressions for driving
-        transitiveInline :: PureHeap -> PureHeap -> FreeVars -> PureHeap
-        transitiveInline h_inlineable h_output fvs
-            = if M.null h_inline then h_output else transitiveInline h_inlineable' (h_inline `M.union` h_output) fvs'
-          where (h_inline, h_inlineable') = M.partitionWithKey (\x' _ -> x' `S.member` fvs) h_inlineable
-                fvs' = M.fold (\in_e fvs -> fvs `S.union` inFreeVars taggedTermFreeVars in_e) S.empty h_inline
-  
-    (fvs', es') <- liftM unzip $ mapM (\pstate@(h, k, in_e) -> opt (Heap (transitiveInline (h_inlineable `M.union` h) M.empty (pureStateFreeVars pstate)) ids, k, in_e)) (fillers b)
+    (fvs', es') <- liftM unzip $ forM (fillers b) $ \(h, k, in_e) -> opt (transitiveInline' h_inlineable (Heap h ids, k, in_e))
     return (extra_fvs b `S.union` transfer b fvs', rebuild b es')
+
+-- We are going to use this helper function to inline any eligible inlinings to produce the expressions for driving
+transitiveInline :: PureHeap -> PureHeap -> FreeVars -> PureHeap
+transitiveInline h_inlineable h_output fvs
+    = if M.null h_inline then h_output else transitiveInline h_inlineable' (h_inline `M.union` h_output) fvs'
+  where (h_inline, h_inlineable') = M.partitionWithKey (\x' _ -> x' `S.member` fvs) h_inlineable
+        fvs' = M.fold (\in_e fvs -> fvs `S.union` inFreeVars taggedTermFreeVars in_e) S.empty h_inline
+
+transitiveInline' :: PureHeap -> State -> State
+transitiveInline' h_inlineable state@(Heap h ids, k, in_e) = (Heap (transitiveInline (h_inlineable `M.union` h) M.empty (stateFreeVars state)) ids, k, in_e)
 
 optimiseSplit :: Monad m
               => (Bracketed PureState -> m (FreeVars, Out Term))
