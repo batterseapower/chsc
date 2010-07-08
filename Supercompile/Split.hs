@@ -346,6 +346,9 @@ splitPureHeap h was_entered_many entered_k = -- traceRender ("splitPureHeap", (r
     -- in at least one place and furthermore are both expensive and may be used more than once. The free variables of those bindings
     -- are exactly what we need to feed to splitStack on the next iteration to ensure that things referred to by them
     -- but bound in the evaluation context are bound right here.
+    --
+    -- FIXME: must include the FVs of elements of h_inlineable that were not inlined into QA/Stack contexts due to generalisation.
+    -- FIXME: surely should also contain FVs of h_value bindings reachable via h_nonvalue_noninlineable FVs?
     must_resid_k_xs' = S.unions $ map (inFreeVars taggedTermFreeVars) (M.elems h_nonvalue_noninlineable)
 
     -- Construct the final environment that is safe for inlining
