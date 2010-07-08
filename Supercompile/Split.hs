@@ -180,11 +180,10 @@ instance Functor Bracketed where
 
 optimiseBracketed :: Monad m
                   => (State -> m (FreeVars, Out Term))
-                  -> Heap
-                  -> Bracketed PureState
+                  -> Bracketed State
                   -> m (FreeVars, Out Term)
-optimiseBracketed opt (Heap h_inlineable ids) b = do
-    (fvs', es') <- liftM unzip $ forM (fillers b) $ \(h, k, in_e) -> opt (transitiveInline' h_inlineable (Heap h ids, k, in_e))
+optimiseBracketed opt b = do
+    (fvs', es') <- liftM unzip $ mapM opt (fillers b)
     return (extra_fvs b `S.union` transfer b fvs', rebuild b es')
 
 -- We are going to use this helper function to inline any eligible inlinings to produce the expressions for driving
@@ -253,7 +252,7 @@ split' opt (cheapifyHeap -> Heap h (splitIdSupply -> (ids1, ids2))) k (entered_h
       , must_resid_k_xs == must_resid_k_xs'
       = -- (\res -> traceRender ("split'", entered_hole, "==>", entered_k, "==>", entered', must_resid_k_xs, [x' | Tagged _ (Update x') <- k], M.keysSet floats_k_bound) res) $
         (\brack -> do
-          (fvs', e') <- optimiseBracketed opt (Heap h_inlineable ids2) brack
+          (fvs', e') <- optimiseBracketed opt (fmap (\(h, k, in_e) -> transitiveInline' h_inlineable (Heap h ids2, k, in_e)) brack)
           let _xs_upd_frames_pushed_down = S.fromList [x' | Tagged _ (Update x') <- k] S.\\ M.keysSet floats_k_bound
           assertRender ("optimiseBracketed", fvs' `S.intersection` _xs_upd_frames_pushed_down) (S.null (fvs' `S.intersection` _xs_upd_frames_pushed_down)) $ return ()
           return (fvs', e'),
