@@ -27,37 +27,9 @@ import qualified Data.Set as S
 
 
 supercompile :: Term -> Term
-supercompile e = traceRender ("all input FVs", fvs) $ runScpM fvs $ fmap snd $ sc [] state
+supercompile e = traceRender ("all input FVs", fvs) $ runScpM fvs $ fmap snd $ sc emptyHistory state
   where fvs = termFreeVars e
         state = (Heap M.empty reduceIdSupply, [], (mkIdentityRenaming $ S.toList fvs, tagTerm tagIdSupply e))
-
-
---
--- == Termination ==
---
-
--- Other functions:
---  Termination.Terminate.terminate
-
--- This family of functions is the whole reason that I have to thread Tag information throughout the rest of the code:
-
-stateTagBag :: State -> TagBag
-stateTagBag (Heap h _, k, (_, e)) = pureHeapTagBag h `plusTagBag` stackTagBag k `plusTagBag` taggedTermTagBag e
-
-pureHeapTagBag :: PureHeap -> TagBag
-pureHeapTagBag = plusTagBags . map (taggedTagBag 5 . unTaggedTerm . snd) . M.elems
-
-stackTagBag :: Stack -> TagBag
-stackTagBag = plusTagBags . map (taggedTagBag 3)
-
-taggedTermTagBag :: TaggedTerm -> TagBag
-taggedTermTagBag = taggedTagBag 2 . unTaggedTerm
-
-taggedTagBag :: Int -> Tagged a -> TagBag
-taggedTagBag cls = tagTagBag cls . tag
-
-tagTagBag :: Int -> Tag -> TagBag
-tagTagBag cls = mkTagBag . return . injectTag cls
 
 
 --
@@ -73,7 +45,7 @@ reduce = go emptyHistory
         Nothing -> state
         Just state'
           | intermediate state' -> go hist state'
-          | otherwise           -> case terminate hist (stateTagBag state') of
+          | otherwise           -> case terminate hist state' of
               Stop           -> state'
               Continue hist' -> go hist' state'
     
@@ -125,7 +97,7 @@ runScpM input_fvs (ScpM f) = letRec (sortBy (comparing ((read :: String -> Int) 
 
 sc, sc' :: History -> State -> ScpM (FreeVars, Out Term)
 sc hist = memo (sc' hist)
-sc' hist state = case terminate hist (stateTagBag state) of
+sc' hist state = case terminate hist state of
     Stop           -> split (sc hist)  state
     Continue hist' -> split (sc hist') (reduce state)
 

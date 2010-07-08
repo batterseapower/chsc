@@ -43,9 +43,6 @@ instance NFData Id where
 
 type Tag = Int
 
-injectTag :: Int -> Tag -> Tag
-injectTag cls tg = cls * tg
-
 data Tagged a = Tagged { tag :: Tag, tagee :: a }
               deriving (Eq, Show)
 
