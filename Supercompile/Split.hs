@@ -12,6 +12,7 @@ import Evaluator.Syntax
 
 import Name
 import Renaming
+import StaticFlags
 import Utilities
 
 import qualified Data.Map as M
@@ -188,14 +189,19 @@ optimiseBracketed opt b = do
     return (extra_fvs b `S.union` transfer b fvs', rebuild b es')
 
 -- We are going to use this helper function to inline any eligible inlinings to produce the expressions for driving
-transitiveInline :: PureHeap -> PureHeap -> FreeVars -> PureHeap
-transitiveInline h_inlineable h_output fvs
-    = if M.null h_inline then h_output else transitiveInline h_inlineable' (h_inline `M.union` h_output) fvs'
-  where (h_inline, h_inlineable') = M.partitionWithKey (\x' _ -> x' `S.member` fvs) h_inlineable
-        fvs' = M.fold (\in_e fvs -> fvs `S.union` inFreeVars taggedTermFreeVars in_e) S.empty h_inline
+transitiveInline :: (PureHeap -> Bool) -> PureHeap -> PureHeap -> FreeVars -> PureHeap
+transitiveInline admissable = go
+  where
+    go h_inlineable h_output fvs
+        = if M.null h_inline then h_output else go h_inlineable' (h_inline `M.union` h_output) fvs'
+      where -- Generalisation heuristic: only inline those members of the heap which do not cause us to blow the whistle
+            h_inline | gENERALISATION = M.foldWithKey (\x' in_e h_inline -> let h_inline' = M.insert x' in_e h_inline in if admissable h_inline' then h_inline' else h_inline) M.empty h_inline_candidates
+                     | otherwise      = h_inline_candidates
+            (h_inline_candidates, h_inlineable') = M.partitionWithKey (\x' _ -> x' `S.member` fvs) h_inlineable
+            fvs' = M.fold (\in_e fvs -> fvs `S.union` inFreeVars taggedTermFreeVars in_e) S.empty h_inline
 
 transitiveInline' :: (State -> Bool) -> PureHeap -> State -> State
-transitiveInline' admissable h_inlineable (Heap h ids, k, in_e) = (Heap (transitiveInline (h_inlineable `M.union` h) M.empty (stateFreeVars (Heap M.empty ids, k, in_e))) ids, k, in_e)
+transitiveInline' admissable h_inlineable (Heap h ids, k, in_e) = (Heap (transitiveInline (\h' -> admissable (Heap h' ids, k, in_e)) (h_inlineable `M.union` h) M.empty (stateFreeVars (Heap M.empty ids, k, in_e))) ids, k, in_e)
 
 optimiseSplit :: Monad m
               => (State -> m (FreeVars, Out Term))
@@ -384,13 +390,13 @@ splitStack :: (State -> Bool)
            -> (EnteredEnv, Bracketed State)
            -> (M.Map (Out Var) (Bracketed State),
                (EnteredEnv, Bracketed State))
-splitStack admissable _       _           []               (entered_hole, bracketed_hole) = (M.empty, (entered_hole, bracketed_hole)) -- \(rebuild, transfer, in_es) -> (rebuild, transfer, map (M.empty,[],) in_es)
+splitStack _          _       _           []               (entered_hole, bracketed_hole) = (M.empty, (entered_hole, bracketed_hole)) -- \(rebuild, transfer, in_es) -> (rebuild, transfer, map (M.empty,[],) in_es)
 splitStack admissable old_ids mb_in_scrut (Tagged tg kf:k) (entered_hole, (Bracketed rebuild_hole extra_fvs_hole transfer_hole dstates_hole)) = case kf of
     Apply x2' -> splitStack admissable old_ids Nothing k (entered_hole `plusEnteredEnv` mkEnteredEnv (Once Nothing) (S.singleton x2'), Bracketed (\es' -> rebuild_hole es' `app` x2') (S.insert x2' extra_fvs_hole) transfer_hole dstates_hole)
     -- NB: case scrutinisation is special! Instead of kontinuing directly with k, we are going to inline
     -- *as much of entire remaining evaluation context as we can* into each case branch. Scary, eh?
     Scrutinise (rn, unzip -> (alt_cons, alt_es)) -> -- (if null k_remaining then id else traceRender ("splitStack: FORCED SPLIT", M.keysSet entered_hole, [x' | Tagged _ (Update x') <- k_remaining])) $
-                                                    splitStack admissable ids' Nothing k_remaining (entered_hole `plusEnteredEnv` mkEnteredEnv (Once (Just ctxt_id)) (S.unions $ zipWith (S.\\) alt_fvss alt_bvss), Bracketed (\(splitBy dstates_hole -> (es_hole', es_alt')) -> rebuild_alt (rebuild_hole es_hole') es_alt') extra_fvs_hole (\(splitBy dstates_hole -> (fvs_hole', fvs_alt')) -> transfer_alt (transfer_hole fvs_hole') fvs_alt') (dstates_hole ++ dstates_alts))
+                                                    splitStack admissable ids' Nothing (k_not_inlined ++ k_remaining) (entered_hole `plusEnteredEnv` mkEnteredEnv (Once (Just ctxt_id)) (S.unions $ zipWith (S.\\) alt_fvss alt_bvss), Bracketed (\(splitBy dstates_hole -> (es_hole', es_alt')) -> rebuild_alt (rebuild_hole es_hole') es_alt') extra_fvs_hole (\(splitBy dstates_hole -> (fvs_hole', fvs_alt')) -> transfer_alt (transfer_hole fvs_hole') fvs_alt') (dstates_hole ++ dstates_alts))
       where -- 0) Manufacture context identifier
             (ids', state_ids) = splitIdSupply old_ids
             ctxt_id = idFromSupply state_ids
@@ -398,7 +404,7 @@ splitStack admissable old_ids mb_in_scrut (Tagged tg kf:k) (entered_hole, (Brack
             -- 1) Split the continuation eligible for inlining into two parts: that part which can be pushed into
             -- the case branch, and that part which could have been except that we need to refer to a variable it binds
             -- in the residualised part of the term we create
-            (k_inlineable, k_remaining) = span (`does_not_bind_any_of` M.keysSet entered_hole) k
+            (k_inlineable_candidates, k_remaining) = span (`does_not_bind_any_of` M.keysSet entered_hole) k
             does_not_bind_any_of (Tagged _ (Update x')) fvs = x' `S.notMember` fvs
             does_not_bind_any_of _ _ = True
         
@@ -411,8 +417,12 @@ splitStack admissable old_ids mb_in_scrut (Tagged tg kf:k) (entered_hole, (Brack
             --  case x of C -> let unk = C; z = C in ...
             alt_in_es = alt_rns `zip` alt_es
             alt_hs = zipWith (\alt_rn alt_con -> M.empty `fromMaybe` do { in_scrut <- mb_in_scrut; scrut_v <- altConToValue alt_con; return (M.singleton in_scrut (alt_rn, TaggedTerm $ Tagged tg $ Value $ scrut_v)) }) alt_rns alt_cons
-            (alt_bvss, alt_fvss) = unzip $ zipWith3 (\alt_con' alt_h alt_in_e -> altConOpenFreeVars alt_con' (pureHeapOpenFreeVars alt_h (stackFreeVars k_inlineable (inFreeVars taggedTermFreeVars alt_in_e)))) alt_cons' alt_hs alt_in_es
-            dstates_alts = zipWith (\alt_h alt_in_e -> (Heap alt_h state_ids, k_inlineable, alt_in_e)) alt_hs alt_in_es
+            (alt_bvss, alt_fvss) = unzip $ zipWith (\alt_con' (Heap alt_h _, alt_k, alt_in_e) -> altConOpenFreeVars alt_con' (pureHeapOpenFreeVars alt_h (stackFreeVars alt_k (inFreeVars taggedTermFreeVars alt_in_e)))) alt_cons' dstates_alts
+            (k_not_inlined, dstates_alts) = go k_inlineable_candidates (zipWith (\alt_h alt_in_e -> (Heap alt_h state_ids, [], alt_in_e)) alt_hs alt_in_es)
+              where
+                go []     states = ([], states)
+                go (kf:k) states = if any admissable states' || not gENERALISATION then go k states' else (kf:k, states)
+                  where states' = map (second3 (++ [kf])) states
             
             -- 3) Define how to rebuild the case and transfer free variables out of it
             rebuild_alt e_hole' es_alt' = case_ e_hole' (zipWith (\alt_con' e_alt' -> (alt_con', e_alt')) alt_cons' es_alt')
