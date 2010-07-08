@@ -195,7 +195,12 @@ transitiveInline admissable = go
     go h_inlineable h_output fvs
         = if M.null h_inline then h_output else go h_inlineable' (h_inline `M.union` h_output) fvs'
       where -- Generalisation heuristic: only inline those members of the heap which do not cause us to blow the whistle
-            h_inline | gENERALISATION = M.foldWithKey (\x' in_e h_inline -> let h_inline' = M.insert x' in_e h_inline in if admissable h_inline' then h_inline' else h_inline) M.empty h_inline_candidates
+            -- NB: we rely here on the fact that our caller will still be able to fill in bindings for stuff from h_inlineable
+            -- even if we choose not to inline it into the State, and that such bindings will not be evaluated until they are
+            -- actually demanded (or we could get work duplication by inlining into only *some* Once contexts).
+            consider_inlining x' in_e h_inline = if admissable h_inline' then h_inline' else h_inline
+              where h_inline' = M.insert x' in_e h_inline
+            h_inline | gENERALISATION = M.foldWithKey consider_inlining M.empty h_inline_candidates
                      | otherwise      = h_inline_candidates
             (h_inline_candidates, h_inlineable') = M.partitionWithKey (\x' _ -> x' `S.member` fvs) h_inlineable
             fvs' = M.fold (\in_e fvs -> fvs `S.union` inFreeVars taggedTermFreeVars in_e) S.empty h_inline
@@ -256,7 +261,7 @@ split' admissable (cheapifyHeap -> Heap h (splitIdSupply -> (ids1, ids2))) k (en
       | entered_many == entered_many'
       , must_resid_k_xs == must_resid_k_xs'
       = -- (\res -> traceRender ("split'", entered_hole, "==>", entered_k, "==>", entered', must_resid_k_xs, [x' | Tagged _ (Update x') <- k], M.keysSet floats_k_bound) res) $
-        (M.map (inlineBracketHeap . promoteToBracket) (h `exclude` xs_nonvalue_inlinings) `M.union` M.map inlineBracketHeap floats_k_bound,
+        (M.map (inlineBracketHeap . promoteToBracket) h `M.union` M.map inlineBracketHeap floats_k_bound,
          inlineBracketHeap bracket_k)
       | otherwise = go must_resid_k_xs' entered_many'
       where
@@ -278,9 +283,14 @@ split' admissable (cheapifyHeap -> Heap h (splitIdSupply -> (ids1, ids2))) k (en
         
         -- NB: We must NOT take non-values that we have decided to inline and then bind them in the residual term. This does not
         -- usually happen because such things won't be free variables of the immediate output term, but with strict bindings the
-        -- optimiser will be forced to residualise such bindings anyway. Explicitly filter them out to be sure we don't spuriously
-        -- recompute such bindings, BUT make sure to retain non-value bindings that are used Once by the *residual itself*:
-        xs_nonvalue_inlinings = M.keysSet $ M.filterWithKey (\x (_, e) -> maybe False (/= Once Nothing) (M.lookup x entered') && not (taggedTermIsCheap e)) h_inlineable
+        -- optimiser will be forced to residualise such bindings anyway.
+        --
+        -- Explicitly filter them out to be sure we don't spuriously recompute such bindings, BUT make sure to retain non-value
+        -- bindings that are used Once by the *residual itself*:
+        --
+        -- NB: I used to do this, but no longer! The reason is that with generalisation we might choose not to inline some non-value,
+        -- so it must be available to optimiseSplit if it turns out to be free.
+        --xs_nonvalue_inlinings = M.keysSet $ M.filterWithKey (\x (_, e) -> maybe False (/= Once Nothing) (M.lookup x entered') && not (taggedTermIsCheap e)) h_inlineable
         
         entered_many' = toEnteredManyEnv entered'
         
@@ -420,6 +430,8 @@ splitStack admissable old_ids mb_in_scrut (Tagged tg kf:k) (entered_hole, (Brack
             (alt_bvss, alt_fvss) = unzip $ zipWith (\alt_con' (Heap alt_h _, alt_k, alt_in_e) -> altConOpenFreeVars alt_con' (pureHeapOpenFreeVars alt_h (stackFreeVars alt_k (inFreeVars taggedTermFreeVars alt_in_e)))) alt_cons' dstates_alts
             (k_not_inlined, dstates_alts) = go k_inlineable_candidates (zipWith (\alt_h alt_in_e -> (Heap alt_h state_ids, [], alt_in_e)) alt_hs alt_in_es)
               where
+                -- Generalisation heuristic: inline parts of the evaluation context into each branch only if at least one of the
+                -- resulting states is admissable.
                 go []     states = ([], states)
                 go (kf:k) states = if any admissable states' || not gENERALISATION then go k states' else (kf:k, states)
                   where states' = map (second3 (++ [kf])) states

@@ -132,10 +132,9 @@ sc' hist state = case terminate hist (stateTagBag state) of
 
 memo :: (State -> ScpM (FreeVars, Out Term))
      -> State -> ScpM (FreeVars, Out Term)
-memo opt state = traceRenderM (">sc", residualiseState state) >>
-  do
+memo opt state = do
     (ps, input_fvs) <- fmap (promises &&& inputFvs) get
-    case [ (S.fromList (rn_fvs (fvs p)), fun p `varApps` rn_fvs tb_noninput_fvs)
+    case [ (fun p, (S.fromList (rn_fvs (fvs p)), fun p `varApps` rn_fvs tb_noninput_fvs))
          | p <- ps
          , Just rn_lr <- [match (meaning p) state]
          , let rn_fvs = map (safeRename ("tieback: FVs " ++ pPrintRender (fun p)) rn_lr)  -- NB: If tb contains a dead PureHeap binding (hopefully impossible) then it may have a free variable that I can't rename, so "rename" will cause an error. Not observed in practice yet.
@@ -143,8 +142,8 @@ memo opt state = traceRenderM (">sc", residualiseState state) >>
           -- Because we don't abstract over top-level free variables (this is necessary for type checking e.g. polymorphic uses of error):
          , all (\x -> rename rn_lr x == x) tb_input_fvs
          ] of
-      res:_ -> {- traceRender ("tieback", residualiseState state, fst res) $ -} do
-        traceRenderM ("<sc", residualiseState state, res)
+      (_x, res):_ -> {- traceRender ("tieback", residualiseState state, fst res) $ -} do
+        traceRenderM ("=sc", _x, residualiseState state, res)
         return res
       [] -> {- traceRender ("new drive", residualiseState state) $ -} do
         x <- freshHName
@@ -154,10 +153,12 @@ memo opt state = traceRenderM (">sc", residualiseState state) >>
         traceRenderM ("memo", x, vs_list) `seq` return ()
         
         promise P { fun = x, fvs = vs_list, meaning = state }
-        (_fvs', e') <- opt state
-        assertRender ("sc: FVs", _fvs', vs) (_fvs' `S.isSubsetOf` vs) $ return ()
         
-        traceRenderM ("<sc", residualiseState state, (S.fromList vs_list, e'))
+        traceRenderM (">sc", x, residualiseState state)
+        (_fvs', e') <- opt state
+        traceRenderM ("<sc", x, residualiseState state, (S.fromList vs_list, e'))
+        
+        assertRender ("sc: FVs", x, _fvs' S.\\ vs, vs) (_fvs' `S.isSubsetOf` vs) $ return ()
         
         bind x (lambdas noninput_vs_list e')
         return (vs, x `varApps` noninput_vs_list)
@@ -170,5 +171,5 @@ bind :: Var -> Out Term -> ScpM ()
 bind x e = modify (\s -> s { outs = (x, e) : outs s })
 
 traceRenderM :: Pretty a => a -> ScpM ()
---traceRenderM x mx = fmap length history >>= \indent -> traceRender (nest indent (pPrint x)) mx
+--traceRenderM x = fmap ((length . promises) &&& (length . outs)) get >>= \(a, b) -> traceRender (nest (a - b) (pPrint x)) (return ())
 traceRenderM x = traceRender (pPrint x) (return ())
