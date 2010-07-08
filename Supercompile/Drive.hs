@@ -126,8 +126,8 @@ runScpM input_fvs (ScpM f) = letRec (sortBy (comparing ((read :: String -> Int) 
 sc, sc' :: History -> State -> ScpM (FreeVars, Out Term)
 sc hist = memo (sc' hist)
 sc' hist state = case terminate hist (stateTagBag state) of
-    Stop           -> split (sc hist)  state
-    Continue hist' -> split (sc hist') (reduce state)
+    Stop           -> split (isStop . terminate hist  . stateTagBag) (sc hist)  state
+    Continue hist' -> split (isStop . terminate hist' . stateTagBag) (sc hist') (reduce state)
 
 
 memo :: (State -> ScpM (FreeVars, Out Term))
