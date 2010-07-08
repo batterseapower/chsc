@@ -172,7 +172,7 @@ data Bracketed a = Bracketed {
     rebuild :: [Out Term] -> Out Term,  -- Rebuild the full output term given outputs to plug into each hole
     extra_fvs :: FreeVars,              -- Maximum free variables added by the residual wrapped around the holes
     transfer :: [FreeVars] -> FreeVars, -- Strips any variables bound by the residual out of the hole FVs
-    fillers :: [a]                      -- Hole-fillers themselves. Can be State or PureState
+    fillers :: [a]                      -- Hole-fillers themselves. Usually State
   }
 
 instance Functor Bracketed where
@@ -234,14 +234,10 @@ type EnteredManyEnv = M.Map (Out Var) Bool
 toEnteredManyEnv :: EnteredEnv -> EnteredManyEnv
 toEnteredManyEnv = M.map (not . isOnce)
 
--- State with no Ids yet. Used only to delay filling in the Ids until we inline the inlineable parts of the Heap.
--- TODO: remove the use of this type entirely.
-type PureState = (PureHeap, Stack, In TaggedTerm)
-
 split'
   :: Heap
   -> Stack
-  -> (EnteredEnv, Bracketed PureState)
+  -> (EnteredEnv, Bracketed State)
   -> (M.Map (Out Var) (Bracketed State),
       Bracketed State)
 split' (cheapifyHeap -> Heap h (splitIdSupply -> (ids1, ids2))) k (entered_hole, bracketed_hole)
@@ -280,14 +276,14 @@ split' (cheapifyHeap -> Heap h (splitIdSupply -> (ids1, ids2))) k (entered_hole,
         
         entered_many' = toEnteredManyEnv entered'
         
-        inlineBracketHeap :: Bracketed PureState -> Bracketed State
-        inlineBracketHeap = fmap (\(h, k, in_e) -> transitiveInline' h_inlineable (Heap h ids2, k, in_e))
+        inlineBracketHeap :: Bracketed State -> Bracketed State
+        inlineBracketHeap = fmap (transitiveInline' h_inlineable)
 
-    promoteToPureState :: In TaggedTerm -> PureState
-    promoteToPureState in_e = (M.empty, [], in_e)
+    promoteToState :: In TaggedTerm -> State
+    promoteToState in_e = (Heap M.empty ids2, [], in_e)
 
-    promoteToBracket :: In TaggedTerm -> Bracketed PureState
-    promoteToBracket in_e = Bracketed (\[e'] -> e') S.empty (\[fvs'] -> fvs') [promoteToPureState in_e]
+    promoteToBracket :: In TaggedTerm -> Bracketed State
+    promoteToBracket in_e = Bracketed (\[e'] -> e') S.empty (\[fvs'] -> fvs') [promoteToState in_e]
 
 splitPureHeap :: PureHeap -> M.Map Var Bool -> EnteredEnv -> (PureHeap, EnteredEnv, FreeVars)
 splitPureHeap h was_entered_many entered_k = -- traceRender ("splitPureHeap", (residualisePureHeap prettyIdSupply h), (entered, entered_k), "=>", entered', must_resid_k_xs') $
@@ -378,9 +374,9 @@ cheapifyHeap (Heap h (splitIdSupply -> (ids, ids'))) = Heap (M.fromList floats `
 
 splitStack :: IdSupply -> Maybe (Out Var)
            -> Stack
-           -> (EnteredEnv, Bracketed PureState)
-           -> (M.Map (Out Var) (Bracketed PureState),
-               (EnteredEnv, Bracketed PureState))
+           -> (EnteredEnv, Bracketed State)
+           -> (M.Map (Out Var) (Bracketed State),
+               (EnteredEnv, Bracketed State))
 splitStack _       _           []               (entered_hole, bracketed_hole) = (M.empty, (entered_hole, bracketed_hole)) -- \(rebuild, transfer, in_es) -> (rebuild, transfer, map (M.empty,[],) in_es)
 splitStack old_ids mb_in_scrut (Tagged tg kf:k) (entered_hole, (Bracketed rebuild_hole extra_fvs_hole transfer_hole dstates_hole)) = case kf of
     Apply x2' -> splitStack old_ids Nothing k (entered_hole `plusEnteredEnv` mkEnteredEnv (Once Nothing) (S.singleton x2'), Bracketed (\es' -> rebuild_hole es' `app` x2') (S.insert x2' extra_fvs_hole) transfer_hole dstates_hole)
@@ -389,7 +385,8 @@ splitStack old_ids mb_in_scrut (Tagged tg kf:k) (entered_hole, (Bracketed rebuil
     Scrutinise (rn, unzip -> (alt_cons, alt_es)) -> -- (if null k_remaining then id else traceRender ("splitStack: FORCED SPLIT", M.keysSet entered_hole, [x' | Tagged _ (Update x') <- k_remaining])) $
                                                     splitStack ids' Nothing k_remaining (entered_hole `plusEnteredEnv` mkEnteredEnv (Once (Just ctxt_id)) (S.unions $ zipWith (S.\\) alt_fvss alt_bvss), Bracketed (\(splitBy dstates_hole -> (es_hole', es_alt')) -> rebuild_alt (rebuild_hole es_hole') es_alt') extra_fvs_hole (\(splitBy dstates_hole -> (fvs_hole', fvs_alt')) -> transfer_alt (transfer_hole fvs_hole') fvs_alt') (dstates_hole ++ dstates_alts))
       where -- 0) Manufacture context identifier
-            (ids', ctxt_id) = stepIdSupply old_ids
+            (ids', state_ids) = splitIdSupply old_ids
+            ctxt_id = idFromSupply state_ids
         
             -- 1) Split the continuation eligible for inlining into two parts: that part which can be pushed into
             -- the case branch, and that part which could have been except that we need to refer to a variable it binds
@@ -408,14 +405,15 @@ splitStack old_ids mb_in_scrut (Tagged tg kf:k) (entered_hole, (Bracketed rebuil
             alt_in_es = alt_rns `zip` alt_es
             alt_hs = zipWith (\alt_rn alt_con -> M.empty `fromMaybe` do { in_scrut <- mb_in_scrut; scrut_v <- altConToValue alt_con; return (M.singleton in_scrut (alt_rn, TaggedTerm $ Tagged tg $ Value $ scrut_v)) }) alt_rns alt_cons
             (alt_bvss, alt_fvss) = unzip $ zipWith3 (\alt_con' alt_h alt_in_e -> altConOpenFreeVars alt_con' (pureHeapOpenFreeVars alt_h (stackFreeVars k_inlineable (inFreeVars taggedTermFreeVars alt_in_e)))) alt_cons' alt_hs alt_in_es
-            dstates_alts = zip3 alt_hs (repeat k_inlineable) alt_in_es
+            dstates_alts = zipWith (\alt_h alt_in_e -> (Heap alt_h state_ids, k_inlineable, alt_in_e)) alt_hs alt_in_es
             
             -- 3) Define how to rebuild the case and transfer free variables out of it
             rebuild_alt e_hole' es_alt' = case_ e_hole' (zipWith (\alt_con' e_alt' -> (alt_con', e_alt')) alt_cons' es_alt')
             transfer_alt fvs_hole' fvss_alt' = fvs_hole' `S.union` S.unions (zipWith (\fvs_alt' alt_bvs -> fvs_alt' S.\\ alt_bvs) fvss_alt' alt_bvss)
     PrimApply pop in_vs in_es -> splitStack ids' Nothing k (entered_hole `plusEnteredEnv` plusEnteredEnvs entered_vs `plusEnteredEnv` plusEnteredEnvs [mkEnteredEnv (Once $ Just ctxt_id) (inFreeVars taggedTermFreeVars in_e) | (ctxt_id, in_e) <- ctxt_ids `zip` in_es], Bracketed (\(splitBy dstates_hole -> (es_hole', es_args')) -> rebuild_pop (rebuild_hole es_hole') es_args') (extra_fvs_hole `S.union` S.unions (map extra_fvs bracketed_vss)) (\(splitBy dstates_hole -> (fvs_hole', fvss_args')) -> transfer_pop (transfer_hole fvs_hole') fvss_args') (dstates_hole ++ dstates_vs ++ dstates_es))
       where -- 0) Manufacture context identifier
-            (ids', ctxt_ids) = accumL stepIdSupply old_ids (length in_es)
+            (ids', state_idss) = accumL splitIdSupply old_ids (length in_es)
+            ctxt_ids = map idFromSupply state_idss
             
             -- 1) Split every value remaining apart
             (entered_vs, bracketed_vss {- unzip4 -> (rebuilds_vs, extra_fvss_vs, transfers_vs, dstatess_vs) -}) = unzip $ map (splitValue ids') in_vs
@@ -423,7 +421,7 @@ splitStack old_ids mb_in_scrut (Tagged tg kf:k) (entered_hole, (Bracketed rebuil
             -- 2) Define how to rebuild the primitive application
             dstates_vss = map fillers bracketed_vss
             dstates_vs = concat dstates_vss
-            dstates_es = [(M.empty, [], in_e) | in_e <- in_es]
+            dstates_es = [(Heap M.empty state_ids, [], in_e) | (state_ids, in_e) <- state_idss `zip` in_es]
             rebuild_pop e_hole' (splitBy dstates_vs -> (splitManyBy dstates_vss -> es_vs', es_es')) = primOp pop (zipWith ($) (map rebuild bracketed_vss) es_vs' ++ [e_hole'] ++ es_es')
             transfer_pop fvs_hole' (splitBy dstates_vs -> (fvss_vs', fvs_es')) = fvs_hole' `S.union` S.unions (zipWith ($) (map transfer bracketed_vss) $ splitManyBy dstates_vss fvss_vs') `S.union` S.unions fvs_es'
     Update x' -> first (M.insert x' (Bracketed rebuild_hole extra_fvs_hole transfer_hole dstates_hole)) $ splitStack old_ids (Just x') k (entered_hole `M.union` mkEnteredEnv (Once Nothing) (S.singleton x'), Bracketed (\[] -> var x') (S.singleton x') (\[] -> S.empty) [])
@@ -433,13 +431,13 @@ splitStack old_ids mb_in_scrut (Tagged tg kf:k) (entered_hole, (Bracketed rebuil
     altConToValue (LiteralAlt l)  = Just $ Literal l
     altConToValue (DefaultAlt _)  = Nothing
 
-splitValue :: IdSupply -> In TaggedValue -> (EnteredEnv, Bracketed PureState)
-splitValue ids in_v@(rn, Lambda x e) = (mkEnteredEnv Many (inFreeVars taggedValueFreeVars in_v), Bracketed (\[h] -> lambda x' h) S.empty (\[fvs] -> S.delete x' fvs) [(M.empty, [], (rn', e))])
-  where (_ids', rn', x') = renameBinder ids rn x
+splitValue :: IdSupply -> In TaggedValue -> (EnteredEnv, Bracketed State)
+splitValue ids in_v@(rn, Lambda x e) = (mkEnteredEnv Many (inFreeVars taggedValueFreeVars in_v), Bracketed (\[h] -> lambda x' h) S.empty (\[fvs] -> S.delete x' fvs) [(Heap M.empty state_ids', [], (rn', e))])
+  where (state_ids', rn', x') = renameBinder ids rn x
 splitValue ids in_v                  = (mkEnteredEnv (Once Nothing) fvs', Bracketed (\[] -> value v') fvs' (\[] -> S.empty) [])
   where v' = detagValue $ renameIn renameTaggedValue ids in_v
         fvs' = valueFreeVars v'
 
-splitQA :: IdSupply -> Tagged QA -> (EnteredEnv, Bracketed PureState)
+splitQA :: IdSupply -> Tagged QA -> (EnteredEnv, Bracketed State)
 splitQA _   (Tagged _ (Question x')) = (mkEnteredEnv (Once Nothing) (S.singleton x'), Bracketed (\[] -> var x') (S.singleton x') (\[] -> S.empty) [])
 splitQA ids (Tagged _ (Answer in_v)) = splitValue ids in_v
