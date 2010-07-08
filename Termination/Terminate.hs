@@ -40,6 +40,10 @@ emptyHistory = []
 
 data TermRes = Stop | Continue History
 
+isStop :: TermRes -> Bool
+isStop Stop = True
+isStop _    = False
+
 terminate :: History -> TagBag -> TermRes
 terminate hist here
   -- | traceRender (length hist, tagBag here) && False = undefined
@@ -47,3 +51,4 @@ terminate hist here
   = Stop
   | otherwise
   = Continue (here : hist)
+

@@ -221,6 +221,14 @@ optimiseSplit optimise_bracketed floats_h floats_compulsory = do
     (fvs', xes') <- residualise [] S.empty fvs_compulsory'
     return (fvs', letRec xes' e_compulsory')
 
+-- Whether the given variable was entered many times, with no context identifier information required
+-- I'm using this abstraction to make explicit the fact that we don't pass context identifiers between
+-- iterations of the splitter "go" loop. This is important because they are potentially unstable!
+type EnteredManyEnv = M.Map (Out Var) Bool
+
+toEnteredManyEnv :: EnteredEnv -> EnteredManyEnv
+toEnteredManyEnv = M.map (not . isOnce)
+
 split'
   :: Monad m
   => (State -> m (FreeVars, Out Term))
@@ -231,11 +239,11 @@ split'
       M.Map (Out Var) (Bracketed PureState),
       Bracketed PureState)
 split' opt (cheapifyHeap -> Heap h (splitIdSupply -> (ids1, ids2))) k (entered_hole, bracketed_hole)
-  = go S.empty entered_hole
+  = go S.empty (toEnteredManyEnv entered_hole)
   where
-    go must_resid_k_xs entered
+    go must_resid_k_xs entered_many
       -- | traceRender ("split.go", entered, entered_k, xs_nonvalue_inlinings) False = undefined
-      | entered == entered' -- FIXME: very very suspicious, because the Once ids may change
+      | entered_many == entered_many'
       , must_resid_k_xs == must_resid_k_xs'
       = -- (\res -> traceRender ("split'", entered_hole, "==>", entered_k, "==>", entered', must_resid_k_xs, [x' | Tagged _ (Update x') <- k], M.keysSet floats_k_bound) res) $
         (\brack -> do
@@ -245,7 +253,7 @@ split' opt (cheapifyHeap -> Heap h (splitIdSupply -> (ids1, ids2))) k (entered_h
           return (fvs', e'),
          M.map promoteToBracket (h `exclude` xs_nonvalue_inlinings) `M.union` floats_k_bound,
          bracket_k)
-      | otherwise = go must_resid_k_xs' entered'
+      | otherwise = go must_resid_k_xs' entered_many'
       where
         -- Evaluation context splitting
         -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -261,12 +269,15 @@ split' opt (cheapifyHeap -> Heap h (splitIdSupply -> (ids1, ids2))) k (entered_h
         -- ~~~~~~~~~~~~~~
         
         -- Guess which parts of the heap are safe for inlining based on the current Entered information
-        (h_inlineable, entered', must_resid_k_xs') = splitPureHeap h entered entered_k
+        (h_inlineable, entered', must_resid_k_xs') = splitPureHeap h entered_many entered_k
+        
         -- NB: We must NOT take non-values that we have decided to inline and then bind them in the residual term. This does not
         -- usually happen because such things won't be free variables of the immediate output term, but with strict bindings the
         -- optimiser will be forced to residualise such bindings anyway. Explicitly filter them out to be sure we don't spuriously
         -- recompute such bindings, BUT make sure to retain non-value bindings that are used Once by the *residual itself*:
         xs_nonvalue_inlinings = M.keysSet $ M.filterWithKey (\x (_, e) -> maybe False (/= Once Nothing) (M.lookup x entered') && not (taggedTermIsCheap e)) h_inlineable
+        
+        entered_many' = toEnteredManyEnv entered'
 
     promoteToPureState :: In TaggedTerm -> PureState
     promoteToPureState in_e = (M.empty, [], in_e)
@@ -274,9 +285,9 @@ split' opt (cheapifyHeap -> Heap h (splitIdSupply -> (ids1, ids2))) k (entered_h
     promoteToBracket :: In TaggedTerm -> Bracketed PureState
     promoteToBracket in_e = Bracketed (\[e'] -> e') S.empty (\[fvs'] -> fvs') [promoteToPureState in_e]
 
-splitPureHeap :: PureHeap -> EnteredEnv -> EnteredEnv -> (PureHeap, EnteredEnv, FreeVars)
-splitPureHeap h entered entered_k = -- traceRender ("splitPureHeap", (residualisePureHeap prettyIdSupply h), (entered, entered_k), "=>", entered', must_resid_k_xs') $
-                                    (h_inlineable, entered', must_resid_k_xs')
+splitPureHeap :: PureHeap -> M.Map Var Bool -> EnteredEnv -> (PureHeap, EnteredEnv, FreeVars)
+splitPureHeap h was_entered_many entered_k = -- traceRender ("splitPureHeap", (residualisePureHeap prettyIdSupply h), (entered, entered_k), "=>", entered', must_resid_k_xs') $
+                                             (h_inlineable, entered', must_resid_k_xs')
   where
     -- Linearity
     -- ~~~~~~~~~
@@ -284,10 +295,10 @@ splitPureHeap h entered entered_k = -- traceRender ("splitPureHeap", (residualis
     -- We have already gathered entry information from the Stack. Carry on, gathering
     -- it from the Heap as well. Assume Heap bindings are used as many times as they were used
     -- the last time we went around the loop.
-    entered' = M.foldWithKey (\x' in_e entered' -> entered' `plusEnteredEnv` incorporate (fromJust $ name_id x') (M.lookup x' entered) in_e) entered_k h
-    incorporate _ Nothing    _    = emptyEnteredEnv
-    incorporate i (Just ent) in_e = -- (\res -> traceRender ("incorporate", mb_id, ent, inFreeVars taggedTermFreeVars in_e) res) $
-                                    mkEnteredEnv (if taggedTermIsCheap (snd in_e) && not (isOnce ent) then Many else Once (Just i)) (inFreeVars taggedTermFreeVars in_e)
+    entered' = M.foldWithKey (\x' in_e entered' -> entered' `plusEnteredEnv` incorporate (fromJust $ name_id x') (M.lookup x' was_entered_many) in_e) entered_k h
+    incorporate _ Nothing         _    = emptyEnteredEnv
+    incorporate i (Just was_many) in_e = -- (\res -> traceRender ("incorporate", mb_id, ent, inFreeVars taggedTermFreeVars in_e) res) $
+                                         mkEnteredEnv (if taggedTermIsCheap (snd in_e) && was_many then Many else Once (Just i)) (inFreeVars taggedTermFreeVars in_e)
      -- Cheap things may be duplicated, so if they are used Many times so will their FVs be. Non-cheap things are either:
      --   a) Residualised immediately and so they enter their FVs at most Once
      --   b) Duplicated downwards, but used linearly anyway, so their FVs are still used Once
