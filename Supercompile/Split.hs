@@ -191,26 +191,28 @@ optimiseBracketed opt b = do
 -- Returns (along with the augmented state) the names of those bindings in the input PureHeap that could have been inlined
 -- but were not due to generalisation.
 transitiveInline :: (State -> Bool) -> PureHeap -> State -> (FreeVars, State)
-transitiveInline admissable_state h_inlineable (Heap h ids, k, in_e) = (if not (S.null fvs') then traceRender ("transitiveInline: generalise", fvs') else id) $
-                                                                       (fvs', (Heap h' ids, k, in_e))
+transitiveInline admissable_state h_inlineable (Heap h ids, k, in_e) = (if not (S.null not_inlined_vs') then traceRender ("transitiveInline: generalise", not_inlined_vs') else id) $
+                                                                       (not_inlined_vs', (Heap h' ids, k, in_e))
   where
-    (fvs', h') = go (h_inlineable `M.union` h) M.empty (stateFreeVars (Heap M.empty ids, k, in_e))
+    (not_inlined_vs', h') = go 0 (h_inlineable `M.union` h) M.empty (stateFreeVars (Heap M.empty ids, k, in_e))
     
     admissable h' = admissable_state (Heap h' ids, k, in_e)
     
-    go :: PureHeap -> PureHeap -> FreeVars -> (FreeVars, PureHeap)
-    go h_inlineable h_output fvs
-        = if M.null h_inline then (M.keysSet h_not_inlined, h_output) else go (h_inlineable' `M.union` h_not_inlined) (h_output `M.union` h_inline) fvs'
+    go :: Int -> PureHeap -> PureHeap -> FreeVars -> (FreeVars, PureHeap)
+    go n h_inlineable h_output fvs = -- traceRender ("go", n, M.keysSet h_inlineable, M.keysSet h_output, fvs) $
+                                     if M.null h_inline then (M.keysSet h_not_inlined, h_output) else go (n + 1) (h_inlineable' `M.union` h_not_inlined) (h_output `M.union` h_inline) fvs'
       where -- Generalisation heuristic: only inline those members of the heap which do not cause us to blow the whistle
             -- NB: we rely here on the fact that our caller will still be able to fill in bindings for stuff from h_inlineable
             -- even if we choose not to inline it into the State, and that such bindings will not be evaluated until they are
             -- actually demanded (or we could get work duplication by inlining into only *some* Once contexts).
-            consider_inlining x' in_e (h_inline, h_not_inlined) = if admissable h_inline' then (h_inline', h_not_inlined) else (h_inline, M.insert x' in_e h_not_inlined)
+            consider_inlining x' in_e (h_inline, h_not_inlined) = if admissable h_inline' then (h_inline', h_not_inlined) else {- traceRender ("FOO", x') -} (h_inline, M.insert x' in_e h_not_inlined)
               where h_inline' = M.insert x' in_e h_inline
-            (h_inline, h_not_inlined) | gENERALISATION = M.foldWithKey consider_inlining (M.empty, M.empty) h_inline_candidates
+            (h_inline, h_not_inlined) | gENERALISATION = -- traceRender ">transitiveInline" $
+                                                         -- (\res@(_, n_il) -> traceRender ("<transitiveInline", M.keysSet n_il) res) $
+                                                         M.foldWithKey consider_inlining (M.empty, M.empty) h_inline_candidates
                                       | otherwise      = (h_inline_candidates, M.empty)
             (h_inline_candidates, h_inlineable') = M.partitionWithKey (\x' _ -> x' `S.member` fvs) h_inlineable
-            fvs' = M.fold (\in_e fvs -> fvs `S.union` inFreeVars taggedTermFreeVars in_e) S.empty h_inline
+            fvs' = M.fold (\in_e fvs -> fvs `S.union` inFreeVars taggedTermFreeVars in_e) fvs h_inline
 
 optimiseSplit :: Monad m
               => (State -> m (FreeVars, Out Term))
