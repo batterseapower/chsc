@@ -20,3 +20,10 @@ data StackFrame = Apply (Out Var)
                 | PrimApply PrimOp [In TaggedValue] [In TaggedTerm]
                 | Update (Out Var)
                 deriving (Show)
+
+instance Pretty StackFrame where
+    pPrintPrec level prec kf = case kf of
+        Apply x'                  -> pPrintPrecApp level prec (text "[_]") x'
+        Scrutinise in_alts        -> pPrintPrecCase level prec (text "[_]") (renameIn renameTaggedAlts prettyIdSupply in_alts)
+        PrimApply pop in_vs in_es -> pPrintPrecPrimOp level prec pop (map SomePretty in_vs ++ map SomePretty in_es)
+        Update x'                 -> pPrintPrecApp level prec (text "update") x'

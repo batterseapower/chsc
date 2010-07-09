@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections, PatternGuards #-}
+{-# LANGUAGE TupleSections, PatternGuards, ExistentialQuantification #-}
 module Utilities (
     module IdSupply,
     module Utilities,
@@ -203,6 +203,12 @@ instance (Pretty a, Pretty b, Pretty c, Pretty d,
 
 pPrintTuple :: [Doc] -> Doc
 pPrintTuple ds = parens $ fsep $ punctuate comma ds
+
+
+data SomePretty = forall a. Pretty a => SomePretty a
+
+instance Pretty SomePretty where
+    pPrintPrec level prec (SomePretty x) = pPrintPrec level prec x
 
 
 newtype PrettyFunction = PrettyFunction (PrettyLevel -> Rational -> Doc)
