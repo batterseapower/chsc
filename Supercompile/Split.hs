@@ -191,7 +191,8 @@ optimiseBracketed opt b = do
 -- Returns (along with the augmented state) the names of those bindings in the input PureHeap that could have been inlined
 -- but were not due to generalisation.
 transitiveInline :: (State -> Bool) -> PureHeap -> State -> (FreeVars, State)
-transitiveInline admissable_state h_inlineable (Heap h ids, k, in_e) = (fvs', (Heap h' ids, k, in_e))
+transitiveInline admissable_state h_inlineable (Heap h ids, k, in_e) = (if not (S.null fvs') then traceRender ("transitiveInline: generalise", fvs') else id) $
+                                                                       (fvs', (Heap h' ids, k, in_e))
   where
     (fvs', h') = go (h_inlineable `M.union` h) M.empty (stateFreeVars (Heap M.empty ids, k, in_e))
     
@@ -260,7 +261,7 @@ split' admissable (cheapifyHeap -> Heap h (splitIdSupply -> (ids1, ids2))) k (en
   = go S.empty (toEnteredManyEnv entered_hole)
   where
     go must_resid_k_xs entered_many
-      | traceRender ("split.go", gen_fvs) False = undefined
+      | not (S.null gen_fvs) && traceRender ("split.go", gen_fvs) False = undefined
       -- | traceRender ("split.go", entered, entered_k, xs_nonvalue_inlinings) False = undefined
       | entered_many == entered_many'
       , must_resid_k_xs == must_resid_k_xs'
@@ -424,6 +425,7 @@ splitStack admissable old_ids mb_in_scrut (Tagged tg kf:k) (entered_hole, (Brack
     -- NB: case scrutinisation is special! Instead of kontinuing directly with k, we are going to inline
     -- *as much of entire remaining evaluation context as we can* into each case branch. Scary, eh?
     Scrutinise (rn, unzip -> (alt_cons, alt_es)) -> -- (if null k_remaining then id else traceRender ("splitStack: FORCED SPLIT", M.keysSet entered_hole, [x' | Tagged _ (Update x') <- k_remaining])) $
+                                                    (if not (null k_not_inlined) then traceRender ("splitStack: generalise", k_not_inlined) else id) $
                                                     splitStack admissable ids' Nothing (k_not_inlined ++ k_remaining) (entered_hole `plusEnteredEnv` mkEnteredEnv (Once (Just ctxt_id)) (S.unions $ zipWith (S.\\) alt_fvss alt_bvss), Bracketed (\(splitBy dstates_hole -> (es_hole', es_alt')) -> rebuild_alt (rebuild_hole es_hole') es_alt') extra_fvs_hole (\(splitBy dstates_hole -> (fvs_hole', fvs_alt')) -> transfer_alt (transfer_hole fvs_hole') fvs_alt') (dstates_hole ++ dstates_alts))
       where -- 0) Manufacture context identifier
             (ids', state_ids) = splitIdSupply old_ids
