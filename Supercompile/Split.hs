@@ -259,7 +259,7 @@ split'
   -> (EnteredEnv, Bracketed State)
   -> (M.Map (Out Var) (Bracketed State),
       Bracketed State)
-split' admissable (cheapifyHeap -> Heap h (splitIdSupply -> (ids1, ids2))) k (entered_hole, bracketed_hole)
+split' admissable old_h@(cheapifyHeap -> Heap h (splitIdSupply -> (ids1, ids2))) k (entered_hole, bracketed_hole)
   = go S.empty (toEnteredManyEnv entered_hole)
   where
     go must_resid_k_xs entered_many
@@ -268,6 +268,7 @@ split' admissable (cheapifyHeap -> Heap h (splitIdSupply -> (ids1, ids2))) k (en
       | entered_many == entered_many'
       , must_resid_k_xs == must_resid_k_xs'
       = -- (\res -> traceRender ("split'", entered_hole, "==>", entered_k, "==>", entered', must_resid_k_xs, [x' | Tagged _ (Update x') <- k], M.keysSet floats_k_bound) res) $
+        (\res@(avail_h, _) -> traceRender ("split'", M.keysSet (case old_h of Heap h _ -> h), M.keysSet h, M.keysSet avail_h, M.keysSet h_inlineable) res) $
         (brackets_h `M.union` brackets_k_bound, bracket_k')
       | otherwise = go must_resid_k_xs' entered_many'
       where
