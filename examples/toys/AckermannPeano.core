@@ -1,0 +1,9 @@
+ack m n = case m of Z   -> S n
+                    S m -> case n of Z   -> ack m (S Z)
+                                     S n -> ack m (ack (S m) n)
+
+root x = ack (S (S Z)) x
+
+tests = [
+    (root Z, S (S (S Z)))
+  ]
