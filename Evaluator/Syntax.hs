@@ -17,7 +17,7 @@ data Heap = Heap PureHeap IdSupply
 type Stack = [Tagged StackFrame]
 data StackFrame = Apply (Out Var)
                 | Scrutinise (In [TaggedAlt])
-                | PrimApply PrimOp [In TaggedValue] [In TaggedTerm]
+                | PrimApply PrimOp [Tagged (In TaggedValue)] [In TaggedTerm]
                 | Update (Out Var)
                 deriving (Show)
 

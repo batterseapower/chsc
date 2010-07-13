@@ -88,7 +88,7 @@ matchEC k_l k_r = fmap combine $ zipWithEqualM (\kf_l kf_r -> matchECFrame (tage
 matchECFrame :: StackFrame -> StackFrame -> Maybe ([(Var, Var)], [(Var, Var)])
 matchECFrame (Apply x_l')                      (Apply x_r')                      = Just ([], [matchVar x_l' x_r'])
 matchECFrame (Scrutinise in_alts_l)            (Scrutinise in_alts_r)            = fmap ([],) $ matchInAlts matchIdSupply in_alts_l in_alts_r
-matchECFrame (PrimApply pop_l in_vs_l in_es_l) (PrimApply pop_r in_vs_r in_es_r) = fmap ([],) $ guard (pop_l == pop_r) >> liftM2 (++) (matchList (matchInValue matchIdSupply) in_vs_l in_vs_r) (matchList (matchInTerm matchIdSupply) in_es_l in_es_r)
+matchECFrame (PrimApply pop_l in_vs_l in_es_l) (PrimApply pop_r in_vs_r in_es_r) = fmap ([],) $ guard (pop_l == pop_r) >> liftM2 (++) (matchList (\v1 v2 -> matchInValue matchIdSupply (tagee v1) (tagee v2)) in_vs_l in_vs_r) (matchList (matchInTerm matchIdSupply) in_es_l in_es_r)
 matchECFrame (Update x_l')                     (Update x_r')                     = Just ([matchVar x_l' x_r'], [])
 matchECFrame _ _ = Nothing
 

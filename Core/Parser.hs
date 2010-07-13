@@ -64,6 +64,7 @@ buildWrappers ps
     | (pop, f) <- M.toList (prim_wrappers ps) ] ++
     [ (name "error", lam (name "msg") $ case_ (var (name "prelude_error") `app` name "msg") []) ]
   where
+    dataConArity :: String -> Int
     dataConArity "()"      = 0
     dataConArity "(,)"     = 2
     dataConArity "(,,)"    = 3
@@ -236,8 +237,8 @@ qNameCore (LHE.Special sc) = fmap var $ dataConWrapper $ specialConDataCon sc
 qNameCore qn = panic "qNameCore" (text $ show qn)
 
 qNameDataCon :: LHE.QName -> DataCon
-qNameDataCon (LHE.UnQual name) = nameString name
-qNameDataCon (LHE.Special sc)  = specialConDataCon sc
+qNameDataCon (LHE.UnQual n)   = nameString n
+qNameDataCon (LHE.Special sc) = specialConDataCon sc
 
 patCores :: [LHE.Pat] -> ([Var], [Var], Term -> Term)
 patCores []     = ([], [], id)

@@ -7,58 +7,67 @@ import Core.Renaming
 import Core.Syntax
 import Core.Prelude (trueDataCon, falseDataCon)
 
+import Size.Deeds
+
 import Renaming
 import Utilities
 
 import qualified Data.Map as M
 
 
-step :: State -> Maybe State
-step (h, k, (rn, TaggedTerm (Tagged tg e))) = case e of
-    Var x             -> force  h k tg (rename rn x)
-    Value v           -> unwind h k    (rn, v)
-    App e1 x2         -> Just (h, Tagged tg (Apply (rename rn x2))            : k, (rn, e1))
-    PrimOp pop (e:es) -> Just (h, Tagged tg (PrimApply pop [] (map (rn,) es)) : k, (rn, e))
-    Case e alts       -> Just (h, Tagged tg (Scrutinise (rn, alts))           : k, (rn, e))
-    LetRec xes e      -> Just (allocate h k (rn, (xes, e)))
+step :: (Deeds, State) -> Maybe (Deeds, State)
+step (deeds, (h, k, (rn, TaggedTerm (Tagged tg e)))) = case e of
+    Var x             -> force  deeds' h k tg (rename rn x)
+    Value v           -> unwind deeds' h k tg (rn, v)
+    App e1 x2         -> Just (deeds', (h, Tagged tg (Apply (rename rn x2))            : k, (rn, e1)))
+    PrimOp pop (e:es) -> Just (deeds', (h, Tagged tg (PrimApply pop [] (map (rn,) es)) : k, (rn, e)))
+    Case e alts       -> Just (deeds', (h, Tagged tg (Scrutinise (rn, alts))           : k, (rn, e)))
+    LetRec xes e      -> Just (deeds', allocate h k (rn, (xes, e)))
+  where deeds' = releaseDeedDescend_ deeds tg
 
-force :: Heap -> Stack -> Tag -> Out Var -> Maybe State
-force (Heap h ids) k tg x' = M.lookup x' h >>= \in_e -> return (Heap (M.delete x' h) ids, Tagged tg (Update x') : k, in_e)
+force :: Deeds -> Heap -> Stack -> Tag -> Out Var -> Maybe (Deeds, State)
+force deeds (Heap h ids) k tg x' = M.lookup x' h >>= \in_e -> return (deeds, (Heap (M.delete x' h) ids, Tagged tg (Update x') : k, in_e))
 
-unwind :: Heap -> Stack -> In TaggedValue -> Maybe State
-unwind h k in_v = uncons k >>= \(Tagged tg kf, k) -> return $ case kf of
-    Apply x2'                 -> apply      h k    in_v x2'
-    Scrutinise in_alts        -> scrutinise h k tg in_v in_alts
-    PrimApply pop in_vs in_es -> primop     h k tg pop in_vs in_v in_es
-    Update x'                 -> update     h k tg x' in_v
+unwind :: Deeds -> Heap -> Stack -> Tag -> In TaggedValue -> Maybe (Deeds, State)
+unwind deeds h k tg_v in_v = uncons k >>= \(Tagged tg kf, k) -> case kf of
+    Apply x2'                 -> return $ apply      (releaseDeedDescend_ deeds tg) h k    tg_v in_v x2'
+    Scrutinise in_alts        -> return $ scrutinise (releaseDeedDescend_ deeds tg) h k    tg_v in_v in_alts
+    PrimApply pop in_vs in_es -> return $ primop     deeds                          h k tg tg_v pop in_vs in_v in_es
+    Update x'                 ->          update     (releaseDeedDescend_ deeds tg) h k    tg_v x' in_v
 
-apply :: Heap -> Stack -> In TaggedValue -> Out Var -> State
-apply h k (rn, Lambda x e_body) x2' = (h, k, (insertRenaming x x2' rn, e_body))
-apply _ _ (_,  v)               _   = panic "apply" (pPrint v)
+apply :: Deeds -> Heap -> Stack -> Tag -> In TaggedValue -> Out Var -> (Deeds, State)
+apply deeds h k tg_v (rn, Lambda x e_body) x2' = (deeds', (h, k, (insertRenaming x x2' rn, e_body)))
+  where deeds' = releaseDeedDescend_ deeds tg_v
+apply _     _ _ _    (_,  v)               _   = panic "apply" (pPrint v)
 
-scrutinise :: Heap -> Stack -> Tag -> In TaggedValue -> In [TaggedAlt] -> State
-scrutinise h            k _  (_,    Literal l)  (rn_alts, alts)
-  | alt_e:_ <- [(rn_alts, alt_e) | (LiteralAlt alt_l, alt_e) <- alts, alt_l == l] ++ [(rn_alts, alt_e) | (DefaultAlt Nothing, alt_e) <- alts] = (h, k, alt_e)
-scrutinise h            k _  (rn_v, Data dc xs) (rn_alts, alts)
-  | alt_e:_ <- [(insertRenamings (alt_xs `zip` map (rename rn_v) xs) rn_alts, alt_e) | (DataAlt alt_dc alt_xs, alt_e) <- alts, alt_dc == dc] ++ [(rn_alts, alt_e) | (DefaultAlt Nothing, alt_e) <- alts] = (h, k, alt_e)
-scrutinise (Heap h ids) k tg (rn_v, v)          (rn_alts, alts)
-  | (alt_x, alt_e):_ <- [(alt_x, alt_e) | (DefaultAlt (Just alt_x), alt_e) <- alts]
+scrutinise :: Deeds -> Heap -> Stack -> Tag -> In TaggedValue -> In [TaggedAlt] -> (Deeds, State)
+scrutinise deeds h            k tg_v (_,    Literal l)  (rn_alts, alts)
+  | (alt_e, rest):_ <- [((rn_alts, alt_e), rest) | ((LiteralAlt alt_l, alt_e), rest) <- bagContexts alts, alt_l == l] ++ [((rn_alts, alt_e), rest) | ((DefaultAlt Nothing, alt_e), rest) <- bagContexts alts]
+  = (releaseAltDeeds rest (releaseDeedDeep deeds tg_v), (h, k, alt_e))
+scrutinise deeds h            k tg_v (rn_v, Data dc xs) (rn_alts, alts)
+  | (alt_e, rest):_ <- [((insertRenamings (alt_xs `zip` map (rename rn_v) xs) rn_alts, alt_e), rest) | ((DataAlt alt_dc alt_xs, alt_e), rest) <- bagContexts alts, alt_dc == dc] ++ [((rn_alts, alt_e), rest) | ((DefaultAlt Nothing, alt_e), rest) <- bagContexts alts]
+  = (releaseAltDeeds rest (releaseDeedDeep deeds tg_v), (h, k, alt_e))
+scrutinise deeds (Heap h ids) k tg_v (rn_v, v)          (rn_alts, alts)
+  | ((alt_x, alt_e), rest):_ <- [((alt_x, alt_e), rest) | ((DefaultAlt (Just alt_x), alt_e), rest) <- bagContexts alts]
   , (ids', rn_alts', alt_x') <- renameBinder ids rn_alts alt_x
-  = (Heap (M.insert alt_x' (rn_v, TaggedTerm $ Tagged tg $ Value v) h) ids', k, (rn_alts', alt_e))
+  = (releaseAltDeeds rest deeds, (Heap (M.insert alt_x' (rn_v, TaggedTerm $ Tagged tg_v $ Value v) h) ids', k, (rn_alts', alt_e)))
   | otherwise
   = panic "scrutinise" (pPrint v)
 
-primop :: Heap -> Stack -> Tag -> PrimOp -> [In TaggedValue] -> In TaggedValue -> [In TaggedTerm] -> State
-primop h k tg pop [(_, Literal (Int l1))] (_, Literal (Int l2)) [] = (h, k, (emptyRenaming, TaggedTerm $ Tagged tg (Value (f pop l1 l2))))
+releaseAltDeeds :: [(a, TaggedTerm)] -> Deeds -> Deeds
+releaseAltDeeds alts deeds = foldl' (\deeds (_, TaggedTerm in_e) -> releaseDeedDeep deeds (tag in_e)) deeds alts
+
+primop :: Deeds -> Heap -> Stack -> Tag -> Tag -> PrimOp -> [Tagged (In TaggedValue)] -> In TaggedValue -> [In TaggedTerm] -> (Deeds, State)
+primop deeds h k tg tg_v2 pop [Tagged tg_v1 (_, Literal (Int l1))] (_, Literal (Int l2)) [] = (releaseDeedDeep (releaseDeedDeep deeds tg) tg_v1, (h, k, (emptyRenaming, TaggedTerm $ Tagged tg_v2 (Value (f pop l1 l2)))))
   where f pop = case pop of Add -> retInt (+); Subtract -> retInt (-);
                             Multiply -> retInt (*); Divide -> retInt div; Modulo -> retInt mod;
                             Equal -> retBool (==); LessThan -> retBool (<); LessThanEqual -> retBool (<=)
         retInt  pop l1 l2 = Literal (Int (pop l1 l2))
         retBool pop l1 l2 = if pop l1 l2 then Data trueDataCon [] else Data falseDataCon []
-primop h k tg pop in_vs (rn, v) (in_e:in_es) = (h, Tagged tg (PrimApply pop (in_vs ++ [(rn, v)]) in_es) : k, in_e)
+primop deeds h k tg tg_v  pop in_vs (rn, v) (in_e:in_es) = (deeds, (h, Tagged tg (PrimApply pop (in_vs ++ [Tagged tg_v (rn, v)]) in_es) : k, in_e))
 
-update :: Heap -> Stack -> Tag -> Out Var -> In TaggedValue -> State
-update (Heap h ids) k tg x' (rn, v) = (Heap (M.insert x' (rn, TaggedTerm $ Tagged tg (Value v)) h) ids, k, (rn, TaggedTerm $ Tagged tg (Value v)))
+update :: Deeds -> Heap -> Stack -> Tag -> Out Var -> In TaggedValue -> Maybe (Deeds, State) -- FIXME: should allow inlining here if we can GC the update frame because it can't be referred to in the continuation?
+update deeds (Heap h ids) k tg_v x' (rn, v) = claimDeed deeds tg_v >>= \deeds -> return (deeds, (Heap (M.insert x' (rn, TaggedTerm $ Tagged tg_v (Value v)) h) ids, k, (rn, TaggedTerm $ Tagged tg_v (Value v))))
 
 allocate :: Heap -> Stack -> In ([(Var, TaggedTerm)], TaggedTerm) -> State
 allocate (Heap h ids) k (rn, (xes, e)) = (Heap (h `M.union` M.fromList xes') ids', k, (rn', e))

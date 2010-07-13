@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections, PatternGuards, ExistentialQuantification #-}
+{-# LANGUAGE TupleSections, PatternGuards, ExistentialQuantification, DeriveFunctor #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Utilities (
     module IdSupply,
@@ -24,10 +24,13 @@ import Control.DeepSeq (NFData(..), rnf)
 import Control.Monad
 
 import Data.Maybe
+import Data.Monoid
 import Data.List
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Time.Clock.POSIX (getPOSIXTime)
+import qualified Data.Foldable as Foldable
+import qualified Data.Traversable as Traversable
 
 import Debug.Trace
 
@@ -159,6 +162,12 @@ assertRender a False _ = error (pPrintRender a)
 removeOnes :: [a] -> [[a]]
 removeOnes [] = []
 removeOnes (x:xs) = xs : map (x:) (removeOnes xs)
+
+listContexts :: [a] -> [([a], a, [a])]
+listContexts xs = zipWith (\is (t:ts) -> (is, t, ts)) (inits xs) (init (tails xs))
+
+bagContexts :: [a] -> [(a, [a])]
+bagContexts xs = [(x, is ++ ts) | (is, x, ts) <- listContexts xs]
 
 
 accumL :: (acc -> (acc, a)) -> acc -> Int -> (acc, [a])
@@ -313,6 +322,45 @@ zipWithEqual _ _ _ = fail "zipWithEqual"
 
 implies :: Bool -> Bool -> Bool
 implies cond consq = not cond || consq
+
+
+mapAccumM :: (Traversable.Traversable t, Monoid m) => (a -> (m, b)) -> t a -> (m, t b)
+mapAccumM f ta = Traversable.mapAccumL (\m a -> case f a of (m', b) -> (m `mappend` m', b)) mempty ta
+
+
+newtype Identity a = I { unI :: a } deriving (Functor)
+
+instance Monad Identity where
+    return = I
+    mx >>= fxmy = fxmy (unI mx)
+
+
+class (Functor t, Foldable.Foldable t) => Accumulatable t where
+    mapAccumT  ::            (acc -> x ->   (acc, y)) -> acc -> t x ->   (acc, t y)
+    mapAccumTM :: Monad m => (acc -> x -> m (acc, y)) -> acc -> t x -> m (acc, t y)
+    
+    mapAccumT f acc x = unI (mapAccumTM (\acc' x' -> I (f acc' x')) acc x)
+
+fmapDefault :: (Accumulatable t) => (a -> b) -> t a -> t b
+fmapDefault f = snd . mapAccumT (\() x -> ((), f x)) ()
+
+foldMapDefault :: (Accumulatable t, Monoid m) => (a -> m) -> t a -> m
+foldMapDefault f = fst . mapAccumT (\acc x -> (f x `mappend` acc, ())) mempty
+
+instance Accumulatable [] where
+    mapAccumT  = mapAccumL
+    mapAccumTM = mapAccumLM
+
+mapAccumLM :: Monad m => (acc -> x -> m (acc, y)) -> acc -> [x] -> m (acc, [y])
+mapAccumLM f = go []
+  where
+    go ys acc []     = return (acc, reverse ys)
+    go ys acc (x:xs) = do
+      (acc, y) <- f acc x
+      go (y:ys) acc xs
+
+instance Ord k => Accumulatable (M.Map k) where
+    mapAccumTM f acc = liftM (second M.fromList) . mapAccumTM (\acc (k, x) -> liftM (second (k,)) (f acc x)) acc . M.toList
 
 
 type Seconds = Double
