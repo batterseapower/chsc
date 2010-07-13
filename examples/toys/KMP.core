@@ -1,0 +1,29 @@
+alphabetEq x y = case x of
+    A -> case y of A -> True
+                   _ -> False
+    B -> case y of B -> True
+                   _ -> False
+
+
+match p s = loop p s p s
+
+loop pp ss op os = case pp of
+    []     -> True
+    (p:pp) -> case ss of []     -> False
+                         (s:ss) -> if alphabetEq p s then loop pp ss op os else next op os
+
+next op ss = case ss of
+    []     -> False
+    (_:ss) -> loop op ss op ss
+
+root u = match [A, A, B] u
+
+tests = [
+    (root [], False),
+    (root [A], False),
+    (root [A, A], False),
+    (root [A, A, B], True),
+    (root [A, A, A, B], True),
+    (root [A, A, B, A], True),
+    (root [A, B, A], False)
+  ]

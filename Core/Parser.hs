@@ -85,6 +85,8 @@ buildWrappers ps
     dataConArity "Node"    = 3 -- ZipTreeMaps
     dataConArity "Wheel1"  = 2 -- Wheel-Sieve1
     dataConArity "Wheel2"  = 3 -- Wheel-Sieve2
+    dataConArity "A"       = 0 -- KMP
+    dataConArity "B"       = 0 -- KMP
     dataConArity s = panic "dataConArity" (text s)
 
 newtype ParseM a = ParseM { unParseM :: ParseState -> (ParseState, a) }

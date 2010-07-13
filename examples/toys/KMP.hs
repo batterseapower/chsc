@@ -1,0 +1,1 @@
+data Alphabet = A | B
