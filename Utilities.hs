@@ -1,4 +1,5 @@
 {-# LANGUAGE TupleSections, PatternGuards, ExistentialQuantification #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 module Utilities (
     module IdSupply,
     module Utilities,
