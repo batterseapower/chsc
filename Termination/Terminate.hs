@@ -3,29 +3,29 @@ module Termination.Terminate where
 import StaticFlags
 import Utilities
 
-import qualified Data.Map as M
+import qualified Data.IntMap as IM
 
 
-newtype TagBag = TagBag { unTagBag :: M.Map Tag Int }
+newtype TagBag = TagBag { unTagBag :: IM.IntMap Int }
                deriving (Eq)
 
 instance Pretty TagBag where
-    pPrint (TagBag m) = braces $ hsep $ punctuate (text ",") [pPrint n | (n, count) <- M.toList m, _ <- replicate count n]
+    pPrint (TagBag m) = braces $ hsep $ punctuate (text ",") [pPrint n | (n, count) <- IM.toList m, _ <- replicate count n]
 
 mkTagBag :: [Tag] -> TagBag
-mkTagBag = TagBag . M.unionsWith (+) . map (flip M.singleton 1)
+mkTagBag = TagBag . IM.unionsWith (+) . map (flip IM.singleton 1)
 
 plusTagBag :: TagBag -> TagBag -> TagBag
-plusTagBag (TagBag tb1) (TagBag tb2) = TagBag (M.unionWith (+) tb1 tb2)
+plusTagBag (TagBag tb1) (TagBag tb2) = TagBag (IM.unionWith (+) tb1 tb2)
 
 plusTagBags :: [TagBag] -> TagBag
-plusTagBags = TagBag . M.unionsWith (+) . map unTagBag
+plusTagBags = TagBag . IM.unionsWith (+) . map unTagBag
 
 cardinality :: TagBag -> Int
-cardinality = M.fold (+) 0 . unTagBag
+cardinality = IM.fold (+) 0 . unTagBag
 
 setEqual :: TagBag -> TagBag -> Bool
-setEqual tb1 tb2  = M.keysSet (unTagBag tb1) == M.keysSet (unTagBag tb2)
+setEqual tb1 tb2  = IM.keysSet (unTagBag tb1) == IM.keysSet (unTagBag tb2)
 
 -- NB: this is inverted compared to Neil's definitions (to make it a better match for w.q.o theory)
 (<|) :: TagBag -> TagBag -> Bool
