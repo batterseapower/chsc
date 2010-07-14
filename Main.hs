@@ -24,6 +24,7 @@ import System.IO
 import Numeric (showFFloat)
 
 
+-- The Cambridge Haskell Supercompiler (CHSC)
 main :: IO ()
 main = do
     (_flags, args) <- fmap (partition ("-" `isPrefixOf`)) getArgs
