@@ -20,13 +20,12 @@ import qualified Data.Set as S
 
 step :: (Deeds, State) -> Maybe (Deeds, State)
 step (deeds, (h, k, (rn, TaggedTerm (Tagged tg e)))) = case e of
-    Var x             -> force  deeds' h k tg (rename rn x)
-    Value v           -> unwind deeds' h k tg (rn, v)
-    App e1 x2         -> Just (deeds', (h, Tagged tg (Apply (rename rn x2))            : k, (rn, e1)))
-    PrimOp pop (e:es) -> Just (deeds', (h, Tagged tg (PrimApply pop [] (map (rn,) es)) : k, (rn, e)))
-    Case e alts       -> Just (deeds', (h, Tagged tg (Scrutinise (rn, alts))           : k, (rn, e)))
-    LetRec xes e      -> Just (deeds', allocate h k (rn, (xes, e)))
-  where deeds' = releaseDeedDescend_ deeds tg
+    Var x             -> force  deeds h k tg (rename rn x)
+    Value v           -> unwind deeds h k tg (rn, v)
+    App e1 x2         -> Just (deeds, (h, Tagged tg (Apply (rename rn x2))            : k, (rn, e1)))
+    PrimOp pop (e:es) -> Just (deeds, (h, Tagged tg (PrimApply pop [] (map (rn,) es)) : k, (rn, e)))
+    Case e alts       -> Just (deeds, (h, Tagged tg (Scrutinise (rn, alts))           : k, (rn, e)))
+    LetRec xes e      -> Just (releaseDeedDescend_ deeds tg, allocate h k (rn, (xes, e)))
 
 force :: Deeds -> Heap -> Stack -> Tag -> Out Var -> Maybe (Deeds, State)
 force deeds (Heap h ids) k tg x' = M.lookup x' h >>= \in_e -> return (deeds, (Heap (M.delete x' h) ids, Tagged tg (Update x') : k, in_e))
