@@ -144,11 +144,14 @@ tagTerm ids (Term e) = TaggedTerm $ Tagged (hashedId i) $ case e of
     Value v       -> Value (tagValue ids' v)
     App e x       -> App (tagTerm ids' e) x
     PrimOp pop es -> PrimOp pop (zipWith tagTerm idss' es)
-    Case e alts   -> Case (tagTerm ids' e) (tagAlts (head idss') alts)
-    LetRec xes e  -> LetRec (zipWith (\ids'' (x, e) -> (x, tagTerm ids'' e)) idss' xes) (tagTerm ids' e)
+      where idss' = splitIdSupplyL ids
+    Case e alts   -> Case (tagTerm ids0' e) (tagAlts ids1' alts)
+      where (ids0', ids1') = splitIdSupply ids'
+    LetRec xes e  -> LetRec (zipWith (\ids'' (x, e) -> (x, tagTerm ids'' e)) idss' xes) (tagTerm ids1' e)
+      where (ids0', ids1') = splitIdSupply ids'
+            idss' = splitIdSupplyL ids0'
   where
     (ids', i) = stepIdSupply ids
-    idss' = splitIdSupplyL ids'
 
 tagValue :: IdSupply -> Value -> TaggedValue
 tagValue ids v = case v of
