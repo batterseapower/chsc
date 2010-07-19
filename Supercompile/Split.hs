@@ -256,14 +256,6 @@ optimiseSplit opt deeds floats_h floats_compulsory = do
     (deeds, fvs', xes') <- residualise deeds [] S.empty fvs_compulsory'
     return (deeds, fvs', letRec xes' e_compulsory')
 
-releaseStateDeed :: Deeds -> State -> Deeds
-releaseStateDeed deeds (Heap h _, k, (_, TaggedTerm e))
-  = foldl' (\deeds kf -> releaseDeedDeep deeds (tag kf))
-           (foldl' (\deeds (_, TaggedTerm e) -> releaseDeedDeep deeds (tag e))
-                   (releaseDeedDeep deeds (tag e))
-                   (M.elems h))
-           k
-
 -- Whether the given variable was entered many times, with no context identifier information required
 -- I'm using this abstraction to make explicit the fact that we don't pass context identifiers between
 -- iterations of the splitter "go" loop. This is important because they are potentially unstable!

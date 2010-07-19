@@ -1,5 +1,7 @@
 module Evaluator.Syntax where
 
+import Size.Deeds
+
 import Core.Renaming
 import Core.Syntax
 
@@ -27,3 +29,12 @@ instance Pretty StackFrame where
         Scrutinise in_alts        -> pPrintPrecCase level prec (text "[_]") (renameIn renameTaggedAlts prettyIdSupply in_alts)
         PrimApply pop in_vs in_es -> pPrintPrecPrimOp level prec pop (map SomePretty in_vs ++ map SomePretty in_es)
         Update x'                 -> pPrintPrecApp level prec (text "update") x'
+
+
+releaseStateDeed :: Deeds -> State -> Deeds
+releaseStateDeed deeds (Heap h _, k, (_, TaggedTerm e))
+  = foldl' (\deeds kf -> releaseDeedDeep deeds (tag kf))
+           (foldl' (\deeds (_, TaggedTerm e) -> releaseDeedDeep deeds (tag e))
+                   (releaseDeedDeep deeds (tag e))
+                   (M.elems h))
+           k

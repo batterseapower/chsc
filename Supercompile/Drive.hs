@@ -172,7 +172,7 @@ memo opt (deeds, state) = do
          ] of
       (_x, fvs', e'):_ -> {- traceRender ("tieback", residualiseState state, fst res) $ -} do
         traceRenderM ("=sc", _x, residualiseState state, (fvs', e'))
-        return (deeds, fvs', e')
+        return (releaseStateDeed deeds state, fvs', e')
       [] -> {- traceRender ("new drive", residualiseState state) $ -} do
         x <- freshHName
         let vs = stateFreeVars state
