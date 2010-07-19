@@ -1,6 +1,7 @@
 #include "../Prelude.core"
 
 -- FIXME: not optimised. ones residualised? Works if root = example1
+-- I suspect this happens because 1 : ones is not a value in my current desugaring.
 example1 = let ones = 1 : ones
            in map (\x -> x + 1) ones
 
