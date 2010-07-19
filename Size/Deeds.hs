@@ -9,6 +9,8 @@ import Data.Tree
 
 type Unclaimed = Int
 newtype Deeds = Deeds { unDeeds :: IM.IntMap ([Tag], Unclaimed) }
+-- TODO: could be slightly neater: only need to store Deeds for the *leaves* of the tree, and a mapping that
+-- tells us which leaves the node corresponding to any given Tag dominates.
 
 mkDeeds :: Unclaimed -> Tree Tag -> Deeds
 mkDeeds k = Deeds . go IM.empty
