@@ -1,6 +1,6 @@
 {-# LANGUAGE ViewPatterns, TupleSections, PatternGuards, BangPatterns #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
-module Supercompile.Drive (supercompile) where
+module Supercompile.Drive (supercompile, reduce) where
 
 import Supercompile.Match
 import Supercompile.Residualise

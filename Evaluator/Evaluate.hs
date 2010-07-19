@@ -1,6 +1,8 @@
 {-# LANGUAGE ViewPatterns, TupleSections, PatternGuards #-}
 module Evaluator.Evaluate (step) where
 
+import {-# SOURCE #-} Supercompile.Drive (reduce)
+
 import Evaluator.Syntax
 
 import Core.Renaming
@@ -8,6 +10,7 @@ import Core.Syntax
 import Core.Prelude (trueDataCon, falseDataCon)
 
 import Renaming
+import StaticFlags
 import Utilities
 
 import qualified Data.Map as M
@@ -61,5 +64,11 @@ update :: Heap -> Stack -> Tag -> Out Var -> In TaggedValue -> State
 update (Heap h ids) k tg x' (rn, v) = (Heap (M.insert x' (rn, TaggedTerm $ Tagged tg (Value v)) h) ids, k, (rn, TaggedTerm $ Tagged tg (Value v)))
 
 allocate :: Heap -> Stack -> In ([(Var, TaggedTerm)], TaggedTerm) -> State
-allocate (Heap h ids) k (rn, (xes, e)) = (Heap (h `M.union` M.fromList xes') ids', k, (rn', e))
-  where (ids', rn', xes') = renameBounds (\_ x' -> x') ids rn xes
+allocate (Heap h ids) k (rn, (xes, e)) = (heap', k, (rn', e))
+  where
+    (ids', rn', xes') = renameBounds (\_ x' -> x') ids rn xes
+    heap' | not sPECULATION = Heap (h `M.union` M.fromList xes') ids'
+          | otherwise = foldl' (\(Heap h ids) (x', in_e) -> case reduce (Heap h ids, [], in_e) of
+                                                                (Heap h' ids', [], in_e'@(_, TaggedTerm (Tagged _ (Value _)))) -> Heap (M.insert x' in_e' h') ids' -- Speculation: if we can evaluate to a value "quickly" then use that value,
+                                                                _                                                              -> Heap (M.insert x' in_e  h)  ids) -- otherwise throw away the half-evaluated mess that we reach
+                                 (Heap h ids') xes'
