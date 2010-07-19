@@ -27,7 +27,7 @@ import qualified Data.Set as S
 --
 
 data Entered = Once (Maybe Id) -- ^ The Id is a context identifier: if a binding is Entered twice from the same context it's really a single Entrance. Nothing signifies the residual context (i.e. there is no associated float)
-             | Many
+             | Many Bool       -- ^ The Bool records whether any of those Many occurrences are in the residual
              deriving (Eq, Show)
 
 instance Pretty Entered where
@@ -37,11 +37,15 @@ isOnce :: Entered -> Bool
 isOnce (Once _) = True
 isOnce _ = False
 
+enteredInResidual :: Entered -> Bool
+enteredInResidual (Once mb_id) = isNothing mb_id
+enteredInResidual (Many resid) = resid
+
 plusEntered :: Entered -> Entered -> Entered
 plusEntered (Once mb_id1) (Once mb_id2)
   | mb_id1 == mb_id2 = Once mb_id1
-  | otherwise        = {- traceRender ("Once promotion", mb_id1, mb_id2) -} Many
-plusEntered _ _ = Many
+  | otherwise        = {- traceRender ("Once promotion", mb_id1, mb_id2) -} (Many (isNothing mb_id1 || isNothing mb_id2))
+plusEntered e1 e2 = Many (enteredInResidual e1 || enteredInResidual e2)
 
 type EnteredEnv = M.Map (Out Var) Entered
 
@@ -214,9 +218,9 @@ transitiveInline deeds h_inlineable (Heap h ids, k, in_e) = (if not (S.null not_
             -- even if we choose not to inline it into the State, and that such bindings will not be evaluated until they are
             -- actually demanded (or we could get work duplication by inlining into only *some* Once contexts).
             consider_inlining x' in_e@(_, TaggedTerm e) (deeds, h_inline, h_not_inlined) = case claimDeed deeds (tag e) of
-                Just deeds -> (deeds, h_inline', h_not_inlined) 
-                Nothing    -> (deeds, h_inline, M.insert x' in_e h_not_inlined)
-              where h_inline' = M.insert x' in_e h_inline
+                Nothing    -> traceRender ("transitiveInline: deed claim failure", x') (deeds,                  h_inline, h_not_inlined)
+                                                                                                                          -- M.insert x' in_e h_not_inlined) -- NB: only relevant if generalising WRT TagBag
+                Just deeds ->                                                          (deeds, M.insert x' in_e h_inline,                  h_not_inlined)
             (deeds', h_inline, h_not_inlined) = M.foldWithKey consider_inlining (deeds, M.empty, M.empty) h_inline_candidates
             (h_inline_candidates, h_inlineable') = M.partitionWithKey (\x' _ -> x' `S.member` fvs) h_inlineable
             fvs' = M.fold (\in_e fvs -> fvs `S.union` inFreeVars taggedTermFreeVars in_e) fvs h_inline
@@ -314,11 +318,12 @@ split' old_deeds old_h@((cheapifyHeap . (old_deeds,)) -> (deeds, Heap h (splitId
         -- Explicitly filter them out to be sure we don't spuriously recompute such bindings, BUT make sure to retain non-value
         -- bindings that are used Once by the *residual itself*:
         --
-        -- NB: the below comment was outdated. Could fix the bug by just using must_resid_k_xs to communicate residualised stuff between iterations.
+        -- NB: the below comment is outdated. It turns out we could fix the bug by just using must_resid_k_xs to communicate
+        -- residualised stuff between iterations.
         -- NB: I used to do this, but no longer! The reason is that with generalisation we might choose not to inline some non-value,
         -- so it must be available to optimiseSplit if it turns out to be free.
-        h_strictly_inlined = M.filterWithKey (\x _ -> maybe False (/= Once Nothing) (M.lookup x entered')) h_inlineable
-        xs_nonvalue_inlinings = M.keysSet $ M.filter (\(_, e) -> not (taggedTermIsCheap e)) h_strictly_inlined
+        h_strictly_inlined = M.filterWithKey (\x _ -> maybe True (not . enteredInResidual) (M.lookup x entered')) h_inlineable
+        xs_nonvalue_inlinings = M.keysSet h_strictly_inlined
         
         -- Generalisation
         -- ~~~
@@ -373,7 +378,7 @@ splitPureHeap h was_entered_many entered_k = -- traceRender ("splitPureHeap", (r
     entered' = M.foldWithKey (\x' in_e entered' -> entered' `plusEnteredEnv` incorporate (fromJust $ name_id x') (M.lookup x' was_entered_many) in_e) entered_k h
     incorporate _ Nothing         _    = emptyEnteredEnv
     incorporate i (Just was_many) in_e = -- (\res -> traceRender ("incorporate", mb_id, ent, inFreeVars taggedTermFreeVars in_e) res) $
-                                         mkEnteredEnv (if taggedTermIsCheap (snd in_e) && was_many then Many else Once (Just i)) (inFreeVars taggedTermFreeVars in_e)
+                                         mkEnteredEnv (if taggedTermIsCheap (snd in_e) && was_many then Many False else Once (Just i)) (inFreeVars taggedTermFreeVars in_e)
      -- Cheap things may be duplicated, so if they are used Many times so will their FVs be. Non-cheap things are either:
      --   a) Residualised immediately and so they enter their FVs at most Once
      --   b) Duplicated downwards, but used linearly anyway, so their FVs are still used Once
@@ -495,8 +500,8 @@ splitStack deeds old_ids scruts (Tagged tg kf:k) (entered_hole, (Bracketed rebui
                 -- Inline parts of the evaluation context into each branch only if we can get that many deeds for duplication
                 go deeds []     states = (deeds, [], states)
                 go deeds (kf:k) states = case claimDeeds deeds (tag kf) (branch_factor - 1) of -- NB: subtract one because one occurrence is already "paid for". It is OK if the result is negative (i.e. branch_factor 0)!
+                    Nothing    -> traceRender ("splitStack: deed claim failure", length k) (deeds, kf:k, states)
                     Just deeds -> go deeds k (map (second3 (++ [kf])) states)
-                    Nothing    -> (deeds, kf:k, states)
             
             -- 3) Define how to rebuild the case and transfer free variables out of it
             rebuild_alt e_hole' es_alt' = case_ e_hole' (zipWith (\alt_con' e_alt' -> (alt_con', e_alt')) alt_cons' es_alt')
@@ -523,7 +528,7 @@ splitStack deeds old_ids scruts (Tagged tg kf:k) (entered_hole, (Bracketed rebui
     altConToValue (DefaultAlt _)  = Nothing
 
 splitValue :: IdSupply -> In TaggedValue -> (EnteredEnv, Bracketed State)
-splitValue ids in_v@(rn, Lambda x e) = (mkEnteredEnv Many (inFreeVars taggedValueFreeVars in_v), Bracketed (\[h] -> lambda x' h) S.empty (\[fvs] -> S.delete x' fvs) [(Heap M.empty state_ids', [], (rn', e))])
+splitValue ids in_v@(rn, Lambda x e) = (mkEnteredEnv (Many False) (inFreeVars taggedValueFreeVars in_v), Bracketed (\[h] -> lambda x' h) S.empty (\[fvs] -> S.delete x' fvs) [(Heap M.empty state_ids', [], (rn', e))])
   where (state_ids', rn', x') = renameBinder ids rn x
 splitValue ids in_v                  = (mkEnteredEnv (Once Nothing) fvs', Bracketed (\[] -> value v') fvs' (\[] -> S.empty) [])
   where v' = detagValue $ renameIn renameTaggedValue ids in_v
