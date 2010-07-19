@@ -20,8 +20,8 @@ data Literal = Int Integer | Char Char
 
 newtype Term = Term { unTerm :: TermF Term }
              deriving (Eq, Show)
-data TaggedTerm = TaggedTerm { unTaggedTerm :: Tagged (TermF TaggedTerm) }
-                deriving (Eq, Show)
+newtype TaggedTerm = TaggedTerm { unTaggedTerm :: Tagged (TermF TaggedTerm) }
+                   deriving (Eq, Show)
 data TermF term = Var Var | Value (ValueF term) | App term Var | PrimOp PrimOp [term] | Case term [AltF term] | LetRec [(Var, term)] term
                 deriving (Eq, Show)
 
