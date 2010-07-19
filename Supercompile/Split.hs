@@ -218,8 +218,7 @@ transitiveInline deeds h_inlineable (Heap h ids, k, in_e) = (if not (S.null not_
             -- even if we choose not to inline it into the State, and that such bindings will not be evaluated until they are
             -- actually demanded (or we could get work duplication by inlining into only *some* Once contexts).
             consider_inlining x' in_e@(_, TaggedTerm e) (deeds, h_inline, h_not_inlined) = case claimDeed deeds (tag e) of
-                Nothing    -> traceRender ("transitiveInline: deed claim failure", x') (deeds,                  h_inline, h_not_inlined)
-                                                                                                                          -- M.insert x' in_e h_not_inlined) -- NB: only relevant if generalising WRT TagBag
+                Nothing    -> traceRender ("transitiveInline: deed claim failure", x') (deeds,                  h_inline, M.insert x' in_e h_not_inlined)
                 Just deeds ->                                                          (deeds, M.insert x' in_e h_inline,                  h_not_inlined)
             (deeds', h_inline, h_not_inlined) = M.foldWithKey consider_inlining (deeds, M.empty, M.empty) h_inline_candidates
             (h_inline_candidates, h_inlineable') = M.partitionWithKey (\x' _ -> x' `S.member` fvs) h_inlineable
@@ -286,13 +285,14 @@ split' old_deeds old_h@((cheapifyHeap . (old_deeds,)) -> (deeds, Heap h (splitId
   = go S.empty (toEnteredManyEnv entered_hole)
   where
     go must_resid_k_xs entered_many
-      | not (S.null gen_fvs) && traceRender ("split.go", gen_fvs) False = undefined
+      | not (S.null gen_fvs) && traceRender ("split.go", gen_fvs)   False = undefined
+      -- | traceRender ("split.release", M.keysSet h_strictly_inlined) False = undefined
       -- | traceRender ("split.go", entered, entered_k, xs_nonvalue_inlinings) False = undefined
       | entered_many == entered_many'
       , must_resid_k_xs == must_resid_k_xs'
       = -- (\res -> traceRender ("split'", entered_hole, "==>", entered_k, "==>", entered', must_resid_k_xs, [x' | Tagged _ (Update x') <- k], M.keysSet floats_k_bound) res) $
-        (\res@(_, avail_h, _) -> traceRender ("split'", M.keysSet (case old_h of Heap h _ -> h), M.keysSet h, M.keysSet avail_h, M.keysSet h_inlineable) res) $
-        (deeds3, (brackets_h `M.union` brackets_k_bound) `exclude` xs_nonvalue_inlinings, bracket_k')
+        (\res@(_, avail_h, _) -> traceRender ("split'", M.keysSet h_strictly_inlined, deeds, deeds0, deeds3, M.keysSet (case old_h of Heap h _ -> h), M.keysSet h, M.keysSet avail_h, M.keysSet h_inlineable) res) $
+        (deeds3, brackets_h `M.union` brackets_k_bound, bracket_k')
       | otherwise = go must_resid_k_xs' entered_many'
       where
         -- Evaluation context splitting
@@ -322,8 +322,8 @@ split' old_deeds old_h@((cheapifyHeap . (old_deeds,)) -> (deeds, Heap h (splitId
         -- residualised stuff between iterations.
         -- NB: I used to do this, but no longer! The reason is that with generalisation we might choose not to inline some non-value,
         -- so it must be available to optimiseSplit if it turns out to be free.
-        h_strictly_inlined = M.filterWithKey (\x _ -> maybe True (not . enteredInResidual) (M.lookup x entered')) h_inlineable
-        xs_nonvalue_inlinings = M.keysSet h_strictly_inlined
+        h_strictly_inlined    = M.filterWithKey (\x _ -> maybe True (not . enteredInResidual) (M.lookup x entered')) h_inlineable
+        xs_nonvalue_inlinings = M.keysSet h_strictly_inlined -- $ M.filterWithKey (\x (_, e) -> maybe False (/= Once Nothing) (M.lookup x entered') && not (taggedTermIsCheap e)) h_inlineable
         
         -- Generalisation
         -- ~~~
@@ -349,8 +349,8 @@ split' old_deeds old_h@((cheapifyHeap . (old_deeds,)) -> (deeds, Heap h (splitId
         inlineBracketHeap = inlineHeapT (flip transitiveInline h_inlineable)
         
         (deeds1, gen_fvs_k',      bracket_k')       = inlineBracketHeap deeds0 bracket_k
-        (deeds2, gen_fvs_h,       brackets_h)       = inlineHeapT (\deeds b -> inlineBracketHeap deeds (promoteToBracket b)) deeds1 h
-        (deeds3, gen_fvs_k_bound, brackets_k_bound) = inlineHeapT inlineBracketHeap deeds2 floats_k_bound
+        (deeds2, gen_fvs_h,       brackets_h)       = inlineHeapT (\deeds b -> inlineBracketHeap deeds (promoteToBracket b)) deeds1 (h              `exclude` xs_nonvalue_inlinings) -- NB: exclude *before* allowing
+        (deeds3, gen_fvs_k_bound, brackets_k_bound) = inlineHeapT inlineBracketHeap                                          deeds2 (floats_k_bound `exclude` xs_nonvalue_inlinings) -- these guys to claim Deeds
         gen_fvs = gen_fvs_k' `S.union` gen_fvs_h `S.union` gen_fvs_k_bound
         
         -- FIXME: bit of a hack. At least needs some renaming. Basically just want to ensure that generalised variables are residualised,
