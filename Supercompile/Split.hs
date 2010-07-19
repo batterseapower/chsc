@@ -288,7 +288,7 @@ split' old_deeds old_h@((cheapifyHeap . (old_deeds,)) -> (deeds, Heap h (splitId
       , must_resid_k_xs == must_resid_k_xs'
       = -- (\res -> traceRender ("split'", entered_hole, "==>", entered_k, "==>", entered', must_resid_k_xs, [x' | Tagged _ (Update x') <- k], M.keysSet floats_k_bound) res) $
         (\res@(_, avail_h, _) -> traceRender ("split'", M.keysSet (case old_h of Heap h _ -> h), M.keysSet h, M.keysSet avail_h, M.keysSet h_inlineable) res) $
-        (deeds3, brackets_h `M.union` brackets_k_bound, bracket_k')
+        (deeds3, (brackets_h `M.union` brackets_k_bound) `exclude` xs_nonvalue_inlinings, bracket_k')
       | otherwise = go must_resid_k_xs' entered_many'
       where
         -- Evaluation context splitting
@@ -299,7 +299,7 @@ split' old_deeds old_h@((cheapifyHeap . (old_deeds,)) -> (deeds, Heap h (splitId
         -- NB: we add the FVs of the part of the heap that we *have* to residualise to the entered_hole
         -- information. This ensures that splitStack residualises the update frames for any of
         -- those FVs that it happens to bind, which is essential for correctness.
-        (deeds0, floats_k_bound, (entered_k, bracket_k)) = splitStack deeds ids1 scruts k (entered_hole `plusEnteredEnv` mkEnteredEnv (Once Nothing) must_resid_k_xs, bracketed_hole)
+        (deeds0_unreleased, floats_k_bound, (entered_k, bracket_k)) = splitStack deeds ids1 scruts k (entered_hole `plusEnteredEnv` mkEnteredEnv (Once Nothing) must_resid_k_xs, bracketed_hole)
         
         -- Heap splitting
         -- ~~~~~~~~~~~~~~
@@ -314,12 +314,22 @@ split' old_deeds old_h@((cheapifyHeap . (old_deeds,)) -> (deeds, Heap h (splitId
         -- Explicitly filter them out to be sure we don't spuriously recompute such bindings, BUT make sure to retain non-value
         -- bindings that are used Once by the *residual itself*:
         --
+        -- NB: the below comment was outdated. Could fix the bug by just using must_resid_k_xs to communicate residualised stuff between iterations.
         -- NB: I used to do this, but no longer! The reason is that with generalisation we might choose not to inline some non-value,
         -- so it must be available to optimiseSplit if it turns out to be free.
-        --xs_nonvalue_inlinings = M.keysSet $ M.filterWithKey (\x (_, e) -> maybe False (/= Once Nothing) (M.lookup x entered') && not (taggedTermIsCheap e)) h_inlineable
+        h_strictly_inlined = M.filterWithKey (\x _ -> maybe False (/= Once Nothing) (M.lookup x entered')) h_inlineable
+        xs_nonvalue_inlinings = M.keysSet $ M.filter (\(_, e) -> not (taggedTermIsCheap e)) h_strictly_inlined
         
         -- Generalisation
         -- ~~~
+        
+        -- In order to make the Deeds-based stuff less conservative, my first action here is to release our claims to those deeds
+        -- which we do *not* intend to create a residual let binding for here and now. This will let us always inline a heap-bound
+        -- thing into *at least one* context (unless it really is referred to by the residual code).
+        --
+        -- The equivalent process is done for the stack in splitStack itself: we just subtract 1 from the number of deeds we need to
+        -- claim when duplicating a stack frame.
+        deeds0 = M.fold (\(_, TaggedTerm e) deeds -> releaseDeedDeep deeds (tag e)) deeds0_unreleased h_strictly_inlined
         
         -- Generalising the final proposed floats may cause some bindings that we *thought* were going to be inlined to instead be
         -- residualised. We need to account for this in the Entered information (for work-duplication purposes), and in that we will
@@ -484,7 +494,7 @@ splitStack deeds old_ids scruts (Tagged tg kf:k) (entered_hole, (Bracketed rebui
                 
                 -- Inline parts of the evaluation context into each branch only if we can get that many deeds for duplication
                 go deeds []     states = (deeds, [], states)
-                go deeds (kf:k) states = case claimDeeds deeds (tag kf) branch_factor of
+                go deeds (kf:k) states = case claimDeeds deeds (tag kf) (branch_factor - 1) of -- NB: subtract one because one occurrence is already "paid for". It is OK if the result is negative (i.e. branch_factor 0)!
                     Just deeds -> go deeds k (map (second3 (++ [kf])) states)
                     Nothing    -> (deeds, kf:k, states)
             

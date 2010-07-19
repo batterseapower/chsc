@@ -7,6 +7,7 @@ import qualified Data.IntMap as IM
 import Data.Tree
 
 
+-- | Number of unclaimed deeds. Invariant: always greater than or equal to 0
 type Unclaimed = Int
 newtype Deeds = Deeds { unDeeds :: IM.IntMap ([Tag], Unclaimed) }
 -- TODO: could be slightly neater: only need to store Deeds for the *leaves* of the tree, and a mapping that
@@ -20,7 +21,8 @@ mkDeeds k = Deeds . go IM.empty
 claimDeed :: Deeds -> Tag -> Maybe Deeds
 claimDeed deeds tg = claimDeeds deeds tg 1
 
-claimDeeds :: Deeds -> Tag -> Unclaimed -> Maybe Deeds
+-- NB: it is OK if the number of deeds to claim is negative -- that just causes some deeds to be released
+claimDeeds :: Deeds -> Tag -> Int -> Maybe Deeds
 claimDeeds (Deeds m) tg want = if unclaimed < want then Nothing else foldM claimDeed (Deeds (IM.insert tg (child_tgs, unclaimed - want) m)) child_tgs
   where !(child_tgs, unclaimed) = lookupTag tg m
 
