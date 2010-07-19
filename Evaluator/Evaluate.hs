@@ -71,8 +71,10 @@ primop deeds h k tg tg_v  pop in_vs (rn, v) (in_e:in_es) = (deeds, (h, Tagged tg
 
 update :: Deeds -> Heap -> Stack -> Tag -> Out Var -> In TaggedValue -> Maybe (Deeds, State)
 update deeds (Heap h ids) k tg_v x' (rn, v)
-  | linear    = return (deeds, (Heap h ids, k, (rn, TaggedTerm $ Tagged tg_v (Value v))))
-  | otherwise = claimDeed deeds tg_v >>= \deeds -> return (deeds, (Heap (M.insert x' (rn, TaggedTerm $ Tagged tg_v (Value v)) h) ids, k, (rn, TaggedTerm $ Tagged tg_v (Value v))))
+  | linear    = Just (deeds, (Heap h ids, k, (rn, TaggedTerm $ Tagged tg_v (Value v))))
+  | otherwise = case claimDeed deeds tg_v of
+                  Nothing    -> traceRender ("update: deed claim FAILURE", x') Nothing
+                  Just deeds -> Just (deeds, (Heap (M.insert x' (rn, TaggedTerm $ Tagged tg_v (Value v)) h) ids, k, (rn, TaggedTerm $ Tagged tg_v (Value v))))
   where
     -- If we can GC the update frame (because it can't be referred to in the continuation) then we don't have to actually update the heap or even claim a new deed
     -- TODO: make finding FVs much cheaper (i.e. memoise it in the syntax functor construction)

@@ -22,6 +22,8 @@ newtype Term = Term { unTerm :: TermF Term }
              deriving (Eq, Show)
 newtype TaggedTerm = TaggedTerm { unTaggedTerm :: Tagged (TermF TaggedTerm) }
                    deriving (Eq, Show)
+data CountedTerm = CountedTerm { count :: Int, unCountedTerm :: TermF CountedTerm }
+                   deriving (Eq, Show)
 data TermF term = Var Var | Value (ValueF term) | App term Var | PrimOp PrimOp [term] | Case term [AltF term] | LetRec [(Var, term)] term
                 deriving (Eq, Show)
 
@@ -90,6 +92,9 @@ instance Pretty Term where
 
 instance Pretty TaggedTerm where
     pPrintPrec level prec (TaggedTerm e) = pPrintPrec level prec e
+
+instance Pretty CountedTerm where
+    pPrintPrec level _prec (CountedTerm count e) = text ("[" ++ show count ++ "]") <> pPrintPrec level appPrec e
 
 instance Pretty term => Pretty (TermF term) where
     pPrintPrec level prec e = case e of

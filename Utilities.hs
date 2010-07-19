@@ -28,6 +28,7 @@ import Data.Monoid
 import Data.List
 import qualified Data.Map as M
 import qualified Data.Set as S
+import Data.Tree
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import qualified Data.Foldable as Foldable
 import qualified Data.Traversable as Traversable
@@ -78,6 +79,9 @@ instance Pretty a => Pretty (S.Set a) where
 
 instance (Pretty k, Pretty v) => Pretty (M.Map k v) where
     pPrint m = brackets $ fsep (punctuate comma [pPrint k <+> text "|->" <+> pPrint v | (k, v) <- M.toList m])
+
+instance Pretty a => Pretty (Tree a) where
+    pPrint = text . drawTree . fmap (show . pPrint)
 
 fmapSet :: (Ord a, Ord b) => (a -> b) -> S.Set a -> S.Set b
 fmapSet f = S.fromList . map f . S.toList

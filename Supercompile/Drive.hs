@@ -30,21 +30,33 @@ import Data.Tree
 
 
 supercompile :: Term -> Term
-supercompile e = traceRender ("all input FVs", fvs) $ runScpM fvs $ fmap thd3 $ sc [] (deeds, state)
+supercompile e = traceRender ("all input FVs", fvs) $
+                 runScpM fvs $ fmap thd3 $ sc [] (deeds, state)
   where fvs = termFreeVars e
         state = (Heap M.empty reduceIdSupply, [], (mkIdentityRenaming $ S.toList fvs, tagged_e))
         tagged_e = tagTerm tagIdSupply e
         
-        deeds = mkDeeds 3 (extractDeeds tagged_e)
-        extractDeeds (TaggedTerm (Tagged tg e)) = Node tg (extractDeeds' e)
+        (t, rb) = extractDeeds tagged_e
+        deeds = mkDeeds 3 (t, pPrint . rb)
+        extractDeeds (TaggedTerm (Tagged tg e)) = -- traceRender ("extractDeeds", rb (fmap (fmap (const 1)) ts)) $
+                                                  (Node tg ts, \(Node unc ts') -> CountedTerm unc (rb ts'))
+          where (ts, rb) = extractDeeds' e
         extractDeeds' e = case e of
-          Var _              -> []
-          Value (Lambda _ e) -> [extractDeeds e]
-          Value _            -> []
-          App e _            -> [extractDeeds e]
-          PrimOp _ es        -> map extractDeeds es
-          Case e alts        -> extractDeeds e : map (extractDeeds . snd) alts
-          LetRec xes e       -> extractDeeds e : map (extractDeeds . snd) xes
+          Var x              -> ([], \[] -> Var x)
+          Value (Lambda x e) -> ([t], \[t'] -> Value (Lambda x (rb t')))
+            where (t, rb) = extractDeeds e
+          Value (Data dc xs) -> ([], \[] -> Value (Data dc xs))
+          Value (Literal l)  -> ([], \[] -> Value (Literal l))
+          App e x            -> ([t], \[t'] -> App (rb t') x)
+            where (t, rb) = extractDeeds e
+          PrimOp pop es      -> (ts, \ts' -> PrimOp pop (zipWith ($) rbs ts'))
+            where (ts, rbs) = unzip (map extractDeeds es)
+          Case e (unzip -> (alt_cons, alt_es)) -> (t : ts, \(t':ts') -> Case (rb t') (alt_cons `zip` zipWith ($) rbs ts'))
+            where (t, rb)   = extractDeeds e
+                  (ts, rbs) = unzip (map extractDeeds alt_es)
+          LetRec (unzip -> (xs, es)) e         -> (t : ts, \(t':ts') -> LetRec (xs `zip` zipWith ($) rbs ts') (rb t'))
+            where (t, rb)   = extractDeeds e
+                  (ts, rbs) = unzip (map extractDeeds es)
 
 
 --
@@ -83,6 +95,7 @@ reduce :: (Deeds, State) -> (Deeds, State)
 reduce = go emptyHistory
   where
     go hist (deeds, state)
+      | traceRender ("reduce.go", deeds, residualiseState state) False = undefined
       | not eVALUATE_PRIMOPS, (_, _, (_, TaggedTerm (Tagged _ (PrimOp _ _)))) <- state = (deeds, state)
       | otherwise = case step (deeds, state) of
         Nothing -> (deeds, state)
@@ -169,9 +182,9 @@ memo opt (deeds, state) = do
         
         promise P { fun = x, fvs = vs_list, meaning = state }
         
-        traceRenderM (">sc", x, residualiseState state)
+        traceRenderM (">sc", x, deeds, residualiseState state)
         (deeds, _fvs', e') <- opt (deeds, state)
-        traceRenderM ("<sc", x, residualiseState state, (S.fromList vs_list, e'))
+        traceRenderM ("<sc", x, deeds, residualiseState state, (S.fromList vs_list, e'))
         
         assertRender ("sc: FVs", x, _fvs' S.\\ vs, vs) (_fvs' `S.isSubsetOf` vs) $ return ()
         
