@@ -37,7 +37,7 @@ supercompile e = traceRender ("all input FVs", fvs) $
         tagged_e = tagTerm tagIdSupply e
         
         (t, rb) = extractDeeds tagged_e
-        deeds = mkDeeds 3 (t, pPrint . rb)
+        deeds = mkDeeds (bLOAT_FACTOR - 1) (t, pPrint . rb)
         extractDeeds (TaggedTerm (Tagged tg e)) = -- traceRender ("extractDeeds", rb (fmap (fmap (const 1)) ts)) $
                                                   (Node tg ts, \(Node unc ts') -> CountedTerm unc (rb ts'))
           where (ts, rb) = extractDeeds' e

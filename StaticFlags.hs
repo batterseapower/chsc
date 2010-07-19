@@ -1,5 +1,7 @@
 module StaticFlags where
 
+import Data.Maybe
+
 import System.Environment
 import System.IO.Unsafe
 
@@ -23,3 +25,27 @@ eVALUATE_PRIMOPS = not $ "--no-primops" `elem` (unsafePerformIO getArgs)
 {-# NOINLINE gENERALISATION #-}
 gENERALISATION :: Bool
 gENERALISATION = not $ "--no-generalisation" `elem` (unsafePerformIO getArgs)
+
+{-# NOINLINE bLOAT_FACTOR #-}
+bLOAT_FACTOR :: Int
+bLOAT_FACTOR = fromMaybe 10 $ listToMaybe [read arg | '-':'-':'b':'l':'o':'a':'t':'=':arg <- unsafePerformIO getArgs]
+ -- NB: need a bloat factor of at least 5 to get append/append fusion to work. The critical point is:
+ --
+ --  let (++) = ...
+ --  in case (case xs of []     -> ys
+ --                      (x:xs) -> x : (xs ++ ys)) of
+ --    []     -> zs
+ --    (x:xs) -> x : (xs ++ zs)
+ --
+ -- We need to duplicate the case continuation into each branch, so at one time we will have:
+ --  1) Two copies of (++) in the [] branch of the inner case
+ --    a) One in the heap
+ --    b) One from the stack (from [_] ++ zs)
+ --  2) Similarly two copies in the (:) branch of the inner case
+ --  3) One copy manifested in the residual branch of xs
+ --
+ -- Total = 5 copies (due to tiebacks, the residual program will do better than this)
+ --
+ -- 
+ -- Unfortunately, my implementation doesn't tie back as eagerly as you might like, so we actually peel the loop once and
+ -- hence need a bloat factor of 10 here FIXME: figure out how to reduce this number.
