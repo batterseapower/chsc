@@ -1,8 +1,10 @@
 {-# LANGUAGE ViewPatterns, TupleSections, PatternGuards #-}
 module Evaluator.Evaluate (step) where
 
+import Evaluator.FreeVars
 import Evaluator.Syntax
 
+import Core.FreeVars
 import Core.Renaming
 import Core.Syntax
 import Core.Prelude (trueDataCon, falseDataCon)
@@ -13,6 +15,7 @@ import Renaming
 import Utilities
 
 import qualified Data.Map as M
+import qualified Data.Set as S
 
 
 step :: (Deeds, State) -> Maybe (Deeds, State)
@@ -66,8 +69,15 @@ primop deeds h k tg tg_v2 pop [Tagged tg_v1 (_, Literal (Int l1))] (_, Literal (
         retBool pop l1 l2 = if pop l1 l2 then Data trueDataCon [] else Data falseDataCon []
 primop deeds h k tg tg_v  pop in_vs (rn, v) (in_e:in_es) = (deeds, (h, Tagged tg (PrimApply pop (in_vs ++ [Tagged tg_v (rn, v)]) in_es) : k, in_e))
 
-update :: Deeds -> Heap -> Stack -> Tag -> Out Var -> In TaggedValue -> Maybe (Deeds, State) -- FIXME: should allow inlining here if we can GC the update frame because it can't be referred to in the continuation?
-update deeds (Heap h ids) k tg_v x' (rn, v) = claimDeed deeds tg_v >>= \deeds -> return (deeds, (Heap (M.insert x' (rn, TaggedTerm $ Tagged tg_v (Value v)) h) ids, k, (rn, TaggedTerm $ Tagged tg_v (Value v))))
+update :: Deeds -> Heap -> Stack -> Tag -> Out Var -> In TaggedValue -> Maybe (Deeds, State)
+update deeds (Heap h ids) k tg_v x' (rn, v)
+  | linear    = return (deeds, (Heap h ids, k, (rn, TaggedTerm $ Tagged tg_v (Value v))))
+  | otherwise = claimDeed deeds tg_v >>= \deeds -> return (deeds, (Heap (M.insert x' (rn, TaggedTerm $ Tagged tg_v (Value v)) h) ids, k, (rn, TaggedTerm $ Tagged tg_v (Value v))))
+  where
+    -- If we can GC the update frame (because it can't be referred to in the continuation) then we don't have to actually update the heap or even claim a new deed
+    -- TODO: make finding FVs much cheaper (i.e. memoise it in the syntax functor construction)
+    -- TODO: could GC cycles as well (i.e. don't consider stuff from the Heap that was only referred to by the thing being removed as "GC roots")
+    linear = x' `S.notMember` (pureHeapFreeVars h (stackFreeVars k (inFreeVars taggedValueFreeVars (rn, v))))
 
 allocate :: Heap -> Stack -> In ([(Var, TaggedTerm)], TaggedTerm) -> State
 allocate (Heap h ids) k (rn, (xes, e)) = (Heap (h `M.union` M.fromList xes') ids', k, (rn', e))
