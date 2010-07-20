@@ -1,0 +1,15 @@
+#!/bin/bash
+
+TESTS_PRIMOPS="examples/peter/Append.core examples/peter/Factorial.core examples/peter/Raytracer.core examples/peter/SumTree.core examples/peter/TreeFlip.core examples/neil/SumSquare.core examples/imaginary/Bernouilli.core examples/imaginary/DigitsOfE2.core examples/imaginary/Exp3_8.core examples/imaginary/Primes.core examples/imaginary/RFib.core examples/imaginary/X2N1.core"
+#  examples/imaginary/Wheel-Sieve1.core examples/imaginary/Wheel-Sieve2.core
+TESTS_NOPRIMOPS="$TESTS_PRIMOPS examples/imaginary/Tak.core"
+
+# Problems:
+#   DigitsOfE1: TOO SLOW to supercompile
+#   Queens: TOO SLOW to supercompile.
+#   Wheel-Sieve1, Wheel-Sieve2: from fcf9b5381e8634f097bfd5d04b5890c22ef71383 and later, TOO SLOW to supercompile.
+
+echo "=== PRIMOPS ==="
+(./test $TESTS_PRIMOPS    --primops    $* | tail +3 | tee results-primops.tex)   || exit $?
+echo "=== NO PRIMOPS ==="
+(./test $TESTS_NOPRIMOPS  --no-primops $* | tail +3 | tee results-noprimops.tex) || exit $?
