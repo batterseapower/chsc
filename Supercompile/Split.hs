@@ -277,7 +277,7 @@ split' old_deeds old_h@((cheapifyHeap . (old_deeds,)) -> (deeds, Heap h (splitId
   = go S.empty (toEnteredManyEnv entered_hole)
   where
     go must_resid_k_xs entered_many
-      | not (S.null gen_fvs) && traceRender ("split.go", gen_fvs)   False = undefined
+      | not (S.null gen_fvs) && traceRender ("split.go", gen_fvs, must_resid_k_xs, entered_many) False = undefined
       -- | traceRender ("split.release", M.keysSet h_strictly_inlined) False = undefined
       -- | traceRender ("split.go", entered, entered_k, xs_nonvalue_inlinings) False = undefined
       | entered_many == entered_many'
@@ -348,6 +348,7 @@ split' old_deeds old_h@((cheapifyHeap . (old_deeds,)) -> (deeds, Heap h (splitId
         -- FIXME: bit of a hack. At least needs some renaming. Basically just want to ensure that generalised variables are residualised,
         -- and that the resulting modifications to the Entered information takes effect.
         must_resid_k_xs' = gen_fvs `S.union` before_must_resid_k_xs'
+                            `S.union` must_resid_k_xs -- NB: empirically, I have observed non-termination unless I make this set strictly growing (e.g. in TreeFlip-NoLiterals)
         
         entered_many' = toEnteredManyEnv entered'
 
