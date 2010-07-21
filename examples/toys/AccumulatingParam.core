@@ -8,6 +8,17 @@
 --      foldDU n a = if a > b
 --                   then n
 --                   else foldlDU (c n a) (a + 1)
+--
+-- In the course of supercompilation, we get here:
+--
+--    D[root c n a b]
+--  ==>
+--    if a > b
+--    then n
+--    else D[foldl c (c n a) (enumFromTo (a + 1) b)]
+--
+-- If we generalise away the (c n a) and (a + 1) then we'll get a nice tieback to what we started
+-- with that and hence build something equivalent to the input code.
 root c n a b = foldl c n (enumFromTo a b)
 
 tests = [
