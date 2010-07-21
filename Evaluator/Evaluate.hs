@@ -52,7 +52,7 @@ primop :: Heap -> Stack -> Tag -> PrimOp -> [In TaggedValue] -> In TaggedValue -
 primop h k tg pop [(_, Literal (Int l1))] (_, Literal (Int l2)) [] = (h, k, (emptyRenaming, TaggedTerm $ Tagged tg (Value (f pop l1 l2))))
   where f pop = case pop of Add -> retInt (+); Subtract -> retInt (-);
                             Multiply -> retInt (*); Divide -> retInt div; Modulo -> retInt mod;
-                            Equal -> retBool (==); LessThanEqual -> retBool (<=)
+                            Equal -> retBool (==); LessThan -> retBool (<); LessThanEqual -> retBool (<=)
         retInt  pop l1 l2 = Literal (Int (pop l1 l2))
         retBool pop l1 l2 = if pop l1 l2 then Data trueDataCon [] else Data falseDataCon []
 primop h k tg pop in_vs (rn, v) (in_e:in_es) = (h, Tagged tg (PrimApply pop (in_vs ++ [(rn, v)]) in_es) : k, in_e)

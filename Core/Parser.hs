@@ -229,6 +229,7 @@ qNameCore (LHE.UnQual n) = fmap var $ case nameString n of
     "div" -> primWrapper Divide
     "mod" -> primWrapper Modulo
     "=="  -> primWrapper Equal
+    "<"   -> primWrapper LessThan
     "<="  -> primWrapper LessThanEqual
     s -> return (name s)
 qNameCore (LHE.Special sc) = fmap var $ dataConWrapper $ specialConDataCon sc

@@ -9,7 +9,7 @@ type Var = Name
 
 type DataCon = String
 
-data PrimOp = Add | Subtract | Multiply | Divide | Modulo | Equal | LessThanEqual
+data PrimOp = Add | Subtract | Multiply | Divide | Modulo | Equal | LessThan | LessThanEqual
             deriving (Eq, Ord, Show)
 
 data AltCon = DataAlt DataCon [Var] | LiteralAlt Literal | DefaultAlt (Maybe Var)
@@ -71,6 +71,7 @@ instance Pretty PrimOp where
     pPrint Divide        = text "div"
     pPrint Modulo        = text "mod"
     pPrint Equal         = text "(==)"
+    pPrint LessThan      = text "(<)"
     pPrint LessThanEqual = text "(<=)"
 
 instance Pretty AltCon where
