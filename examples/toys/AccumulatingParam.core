@@ -1,0 +1,15 @@
+#include "../Prelude.core"
+
+-- Example from Section 5 of "Shortcut Fusion for Accumulating Parameters & Zip-like Functions"
+-- Optimal output should be isomorphic to:
+--
+--  root c n a b = foldDU n a
+--    where
+--      foldDU n a = if a > b
+--                   then n
+--                   else foldlDU (c n a) (a + 1)
+root c n a b = foldl c n (enumFromTo a b)
+
+tests = [
+    (root (+) 0 1 10, 55)
+  ]
