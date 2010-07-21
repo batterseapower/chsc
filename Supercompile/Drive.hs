@@ -5,6 +5,7 @@ module Supercompile.Drive (supercompile) where
 import Supercompile.Match
 import Supercompile.Residualise
 import Supercompile.Split
+import Supercompile.PostSimplify
 
 import Core.FreeVars
 import Core.Renaming
@@ -27,7 +28,7 @@ import qualified Data.Set as S
 
 
 supercompile :: Term -> Term
-supercompile e = traceRender ("all input FVs", fvs) $ runScpM fvs $ fmap snd $ sc [] state
+supercompile e = traceRender ("all input FVs", fvs) $ inline $ runScpM fvs $ fmap snd $ sc [] state
   where fvs = termFreeVars e
         state = (Heap M.empty reduceIdSupply, [], (mkIdentityRenaming $ S.toList fvs, tagTerm tagIdSupply e))
 
