@@ -1,4 +1,4 @@
-{-# LANGUAGE ViewPatterns, TupleSections #-}
+{-# LANGUAGE ViewPatterns, TupleSections, Rank2Types #-}
 module Core.Renaming where
 
 import Core.Syntax
@@ -29,57 +29,39 @@ renameBounds f ids rn (unzip -> (xs, es)) = (ids', rn', zipWith f xs xs' `zip` m
   where (ids', rn', xs') = renameBinders ids rn xs
 
 
-renameValue :: IdSupply -> Renaming -> Value -> Value
-renameValue = renameValue' renameTerm
+(renameTerm,       renameAlts,       renameValue)       = mkRename (\f ids rn (I e) -> I (f ids rn e))
+(renameTaggedTerm, renameTaggedAlts, renameTaggedValue) = mkRename (\f ids rn (Tagged tg e) -> Tagged tg (f ids rn e))
 
-renameTaggedValue :: IdSupply -> Renaming -> TaggedValue -> TaggedValue
-renameTaggedValue = renameValue' renameTaggedTerm
-
-renameValue' :: (IdSupply -> Renaming -> ann (TermF ann) -> ann (TermF ann))
-             -> IdSupply -> Renaming -> ValueF ann -> ValueF ann
-renameValue' term ids rn v = case v of
-    Lambda x e -> Lambda x' (term ids' rn' e)
-      where (ids', rn', x') = renameBinder ids rn x
-    Data dc xs -> Data dc (map (rename rn) xs)
-    Literal l -> Literal l
-
-renameTerm :: IdSupply -> Renaming -> Term -> Term
-renameTerm ids rn (I e) = I $ renameTerm' renameTerm ids rn e
-
-renameTaggedTerm :: IdSupply -> Renaming -> TaggedTerm -> TaggedTerm
-renameTaggedTerm ids rn e = renameTagged (renameTerm' renameTaggedTerm) ids rn e
-
-renameTerm' :: (IdSupply -> Renaming -> ann (TermF ann) -> ann (TermF ann))
-            -> IdSupply -> Renaming -> TermF ann -> TermF ann
-renameTerm' term ids rn e = case e of
-    Var x -> Var (safeRename "renameTerm" rn x)
-    Value v -> Value (renameValue' term ids rn v)
-    App e1 x2 -> App (term ids rn e1) (rename rn x2)
-    PrimOp pop es -> PrimOp pop (map (term ids rn) es)
-    Case e alts -> Case (term ids rn e) (renameAlts' term ids rn alts)
-    LetRec xes e -> LetRec (map (second (renameIn term ids')) xes') (term ids' rn' e)
-      where (ids', rn', xes') = renameBounds (\_ x' -> x') ids rn xes
-
-renameAlt :: IdSupply -> Renaming -> Alt -> Alt
-renameAlt = renameAlt' renameTerm
-
-renameAlt' :: (IdSupply -> Renaming -> ann (TermF ann) -> ann (TermF ann))
-           -> IdSupply -> Renaming -> AltF ann -> AltF ann
-renameAlt' term ids rn (alt_con, alt_e) = (alt_con', term ids' rn' alt_e)
-  where (ids', rn', alt_con') = renameAltCon ids rn alt_con
+{-# INLINE mkRename #-}
+mkRename :: (forall f. (IdSupply -> Renaming -> f ann -> f ann) -> IdSupply -> Renaming -> ann (f ann) -> ann (f ann))
+         -> (IdSupply -> Renaming -> ann (TermF ann) -> ann (TermF ann),
+             IdSupply -> Renaming -> [AltF ann]      -> [AltF ann],
+             IdSupply -> Renaming -> ValueF ann      -> ValueF ann)
+mkRename rec = (term, alternatives, value)
+  where
+    term = rec term'
+    term' ids rn e = case e of
+      Var x -> Var (safeRename "renameTerm" rn x)
+      Value v -> Value (value ids rn v)
+      App e1 x2 -> App (term ids rn e1) (rename rn x2)
+      PrimOp pop es -> PrimOp pop (map (term ids rn) es)
+      Case e alts -> Case (term ids rn e) (alternatives ids rn alts)
+      LetRec xes e -> LetRec (map (second (renameIn term ids')) xes') (term ids' rn' e)
+        where (ids', rn', xes') = renameBounds (\_ x' -> x') ids rn xes
+    
+    value ids rn v = case v of
+      Lambda x e -> Lambda x' (term ids' rn' e)
+        where (ids', rn', x') = renameBinder ids rn x
+      Data dc xs -> Data dc (map (rename rn) xs)
+      Literal l -> Literal l
+    
+    alternatives ids rn = map (alternative ids rn)
+    
+    alternative ids rn (alt_con, alt_e) = (alt_con', term ids' rn' alt_e)
+        where (ids', rn', alt_con') = renameAltCon ids rn alt_con
 
 renameAltCon :: IdSupply -> Renaming -> AltCon -> (IdSupply, Renaming, AltCon)
 renameAltCon ids rn_alt alt_con = case alt_con of
     DataAlt alt_dc alt_xs -> third3 (DataAlt alt_dc) $ renameBinders ids rn_alt alt_xs
     LiteralAlt _          -> (ids, rn_alt, alt_con)
     DefaultAlt alt_mb_x   -> maybe (ids, rn_alt, alt_con) (third3 (DefaultAlt . Just) . renameBinder ids rn_alt) alt_mb_x
-
-renameAlts :: IdSupply -> Renaming -> [Alt] -> [Alt]
-renameAlts = renameAlts' renameTerm
-
-renameTaggedAlts :: IdSupply -> Renaming -> [TaggedAlt] -> [TaggedAlt]
-renameTaggedAlts = renameAlts' renameTaggedTerm
-
-renameAlts' :: (IdSupply -> Renaming -> ann (TermF ann) -> ann (TermF ann))
-            -> IdSupply -> Renaming -> [AltF ann] -> [AltF ann]
-renameAlts' term ids rn = map (renameAlt' term ids rn)

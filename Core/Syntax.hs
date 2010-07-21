@@ -114,7 +114,7 @@ pPrintPrecLetRec level prec xes e_body
 
 instance Pretty1 ann => Pretty (ValueF ann) where
     pPrintPrec level prec v = case v of
-        -- Unfortunately, this nicer pretty-printing doesn't work for general (TermF term):
+        -- Unfortunately, this nicer pretty-printing doesn't work for general (TermF ann):
         --Lambda x e    -> pPrintPrecLam level prec (x:xs) e'
         --  where (xs, e') = collectLambdas e
         Lambda x e    -> pPrintPrecLam level prec [x] e
@@ -173,14 +173,14 @@ detagAlts :: [TaggedAlt] -> [Alt]
 detagAlts = map (second detagTerm)
 
 
-isValue :: TermF term -> Bool
+isValue :: TermF ann -> Bool
 isValue (Value _) = True
 isValue _         = False
 
 termIsValue :: Term -> Bool
 termIsValue = isValue . unI
 
-isCheap :: TermF term -> Bool
+isCheap :: TermF ann -> Bool
 isCheap (Var _)   = True
 isCheap (Value _) = True
 isCheap _         = False

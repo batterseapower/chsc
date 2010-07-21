@@ -1,3 +1,4 @@
+{-# LANGUAGE Rank2Types #-}
 module Core.FreeVars where
 
 import Core.Syntax
@@ -13,20 +14,33 @@ type BoundVars = S.Set Var
 deleteList :: Ord a => [a] -> S.Set a -> S.Set a
 deleteList = flip $ foldr S.delete
 
-termFreeVars :: Term -> FreeVars
-termFreeVars (I e) = termFreeVars' termFreeVars e
 
-taggedTermFreeVars :: TaggedTerm -> FreeVars
-taggedTermFreeVars (Tagged _ e) = termFreeVars' taggedTermFreeVars e
+(termFreeVars,       altsFreeVars,       valueFreeVars)       = mkFreeVars (\f (I e) -> f e)
+(taggedTermFreeVars, taggedAltsFreeVars, taggedValueFreeVars) = mkFreeVars (\f (Tagged _ e) -> f e)
 
-termFreeVars' :: (ann (TermF ann) -> FreeVars) -> TermF ann -> FreeVars
-termFreeVars' _    (Var x)        = S.singleton x
-termFreeVars' term (Value v)      = valueFreeVars' term v
-termFreeVars' term (App e x)      = S.insert x $ term e
-termFreeVars' term (PrimOp _ es)  = S.unions $ map term es
-termFreeVars' term (Case e alts)  = term e `S.union` altsFreeVars' term alts
-termFreeVars' term (LetRec xes e) = deleteList xs $ S.unions (map term es) `S.union` term e
-  where (xs, es) = unzip xes
+{-# INLINE mkFreeVars #-}
+mkFreeVars :: (forall f. (f ann -> FreeVars) -> ann (f ann) -> FreeVars)
+           -> (ann (TermF ann) -> FreeVars,
+               [AltF ann]      -> FreeVars,
+               ValueF ann      -> FreeVars)
+mkFreeVars rec = (term, alternatives, value)
+  where
+    term = rec term'
+    term' (Var x)        = S.singleton x
+    term' (Value v)      = value v
+    term' (App e x)      = S.insert x $ term e
+    term' (PrimOp _ es)  = S.unions $ map term es
+    term' (Case e alts)  = term e `S.union` alternatives alts
+    term' (LetRec xes e) = deleteList xs $ S.unions (map term es) `S.union` term e
+      where (xs, es) = unzip xes
+    
+    value (Lambda x e) = S.delete x $ term e
+    value (Data _ xs)  = S.fromList xs
+    value (Literal _)  = S.empty
+    
+    alternatives = S.unions . map alternative
+    
+    alternative (altcon, e) = altConFreeVars altcon $ term e
 
 altConOpenFreeVars :: AltCon -> (BoundVars, FreeVars) -> (BoundVars, FreeVars)
 altConOpenFreeVars (DataAlt _ xs)    (bvs, fvs) = (bvs `S.union` S.fromList xs, fvs)
@@ -37,29 +51,3 @@ altConFreeVars :: AltCon -> FreeVars -> FreeVars
 altConFreeVars (DataAlt _ xs)    = deleteList xs
 altConFreeVars (LiteralAlt _)    = id
 altConFreeVars (DefaultAlt mb_x) = maybe id S.delete mb_x
-
-altFreeVars :: Alt -> FreeVars
-altFreeVars = altFreeVars' termFreeVars
-
-altFreeVars' :: (ann (TermF ann) -> FreeVars) -> AltF ann -> FreeVars
-altFreeVars' term (altcon, e) = altConFreeVars altcon $ term e
-
-altsFreeVars :: [Alt] -> FreeVars
-altsFreeVars = altsFreeVars' termFreeVars
-
-taggedAltsFreeVars :: [TaggedAlt] -> FreeVars
-taggedAltsFreeVars = altsFreeVars' taggedTermFreeVars
-
-altsFreeVars' :: (ann (TermF ann) -> FreeVars) -> [AltF ann] -> FreeVars
-altsFreeVars' term = S.unions . map (altFreeVars' term)
-
-valueFreeVars :: Value -> FreeVars
-valueFreeVars = valueFreeVars' termFreeVars
-
-taggedValueFreeVars :: TaggedValue -> FreeVars
-taggedValueFreeVars = valueFreeVars' taggedTermFreeVars
-
-valueFreeVars' :: (ann (TermF ann) -> FreeVars) -> ValueF ann -> FreeVars
-valueFreeVars' term (Lambda x e) = S.delete x $ term e
-valueFreeVars' _    (Data _ xs)  = S.fromList xs
-valueFreeVars' _    (Literal _)  = S.empty

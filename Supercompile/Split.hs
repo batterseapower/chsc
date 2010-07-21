@@ -515,7 +515,7 @@ splitStack deeds old_ids scruts (Tagged tg kf:k) (entered_hole, (Bracketed rebui
             transfer_pop fvs_hole' (splitBy dstates_vs -> (fvss_vs', fvs_es')) = fvs_hole' `S.union` S.unions (zipWith ($) (map transfer bracketed_vss) $ splitManyBy dstates_vss fvss_vs') `S.union` S.unions fvs_es'
     Update x' -> second3 (M.insert x' (Bracketed rebuild_hole extra_fvs_hole transfer_hole dstates_hole)) $ splitStack deeds old_ids (x' : scruts) k (entered_hole `M.union` mkEnteredEnv (Once Nothing) (S.singleton x'), Bracketed (\[] -> var x') (S.singleton x') (\[] -> S.empty) [])
   where
-    altConToValue :: AltCon -> Maybe (ValueF term)
+    altConToValue :: AltCon -> Maybe (ValueF ann)
     altConToValue (DataAlt dc xs) = Just $ Data dc xs
     altConToValue (LiteralAlt l)  = Just $ Literal l
     altConToValue (DefaultAlt _)  = Nothing
