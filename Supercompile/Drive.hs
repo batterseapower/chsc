@@ -38,8 +38,8 @@ supercompile e = traceRender ("all input FVs", fvs) $
         
         (t, rb) = extractDeeds tagged_e
         deeds = mkDeeds (bLOAT_FACTOR - 1) (t, pPrint . rb)
-        extractDeeds (TaggedTerm (Tagged tg e)) = -- traceRender ("extractDeeds", rb (fmap (fmap (const 1)) ts)) $
-                                                  (Node tg ts, \(Node unc ts') -> CountedTerm unc (rb ts'))
+        extractDeeds (Tagged tg e) = -- traceRender ("extractDeeds", rb (fmap (fmap (const 1)) ts)) $
+                                     (Node tg ts, \(Node unc ts') -> Counted unc (rb ts'))
           where (ts, rb) = extractDeeds' e
         extractDeeds' e = case e of
           Var x              -> ([], \[] -> Var x)
@@ -72,13 +72,13 @@ stateTagBag :: State -> TagBag
 stateTagBag (Heap h _, k, (_, e)) = pureHeapTagBag h `plusTagBag` stackTagBag k `plusTagBag` taggedTermTagBag e
 
 pureHeapTagBag :: PureHeap -> TagBag
-pureHeapTagBag = plusTagBags . map (taggedTagBag 5 . unTaggedTerm . snd) . M.elems
+pureHeapTagBag = plusTagBags . map (taggedTagBag 5 . snd) . M.elems
 
 stackTagBag :: Stack -> TagBag
 stackTagBag = plusTagBags . map (taggedTagBag 3)
 
 taggedTermTagBag :: TaggedTerm -> TagBag
-taggedTermTagBag = taggedTagBag 2 . unTaggedTerm
+taggedTermTagBag = taggedTagBag 2
 
 taggedTagBag :: Int -> Tagged a -> TagBag
 taggedTagBag cls = tagTagBag cls . tag
@@ -96,7 +96,7 @@ reduce = go emptyHistory
   where
     go hist (deeds, state)
       | traceRender ("reduce.go", deeds, residualiseState state) False = undefined
-      | not eVALUATE_PRIMOPS, (_, _, (_, TaggedTerm (Tagged _ (PrimOp _ _)))) <- state = (deeds, state)
+      | not eVALUATE_PRIMOPS, (_, _, (_, Tagged _ (PrimOp _ _))) <- state = (deeds, state)
       | otherwise = case step (deeds, state) of
         Nothing -> (deeds, state)
         Just (deeds', state')
@@ -106,7 +106,7 @@ reduce = go emptyHistory
               Continue hist' -> go hist' (deeds', state')
     
     intermediate :: State -> Bool
-    intermediate (_, _, (_, TaggedTerm (Tagged _ (Var _)))) = False
+    intermediate (_, _, (_, Tagged _ (Var _))) = False
     intermediate _ = True
 
 

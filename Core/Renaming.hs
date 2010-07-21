@@ -35,8 +35,8 @@ renameValue = renameValue' renameTerm
 renameTaggedValue :: IdSupply -> Renaming -> TaggedValue -> TaggedValue
 renameTaggedValue = renameValue' renameTaggedTerm
 
-renameValue' :: (IdSupply -> Renaming -> term -> term)
-             -> IdSupply -> Renaming -> ValueF term -> ValueF term
+renameValue' :: (IdSupply -> Renaming -> ann (TermF ann) -> ann (TermF ann))
+             -> IdSupply -> Renaming -> ValueF ann -> ValueF ann
 renameValue' term ids rn v = case v of
     Lambda x e -> Lambda x' (term ids' rn' e)
       where (ids', rn', x') = renameBinder ids rn x
@@ -44,13 +44,13 @@ renameValue' term ids rn v = case v of
     Literal l -> Literal l
 
 renameTerm :: IdSupply -> Renaming -> Term -> Term
-renameTerm ids rn (Term e) = Term $ renameTerm' renameTerm ids rn e
+renameTerm ids rn (I e) = I $ renameTerm' renameTerm ids rn e
 
 renameTaggedTerm :: IdSupply -> Renaming -> TaggedTerm -> TaggedTerm
-renameTaggedTerm ids rn (TaggedTerm e) = TaggedTerm $ renameTagged (renameTerm' renameTaggedTerm) ids rn e
+renameTaggedTerm ids rn e = renameTagged (renameTerm' renameTaggedTerm) ids rn e
 
-renameTerm' :: (IdSupply -> Renaming -> term -> term)
-            -> IdSupply -> Renaming -> TermF term -> TermF term
+renameTerm' :: (IdSupply -> Renaming -> ann (TermF ann) -> ann (TermF ann))
+            -> IdSupply -> Renaming -> TermF ann -> TermF ann
 renameTerm' term ids rn e = case e of
     Var x -> Var (safeRename "renameTerm" rn x)
     Value v -> Value (renameValue' term ids rn v)
@@ -63,8 +63,8 @@ renameTerm' term ids rn e = case e of
 renameAlt :: IdSupply -> Renaming -> Alt -> Alt
 renameAlt = renameAlt' renameTerm
 
-renameAlt' :: (IdSupply -> Renaming -> term -> term)
-           -> IdSupply -> Renaming -> AltF term -> AltF term
+renameAlt' :: (IdSupply -> Renaming -> ann (TermF ann) -> ann (TermF ann))
+           -> IdSupply -> Renaming -> AltF ann -> AltF ann
 renameAlt' term ids rn (alt_con, alt_e) = (alt_con', term ids' rn' alt_e)
   where (ids', rn', alt_con') = renameAltCon ids rn alt_con
 
@@ -80,6 +80,6 @@ renameAlts = renameAlts' renameTerm
 renameTaggedAlts :: IdSupply -> Renaming -> [TaggedAlt] -> [TaggedAlt]
 renameTaggedAlts = renameAlts' renameTaggedTerm
 
-renameAlts' :: (IdSupply -> Renaming -> term -> term)
-            -> IdSupply -> Renaming -> [AltF term] -> [AltF term]
+renameAlts' :: (IdSupply -> Renaming -> ann (TermF ann) -> ann (TermF ann))
+            -> IdSupply -> Renaming -> [AltF ann] -> [AltF ann]
 renameAlts' term ids rn = map (renameAlt' term ids rn)

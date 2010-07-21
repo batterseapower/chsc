@@ -14,12 +14,12 @@ deleteList :: Ord a => [a] -> S.Set a -> S.Set a
 deleteList = flip $ foldr S.delete
 
 termFreeVars :: Term -> FreeVars
-termFreeVars (Term e) = termFreeVars' termFreeVars e
+termFreeVars (I e) = termFreeVars' termFreeVars e
 
 taggedTermFreeVars :: TaggedTerm -> FreeVars
-taggedTermFreeVars (TaggedTerm (Tagged _ e)) = termFreeVars' taggedTermFreeVars e
+taggedTermFreeVars (Tagged _ e) = termFreeVars' taggedTermFreeVars e
 
-termFreeVars' :: (term -> FreeVars) -> TermF term -> FreeVars
+termFreeVars' :: (ann (TermF ann) -> FreeVars) -> TermF ann -> FreeVars
 termFreeVars' _    (Var x)        = S.singleton x
 termFreeVars' term (Value v)      = valueFreeVars' term v
 termFreeVars' term (App e x)      = S.insert x $ term e
@@ -41,7 +41,7 @@ altConFreeVars (DefaultAlt mb_x) = maybe id S.delete mb_x
 altFreeVars :: Alt -> FreeVars
 altFreeVars = altFreeVars' termFreeVars
 
-altFreeVars' :: (term -> FreeVars) -> AltF term -> FreeVars
+altFreeVars' :: (ann (TermF ann) -> FreeVars) -> AltF ann -> FreeVars
 altFreeVars' term (altcon, e) = altConFreeVars altcon $ term e
 
 altsFreeVars :: [Alt] -> FreeVars
@@ -50,7 +50,7 @@ altsFreeVars = altsFreeVars' termFreeVars
 taggedAltsFreeVars :: [TaggedAlt] -> FreeVars
 taggedAltsFreeVars = altsFreeVars' taggedTermFreeVars
 
-altsFreeVars' :: (term -> FreeVars) -> [AltF term] -> FreeVars
+altsFreeVars' :: (ann (TermF ann) -> FreeVars) -> [AltF ann] -> FreeVars
 altsFreeVars' term = S.unions . map (altFreeVars' term)
 
 valueFreeVars :: Value -> FreeVars
@@ -59,7 +59,7 @@ valueFreeVars = valueFreeVars' termFreeVars
 taggedValueFreeVars :: TaggedValue -> FreeVars
 taggedValueFreeVars = valueFreeVars' taggedTermFreeVars
 
-valueFreeVars' :: (term -> FreeVars) -> ValueF term -> FreeVars
+valueFreeVars' :: (ann (TermF ann) -> FreeVars) -> ValueF ann -> FreeVars
 valueFreeVars' term (Lambda x e) = S.delete x $ term e
 valueFreeVars' _    (Data _ xs)  = S.fromList xs
 valueFreeVars' _    (Literal _)  = S.empty

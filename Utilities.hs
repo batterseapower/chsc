@@ -1,4 +1,5 @@
-{-# LANGUAGE TupleSections, PatternGuards, ExistentialQuantification, DeriveFunctor #-}
+{-# LANGUAGE TupleSections, PatternGuards, ExistentialQuantification, DeriveFunctor,
+             FlexibleInstances, IncoherentInstances, OverlappingInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Utilities (
     module IdSupply,
@@ -42,8 +43,55 @@ import System.IO
 import System.IO.Unsafe (unsafePerformIO)
 
 
+class Show1 f where
+    showsPrec1 :: Show a => Int -> f a -> ShowS
+
+instance (Show1 f, Show a) => Show (f a) where
+    showsPrec = showsPrec1
+
+
+class Eq1 f where
+    eq1 :: Eq a => f a -> f a -> Bool
+
+instance (Eq1 f, Eq a) => Eq (f a) where
+    (==) = eq1
+
+
+class NFData1 f where
+    rnf1 :: NFData a => f a -> ()
+
+instance (NFData1 f, NFData a) => NFData (f a) where
+    rnf = rnf1
+
+
+class Pretty1 f where
+    pPrintPrec1 :: Pretty a => PrettyLevel -> Rational -> f a -> Doc
+
+instance (Pretty1 f, Pretty a) => Pretty (f a) where
+    pPrintPrec = pPrintPrec1
+
+
 instance NFData Id where
     rnf i = rnf (hashedId i)
+
+
+data Counted a = Counted { count :: Int, countee :: a }
+               deriving (Eq)
+
+instance Show1 Counted where
+    showsPrec1 prec (Counted c x) = showParen (prec >= appPrec) (showString "Counted" . showsPrec appPrec c . showsPrec appPrec x)
+
+instance Eq1 Counted where
+    eq1 (Counted c1 x1) (Counted c2 x2) = c1 == c2 && x1 == x2
+
+instance NFData1 Counted where
+    rnf1 (Counted a b) = rnf a `seq` rnf b
+
+instance Pretty1 Counted where
+    pPrintPrec1 level _prec (Counted count x) = text ("[" ++ show count ++ "]") <> pPrintPrec level appPrec x
+
+instance Functor Counted where
+    fmap f (Counted c x) = Counted c (f x)
 
 
 type Tag = Int
@@ -54,14 +102,20 @@ injectTag cls tg = cls * tg
 data Tagged a = Tagged { tag :: Tag, tagee :: a }
               deriving (Eq, Show)
 
-instance NFData a => NFData (Tagged a) where
-    rnf (Tagged a b) = rnf a `seq` rnf b
+instance Show1 Tagged where
+    showsPrec1 prec (Tagged tg x) = showParen (prec >= appPrec) (showString "Tagged" . showsPrec appPrec tg . showsPrec appPrec x)
+
+instance Eq1 Tagged where
+    eq1 (Tagged tg1 x1) (Tagged tg2 x2) = tg1 == tg2 && x1 == x2
+
+instance NFData1 Tagged where
+    rnf1 (Tagged a b) = rnf a `seq` rnf b
+
+instance Pretty1 Tagged where
+    pPrintPrec1 level prec (Tagged tg x) = braces (pPrint tg) <+> pPrintPrec level prec x
 
 instance Functor Tagged where
     fmap f (Tagged tg x) = Tagged tg (f x)
-
-instance Pretty a => Pretty (Tagged a) where
-    pPrintPrec level prec (Tagged tg x) = braces (pPrint tg) <+> pPrintPrec level prec x
 
 
 instance Show IdSupply where
@@ -124,7 +178,7 @@ data Train a b = Wagon a (Train a b)
                | Caboose b
 
 
-appPrec, opPrec, noPrec :: Rational
+appPrec, opPrec, noPrec :: Num a => a
 appPrec = 2    -- Argument of a function application
 opPrec  = 1    -- Argument of an infix operator
 noPrec  = 0    -- Others
@@ -333,6 +387,12 @@ mapAccumM f ta = Traversable.mapAccumL (\m a -> case f a of (m', b) -> (m `mappe
 
 
 newtype Identity a = I { unI :: a } deriving (Functor)
+
+instance NFData1 Identity where
+    rnf1 (I x) = rnf x
+
+instance Pretty1 Identity where
+    pPrintPrec1 level prec (I x) = pPrintPrec level prec x
 
 instance Monad Identity where
     return = I

@@ -19,7 +19,7 @@ import qualified Data.Set as S
 
 
 step :: (Deeds, State) -> Maybe (Deeds, State)
-step (deeds, (h, k, (rn, TaggedTerm (Tagged tg e)))) = case e of
+step (deeds, (h, k, (rn, Tagged tg e))) = case e of
     Var x             -> force  deeds h k tg (rename rn x)
     Value v           -> unwind deeds h k tg (rn, v)
     App e1 x2         -> Just (deeds, (h, Tagged tg (Apply (rename rn x2))            : k, (rn, e1)))
@@ -52,15 +52,15 @@ scrutinise deeds h            k tg_v (rn_v, Data dc xs) (rn_alts, alts)
 scrutinise deeds (Heap h ids) k tg_v (rn_v, v)          (rn_alts, alts)
   | ((alt_x, alt_e), rest):_ <- [((alt_x, alt_e), rest) | ((DefaultAlt (Just alt_x), alt_e), rest) <- bagContexts alts]
   , (ids', rn_alts', alt_x') <- renameBinder ids rn_alts alt_x
-  = (releaseAltDeeds rest deeds, (Heap (M.insert alt_x' (rn_v, TaggedTerm $ Tagged tg_v $ Value v) h) ids', k, (rn_alts', alt_e)))
+  = (releaseAltDeeds rest deeds, (Heap (M.insert alt_x' (rn_v, Tagged tg_v $ Value v) h) ids', k, (rn_alts', alt_e)))
   | otherwise
   = panic "scrutinise" (pPrint v)
 
 releaseAltDeeds :: [(a, TaggedTerm)] -> Deeds -> Deeds
-releaseAltDeeds alts deeds = foldl' (\deeds (_, TaggedTerm in_e) -> releaseDeedDeep deeds (tag in_e)) deeds alts
+releaseAltDeeds alts deeds = foldl' (\deeds (_, in_e) -> releaseDeedDeep deeds (tag in_e)) deeds alts
 
 primop :: Deeds -> Heap -> Stack -> Tag -> Tag -> PrimOp -> [Tagged (In TaggedValue)] -> In TaggedValue -> [In TaggedTerm] -> (Deeds, State)
-primop deeds h k tg tg_v2 pop [Tagged tg_v1 (_, Literal (Int l1))] (_, Literal (Int l2)) [] = (releaseDeedDeep (releaseDeedDeep deeds tg) tg_v1, (h, k, (emptyRenaming, TaggedTerm $ Tagged tg_v2 (Value (f pop l1 l2)))))
+primop deeds h k tg tg_v2 pop [Tagged tg_v1 (_, Literal (Int l1))] (_, Literal (Int l2)) [] = (releaseDeedDeep (releaseDeedDeep deeds tg) tg_v1, (h, k, (emptyRenaming, Tagged tg_v2 (Value (f pop l1 l2)))))
   where f pop = case pop of Add -> retInt (+); Subtract -> retInt (-);
                             Multiply -> retInt (*); Divide -> retInt div; Modulo -> retInt mod;
                             Equal -> retBool (==); LessThan -> retBool (<); LessThanEqual -> retBool (<=)
@@ -70,10 +70,10 @@ primop deeds h k tg tg_v  pop in_vs (rn, v) (in_e:in_es) = (deeds, (h, Tagged tg
 
 update :: Deeds -> Heap -> Stack -> Tag -> Out Var -> In TaggedValue -> Maybe (Deeds, State)
 update deeds (Heap h ids) k tg_v x' (rn, v)
-  | linear    = Just (deeds, (Heap h ids, k, (rn, TaggedTerm $ Tagged tg_v (Value v))))
+  | linear    = Just (deeds, (Heap h ids, k, (rn, Tagged tg_v (Value v))))
   | otherwise = case claimDeed deeds tg_v of
                   Nothing    -> traceRender ("update: deed claim FAILURE", x') Nothing
-                  Just deeds -> Just (deeds, (Heap (M.insert x' (rn, TaggedTerm $ Tagged tg_v (Value v)) h) ids, k, (rn, TaggedTerm $ Tagged tg_v (Value v))))
+                  Just deeds -> Just (deeds, (Heap (M.insert x' (rn, Tagged tg_v (Value v)) h) ids, k, (rn, Tagged tg_v (Value v))))
   where
     -- If we can GC the update frame (because it can't be referred to in the continuation) then we don't have to actually update the heap or even claim a new deed
     -- TODO: make finding FVs much cheaper (i.e. memoise it in the syntax functor construction)

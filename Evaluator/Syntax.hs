@@ -32,9 +32,9 @@ instance Pretty StackFrame where
 
 
 releaseStateDeed :: Deeds -> State -> Deeds
-releaseStateDeed deeds (Heap h _, k, (_, TaggedTerm e))
+releaseStateDeed deeds (Heap h _, k, (_, e))
   = foldl' (\deeds kf -> releaseDeedDeep deeds (tag kf))
-           (foldl' (\deeds (_, TaggedTerm e) -> releaseDeedDeep deeds (tag e))
+           (foldl' (\deeds (_, e) -> releaseDeedDeep deeds (tag e))
                    (releaseDeedDeep deeds (tag e))
                    (M.elems h))
            k

@@ -23,9 +23,9 @@ match (Heap h_l _, k_l, in_e_l) (Heap h_r _, k_r, in_e_r) = -- (\res -> traceRen
     matchHeapExact h_l h_r (bound_eqs, free_eqs1 ++ free_eqs2)
 
 matchInTerm :: IdSupply -> In TaggedTerm -> In TaggedTerm -> Maybe [(Var, Var)]
-matchInTerm ids (rn_l, TaggedTerm (Tagged _ e_l)) (rn_r, TaggedTerm (Tagged _ e_r)) = matchInTerm' ids (rn_l, e_l) (rn_r, e_r)
+matchInTerm ids (rn_l, Tagged _ e_l) (rn_r, Tagged _ e_r) = matchInTerm' ids (rn_l, e_l) (rn_r, e_r)
 
-matchInTerm' :: IdSupply -> In (TermF TaggedTerm) -> In (TermF TaggedTerm) -> Maybe [(Var, Var)]
+matchInTerm' :: IdSupply -> In (TermF Tagged) -> In (TermF Tagged) -> Maybe [(Var, Var)]
 matchInTerm' _   (rn_l, Var x_l)           (rn_r, Var x_r)           = Just [matchInVar (rn_l, x_l) (rn_r, x_r)]
 matchInTerm' ids (rn_l, Value v_l)         (rn_r, Value v_r)         = matchInValue ids (rn_l, v_l) (rn_r, v_r)
 matchInTerm' ids (rn_l, App e_l x_l)       (rn_r, App e_r x_r)       = matchInTerm ids (rn_l, e_l) (rn_r, e_r) >>= \eqs -> return (matchInVar (rn_l, x_l) (rn_r, x_r) : eqs)

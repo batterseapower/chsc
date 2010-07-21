@@ -80,8 +80,8 @@ data QA = Question (Out Var)
 simplify :: (Deeds, State) -> (Deeds, (Heap, Stack, Tagged QA))
 simplify (deeds, s) = expectHead "simplify" [(deeds, res) | (deeds, s) <- (deeds, s) : unfoldr (\(deeds, s) -> fmap (\x -> (x, x)) (step (deeds, s))) (deeds, s), Just res <- [stop s]]
   where
-    stop (h, k, (rn, TaggedTerm (Tagged tg (Var x))))   = Just (h, k, Tagged tg (Question (rename rn x)))
-    stop (h, k, (rn, TaggedTerm (Tagged tg (Value v)))) = Just (h, k, Tagged tg (Answer (rn, v)))
+    stop (h, k, (rn, Tagged tg (Var x)))   = Just (h, k, Tagged tg (Question (rename rn x)))
+    stop (h, k, (rn, Tagged tg (Value v))) = Just (h, k, Tagged tg (Answer (rn, v)))
     stop _ = Nothing
 
 -- Discard dead bindings:
@@ -217,7 +217,7 @@ transitiveInline deeds h_inlineable (Heap h ids, k, in_e) = (if not (S.null not_
             -- NB: we rely here on the fact that our caller will still be able to fill in bindings for stuff from h_inlineable
             -- even if we choose not to inline it into the State, and that such bindings will not be evaluated until they are
             -- actually demanded (or we could get work duplication by inlining into only *some* Once contexts).
-            consider_inlining x' in_e@(_, TaggedTerm e) (deeds, h_inline, h_not_inlined) = case claimDeed deeds (tag e) of
+            consider_inlining x' in_e@(_, e) (deeds, h_inline, h_not_inlined) = case claimDeed deeds (tag e) of
                 Nothing    -> traceRender ("transitiveInline: deed claim failure", x') (deeds,                  h_inline, M.insert x' in_e h_not_inlined)
                 Just deeds ->                                                          (deeds, M.insert x' in_e h_inline,                  h_not_inlined)
             (deeds', h_inline, h_not_inlined) = M.foldWithKey consider_inlining (deeds, M.empty, M.empty) h_inline_candidates
@@ -326,7 +326,7 @@ split' old_deeds old_h@((cheapifyHeap . (old_deeds,)) -> (deeds, Heap h (splitId
         --
         -- The equivalent process is done for the stack in splitStack itself: we just subtract 1 from the number of deeds we need to
         -- claim when duplicating a stack frame.
-        deeds0 = M.fold (\(_, TaggedTerm e) deeds -> releaseDeedDeep deeds (tag e)) deeds0_unreleased h_strictly_inlined
+        deeds0 = M.fold (\(_, e) deeds -> releaseDeedDeep deeds (tag e)) deeds0_unreleased h_strictly_inlined
         
         -- Generalising the final proposed floats may cause some bindings that we *thought* were going to be inlined to instead be
         -- residualised. We need to account for this in the Entered information (for work-duplication purposes), and in that we will
@@ -437,7 +437,7 @@ cheapifyHeap (deeds, Heap h (splitIdSupply -> (ids, ids'))) = (deeds', Heap (M.f
     
     -- TODO: make cheapification more powerful (i.e. deal with case bindings)
     cheapify :: Deeds -> IdSupply -> In TaggedTerm -> (Deeds, IdSupply, [(Out Var, In TaggedTerm)], In TaggedTerm)
-    cheapify deeds0 ids0 (rn, TaggedTerm (Tagged tg (LetRec xes e))) = (deeds3, ids3, zip in_xs in_es' ++ floats0 ++ floats1, in_e')
+    cheapify deeds0 ids0 (rn, Tagged tg (LetRec xes e)) = (deeds3, ids3, zip in_xs in_es' ++ floats0 ++ floats1, in_e')
       where deeds1 = releaseDeedDescend_ deeds0 tg
             (        ids1, rn', unzip -> (in_xs, in_es)) = renameBounds (\_ x' -> x') ids0 rn xes
             (deeds2, ids2, floats0, in_es') = cheapifyMany deeds1 ids1 in_es
@@ -484,7 +484,7 @@ splitStack deeds old_ids scruts (Tagged tg kf:k) (entered_hole, (Bracketed rebui
             -- ===>
             --  case x of C -> let unk = C; z = C in ...
             alt_in_es = alt_rns `zip` alt_es
-            alt_hs = zipWith (\alt_rn alt_con -> M.fromList $ do { Just scrut_v <- [altConToValue alt_con]; scrut <- scruts; return (scrut, (alt_rn, TaggedTerm $ Tagged tg $ Value $ scrut_v)) }) alt_rns alt_cons
+            alt_hs = zipWith (\alt_rn alt_con -> M.fromList $ do { Just scrut_v <- [altConToValue alt_con]; scrut <- scruts; return (scrut, (alt_rn, Tagged tg $ Value $ scrut_v)) }) alt_rns alt_cons
             (alt_bvss, alt_fvss) = unzip $ zipWith (\alt_con' (Heap alt_h _, alt_k, alt_in_e) -> altConOpenFreeVars alt_con' (pureHeapOpenFreeVars alt_h (stackFreeVars alt_k (inFreeVars taggedTermFreeVars alt_in_e)))) alt_cons' dstates_alts
             (deeds', k_not_inlined, dstates_alts) = go deeds k_inlineable_candidates (zipWith (\alt_h alt_in_e -> (Heap alt_h state_ids, [], alt_in_e)) alt_hs alt_in_es)
               where
