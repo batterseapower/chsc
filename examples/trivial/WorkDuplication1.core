@@ -1,0 +1,23 @@
+root = \unk -> let expensive_but_used_once = if unk (Just 3, Just 4) then Nothing else Just 2            -- Expensive computation used by residualised expensive: should be inlined into expensive!
+                   expensive = 1 + (case expensive_but_used_once of Nothing -> 1; Just x -> x) -- Shared expensive computation
+                   one = Just (expensive + 1) -- Sharer
+                   two = Just (expensive + 2) -- Sharer
+               in unk (one, two) -- Stuck: forces immediate split
+
+-- Expected output:
+--
+--  h1 = \unk -> h2 unk
+--  h2 = \unk -> let one = Just (expensive + 1)
+--                   two = Just (expensive + 2)
+--                   expensive = if unk (3, 4) then 2 else 3
+--               in unk (one, two)
+--
+-- The bug that I often get is the expensive_but_used_once thing is residualised rather than being inlined,
+-- leading to the |case| on it not being removed in the output program.
+
+maybe x f mb_y = case mb_y of Nothing -> x
+                              Just y  -> f y
+
+tests = [
+    (root (\pair -> maybe 0 id (fst pair) + maybe 0 id (snd pair) == 2), False)
+  ]
