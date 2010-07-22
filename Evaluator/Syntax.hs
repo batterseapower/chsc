@@ -16,11 +16,11 @@ type PureHeap = M.Map (Out Var) (In TaggedTerm)
 data Heap = Heap PureHeap IdSupply
           deriving (Show)
 
-type Stack = [Tagged StackFrame]
-data StackFrame = Apply (Out Var)
+type Stack = [StackFrame]
+data StackFrame = Apply (Out (Tagged Var))
                 | Scrutinise (In [TaggedAlt])
                 | PrimApply PrimOp [Tagged (In TaggedValue)] [In TaggedTerm]
-                | Update (Out Var)
+                | Update (Out (Tagged Var))
                 deriving (Show)
 
 instance Pretty StackFrame where
@@ -31,9 +31,16 @@ instance Pretty StackFrame where
         Update x'                 -> pPrintPrecApp level prec (text "update") x'
 
 
+stackFrameTags :: StackFrame -> [Tag]
+stackFrameTags kf = case kf of
+    Apply x'                -> [tag x']
+    Scrutinise in_alts      -> map (tag . snd) (snd in_alts)
+    PrimApply _ in_vs in_es -> map tag in_vs ++ map (tag . snd) in_es
+    Update x'               -> [tag x']
+
 releaseStateDeed :: Deeds -> State -> Deeds
 releaseStateDeed deeds (Heap h _, k, (_, e))
-  = foldl' (\deeds kf -> releaseDeedDeep deeds (tag kf))
+  = foldl' (\deeds kf -> foldl' releaseDeedDeep deeds (stackFrameTags kf))
            (foldl' (\deeds (_, e) -> releaseDeedDeep deeds (tag e))
                    (releaseDeedDeep deeds (tag e))
                    (M.elems h))

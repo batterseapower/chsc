@@ -21,7 +21,7 @@ data Literal = Int Integer | Char Char
 type Term = Identity (TermF Identity)
 type TaggedTerm = Tagged (TermF Tagged)
 type CountedTerm = Counted (TermF Counted)
-data TermF ann = Var Var | Value (ValueF ann) | App (ann (TermF ann)) Var | PrimOp PrimOp [ann (TermF ann)] | Case (ann (TermF ann)) [AltF ann] | LetRec [(Var, ann (TermF ann))] (ann (TermF ann))
+data TermF ann = Var Var | Value (ValueF ann) | App (ann (TermF ann)) (ann Var) | PrimOp PrimOp [ann (TermF ann)] | Case (ann (TermF ann)) [AltF ann] | LetRec [(Var, ann (TermF ann))] (ann (TermF ann))
                deriving (Eq, Show)
 
 type Alt = AltF Identity
@@ -132,7 +132,8 @@ tagTerm :: IdSupply -> Term -> TaggedTerm
 tagTerm ids (I e) = Tagged (hashedId i) $ case e of
     Var x         -> Var x
     Value v       -> Value (tagValue ids' v)
-    App e x       -> App (tagTerm ids' e) x
+    App e (I x)   -> App (tagTerm ids'' e) (Tagged (hashedId i') x)
+      where (ids'', i') = stepIdSupply ids'
     PrimOp pop es -> PrimOp pop (zipWith tagTerm idss' es)
       where idss' = splitIdSupplyL ids
     Case e alts   -> Case (tagTerm ids0' e) (tagAlts ids1' alts)
@@ -159,7 +160,7 @@ detagTerm :: TaggedTerm -> Term
 detagTerm (Tagged _ e) = case e of
     Var x         -> var x
     Value v       -> value (detagValue v)
-    App e x       -> app (detagTerm e) x
+    App e x       -> app (detagTerm e) (tagee x)
     PrimOp pop es -> primOp pop (map detagTerm es)
     Case e alts   -> case_ (detagTerm e) (detagAlts alts)
     LetRec xes e  -> letRec (map (second detagTerm) xes) (detagTerm e)
@@ -217,7 +218,7 @@ primOp :: PrimOp -> [Term] -> Term
 primOp pop es = I (PrimOp pop es)
 
 app :: Term -> Var -> Term
-app e x = I (App e x)
+app e x = I (App e (I x))
 
 apps :: Term -> [Var] -> Term
 apps = foldl app

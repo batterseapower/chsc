@@ -283,7 +283,7 @@ split' old_deeds old_h@((cheapifyHeap . (old_deeds,)) -> (deeds, Heap h (splitId
       | entered_many == entered_many'
       , must_resid_k_xs == must_resid_k_xs'
       = -- (\res -> traceRender ("split'", entered_hole, "==>", entered_k, "==>", entered', must_resid_k_xs, [x' | Tagged _ (Update x') <- k], M.keysSet floats_k_bound) res) $
-        (\res@(_, avail_h, _) -> traceRender ("split'", M.keysSet h_strictly_inlined, deeds, deeds0, deeds3, M.keysSet (case old_h of Heap h _ -> h), M.keysSet h, M.keysSet avail_h, M.keysSet h_inlineable) res) $
+        (\res@(_, avail_h, _) -> traceRender ("split'", M.keysSet h_strictly_inlined, deeds, deeds0, deeds3, M.keysSet (case old_h of Heap h _ -> h), M.keysSet h, M.keysSet avail_h, M.keysSet h_inlineable, entered_many, entered') res) $
         (deeds3, brackets_h `M.union` brackets_k_bound, bracket_k')
       | otherwise = go must_resid_k_xs' entered_many'
       where
@@ -457,9 +457,9 @@ splitStack :: Deeds
            -> (Deeds,
                M.Map (Out Var) (Bracketed State),
                (EnteredEnv, Bracketed State))
-splitStack deeds _       _      []               (entered_hole, bracketed_hole) = (deeds, M.empty, (entered_hole, bracketed_hole)) -- \(rebuild, transfer, in_es) -> (rebuild, transfer, map (M.empty,[],) in_es)
-splitStack deeds old_ids scruts (Tagged tg kf:k) (entered_hole, (Bracketed rebuild_hole extra_fvs_hole transfer_hole dstates_hole)) = case kf of
-    Apply x2' -> splitStack deeds old_ids [] k (entered_hole `plusEnteredEnv` mkEnteredEnv (Once Nothing) (S.singleton x2'), Bracketed (\es' -> rebuild_hole es' `app` x2') (S.insert x2' extra_fvs_hole) transfer_hole dstates_hole)
+splitStack deeds _       _      []     (entered_hole, bracketed_hole) = (deeds, M.empty, (entered_hole, bracketed_hole)) -- \(rebuild, transfer, in_es) -> (rebuild, transfer, map (M.empty,[],) in_es)
+splitStack deeds old_ids scruts (kf:k) (entered_hole, (Bracketed rebuild_hole extra_fvs_hole transfer_hole dstates_hole)) = case kf of
+    Apply (Tagged _ x2') -> splitStack deeds old_ids [] k (entered_hole `plusEnteredEnv` mkEnteredEnv (Once Nothing) (S.singleton x2'), Bracketed (\es' -> rebuild_hole es' `app` x2') (S.insert x2' extra_fvs_hole) transfer_hole dstates_hole)
     -- NB: case scrutinisation is special! Instead of kontinuing directly with k, we are going to inline
     -- *as much of entire remaining evaluation context as we can* into each case branch. Scary, eh?
     Scrutinise (rn, unzip -> (alt_cons, alt_es)) -> -- (if null k_remaining then id else traceRender ("splitStack: FORCED SPLIT", M.keysSet entered_hole, [x' | Tagged _ (Update x') <- k_remaining])) $
@@ -473,7 +473,7 @@ splitStack deeds old_ids scruts (Tagged tg kf:k) (entered_hole, (Bracketed rebui
             -- the case branch, and that part which could have been except that we need to refer to a variable it binds
             -- in the residualised part of the term we create
             (k_inlineable_candidates, k_remaining) = span (`does_not_bind_any_of` M.keysSet entered_hole) k
-            does_not_bind_any_of (Tagged _ (Update x')) fvs = x' `S.notMember` fvs
+            does_not_bind_any_of (Update x') fvs = tagee x' `S.notMember` fvs
             does_not_bind_any_of _ _ = True
         
             -- 2) Construct the floats for each case alternative by pushing in that continuation
@@ -484,7 +484,7 @@ splitStack deeds old_ids scruts (Tagged tg kf:k) (entered_hole, (Bracketed rebui
             -- ===>
             --  case x of C -> let unk = C; z = C in ...
             alt_in_es = alt_rns `zip` alt_es
-            alt_hs = zipWith (\alt_rn alt_con -> M.fromList $ do { Just scrut_v <- [altConToValue alt_con]; scrut <- scruts; return (scrut, (alt_rn, Tagged tg $ Value $ scrut_v)) }) alt_rns alt_cons
+            alt_hs = zipWith3 (\alt_rn alt_con alt_tg -> M.fromList $ do { Just scrut_v <- [altConToValue alt_con]; scrut <- scruts; return (scrut, (alt_rn, Tagged alt_tg (Value scrut_v))) }) alt_rns alt_cons (map tag alt_es)
             (alt_bvss, alt_fvss) = unzip $ zipWith (\alt_con' (Heap alt_h _, alt_k, alt_in_e) -> altConOpenFreeVars alt_con' (pureHeapOpenFreeVars alt_h (stackFreeVars alt_k (inFreeVars taggedTermFreeVars alt_in_e)))) alt_cons' dstates_alts
             (deeds', k_not_inlined, dstates_alts) = go deeds k_inlineable_candidates (zipWith (\alt_h alt_in_e -> (Heap alt_h state_ids, [], alt_in_e)) alt_hs alt_in_es)
               where
@@ -492,7 +492,7 @@ splitStack deeds old_ids scruts (Tagged tg kf:k) (entered_hole, (Bracketed rebui
                 
                 -- Inline parts of the evaluation context into each branch only if we can get that many deeds for duplication
                 go deeds []     states = (deeds, [], states)
-                go deeds (kf:k) states = case claimDeeds deeds (tag kf) (branch_factor - 1) of -- NB: subtract one because one occurrence is already "paid for". It is OK if the result is negative (i.e. branch_factor 0)!
+                go deeds (kf:k) states = case foldM (\deeds tag -> claimDeeds deeds tag (branch_factor - 1)) deeds (stackFrameTags kf) of -- NB: subtract one because one occurrence is already "paid for". It is OK if the result is negative (i.e. branch_factor 0)!
                     Nothing    -> traceRender ("splitStack: deed claim failure", length k) (deeds, kf:k, states)
                     Just deeds -> go deeds k (map (second3 (++ [kf])) states)
             
@@ -513,7 +513,7 @@ splitStack deeds old_ids scruts (Tagged tg kf:k) (entered_hole, (Bracketed rebui
             dstates_es = [(Heap M.empty state_ids, [], in_e) | (state_ids, in_e) <- state_idss `zip` in_es]
             rebuild_pop e_hole' (splitBy dstates_vs -> (splitManyBy dstates_vss -> es_vs', es_es')) = primOp pop (zipWith ($) (map rebuild bracketed_vss) es_vs' ++ [e_hole'] ++ es_es')
             transfer_pop fvs_hole' (splitBy dstates_vs -> (fvss_vs', fvs_es')) = fvs_hole' `S.union` S.unions (zipWith ($) (map transfer bracketed_vss) $ splitManyBy dstates_vss fvss_vs') `S.union` S.unions fvs_es'
-    Update x' -> second3 (M.insert x' (Bracketed rebuild_hole extra_fvs_hole transfer_hole dstates_hole)) $ splitStack deeds old_ids (x' : scruts) k (entered_hole `M.union` mkEnteredEnv (Once Nothing) (S.singleton x'), Bracketed (\[] -> var x') (S.singleton x') (\[] -> S.empty) [])
+    Update (Tagged _ x') -> second3 (M.insert x' (Bracketed rebuild_hole extra_fvs_hole transfer_hole dstates_hole)) $ splitStack deeds old_ids (x' : scruts) k (entered_hole `M.union` mkEnteredEnv (Once Nothing) (S.singleton x'), Bracketed (\[] -> var x') (S.singleton x') (\[] -> S.empty) [])
   where
     altConToValue :: AltCon -> Maybe (ValueF ann)
     altConToValue (DataAlt dc xs) = Just $ Data dc xs

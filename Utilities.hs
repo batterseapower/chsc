@@ -57,6 +57,13 @@ instance (Eq1 f, Eq a) => Eq (f a) where
     (==) = eq1
 
 
+class Eq1 f => Ord1 f where
+    compare1 :: Ord a => f a -> f a -> Ordering
+
+instance (Ord1 f, Ord a) => Ord (f a) where
+    compare = compare1
+
+
 class NFData1 f where
     rnf1 :: NFData a => f a -> ()
 
@@ -84,6 +91,9 @@ instance Show1 Counted where
 instance Eq1 Counted where
     eq1 (Counted c1 x1) (Counted c2 x2) = c1 == c2 && x1 == x2
 
+instance Ord1 Counted where
+    compare1 (Counted c1 x1) (Counted c2 x2) = (c1, x1) `compare` (c2, x2)
+
 instance NFData1 Counted where
     rnf1 (Counted a b) = rnf a `seq` rnf b
 
@@ -107,6 +117,9 @@ instance Show1 Tagged where
 
 instance Eq1 Tagged where
     eq1 (Tagged tg1 x1) (Tagged tg2 x2) = tg1 == tg2 && x1 == x2
+
+instance Ord1 Tagged where
+    compare1 (Tagged tg1 x1) (Tagged tg2 x2) = (tg1, x1) `compare` (tg2, x2)
 
 instance NFData1 Tagged where
     rnf1 (Tagged a b) = rnf a `seq` rnf b
@@ -387,6 +400,15 @@ mapAccumM f ta = Traversable.mapAccumL (\m a -> case f a of (m', b) -> (m `mappe
 
 
 newtype Identity a = I { unI :: a } deriving (Functor)
+
+instance Show1 Identity where
+    showsPrec1 prec (I x) = showParen (prec >= appPrec) (showString "Identity" . showsPrec appPrec x)
+
+instance Eq1 Identity where
+    eq1 (I x1) (I x2) = x1 == x2
+
+instance Ord1 Identity where
+    compare1 (I x1) (I x2) = x1 `compare` x2
 
 instance NFData1 Identity where
     rnf1 (I x) = rnf x

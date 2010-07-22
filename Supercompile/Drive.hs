@@ -47,8 +47,9 @@ supercompile e = traceRender ("all input FVs", fvs) $
             where (t, rb) = extractDeeds e
           Value (Data dc xs) -> ([], \[] -> Value (Data dc xs))
           Value (Literal l)  -> ([], \[] -> Value (Literal l))
-          App e x            -> ([t], \[t'] -> App (rb t') x)
-            where (t, rb) = extractDeeds e
+          App e x            -> ([t1, t2], \[t1', t2'] -> App (rb1 t1') (rb2 t2'))
+            where (t1, rb1) = extractDeeds e
+                  (t2, rb2) = (Node (tag x) [], \(Node unc []) -> Counted unc (tagee x))
           PrimOp pop es      -> (ts, \ts' -> PrimOp pop (zipWith ($) rbs ts'))
             where (ts, rbs) = unzip (map extractDeeds es)
           Case e (unzip -> (alt_cons, alt_es)) -> (t : ts, \(t':ts') -> Case (rb t') (alt_cons `zip` zipWith ($) rbs ts'))
@@ -75,7 +76,7 @@ pureHeapTagBag :: PureHeap -> TagBag
 pureHeapTagBag = plusTagBags . map (taggedTagBag 5 . snd) . M.elems
 
 stackTagBag :: Stack -> TagBag
-stackTagBag = plusTagBags . map (taggedTagBag 3)
+stackTagBag = plusTagBags . map (tagTagBag 3) . concatMap stackFrameTags
 
 taggedTermTagBag :: TaggedTerm -> TagBag
 taggedTermTagBag = taggedTagBag 2
