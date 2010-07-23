@@ -1,0 +1,6 @@
+root unk = case unk of [] -> 1; (x:xs) -> (1 + 2) + x
+
+tests = [
+    (root [],  1),
+    (root [1], 4)
+  ]
