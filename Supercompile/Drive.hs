@@ -136,7 +136,6 @@ runTieM input_fvs mx = snd (unTieM mx init_e init_s)
 
 data Seen = S {
     seenMeaning :: State,
-    seenFvs :: FreeVars,
     seenTie :: TieM (Out Term)
   }
 
@@ -178,18 +177,20 @@ memo :: (State -> ScpM (FreeVars, TieM (Out Term)))
      -> State  -> ScpM (FreeVars, TieM (Out Term))
 memo opt state = traceRenderM (">scp", residualiseState state) >> do
     ns <- getSeen
-    case [ (S.fromList $ map (rename rn_lr) $ S.toList (seenFvs n),
-            fmap (\e' -> let xs_hack = S.toList (termFreeVars e' S.\\ seenFvs n) -- FIXME: the xs_hack is necessary so we can rename new "h" functions in the output (e.g. h1)
+    case [ (S.fromList $ map (rename rn_lr) $ S.toList n_fvs,
+            fmap (\e' -> let xs_hack = S.toList (termFreeVars e' S.\\ n_fvs) -- FIXME: the xs_hack is necessary so we can rename new "h" functions in the output (e.g. h1)
                          in renameTerm (case state of (Heap _ ids, _, _) -> ids) (insertRenamings (xs_hack `zip` xs_hack) rn_lr) e')
                  (seenTie n))
          | n <- ns
          , Just rn_lr <- [match (seenMeaning n) state] -- NB: If tb contains a dead PureHeap binding (hopefully impossible) then it may have a free variable that I can't rename, so "rename" will cause an error. Not observed in practice yet.
+         , let n_fvs = stateFreeVars (seenMeaning n)
          ] of
       res:_ -> do
         traceRenderM ("=scp", residualiseState state, fst res)
         return res
       [] -> do
-        res <- mfix $ \(~(_fvs, tiex)) -> saw S { seenMeaning = state, seenFvs = stateFreeVars state {- FIXME: _fvs causes block? Does using this approximation have -VE consequences? -}, seenTie = tiex } >> fmap (second (memo' state)) (opt state)
+        res <- mfix $ \(~(_fvs, tiex)) -> saw S { seenMeaning = state {- NB: Cannot use _fvs here to improve the FVs at the tieback point because that causes a loop -}, seenTie = tiex } >> fmap (second (memo' state)) (opt state)
+        --assertRender ("sc: FVs", fst res, stateFreeVars state) (fst res `S.isSubsetOf` stateFreeVars state) $ return ()
         traceRenderM ("<scp", residualiseState state, fst res)
         return res
 
@@ -219,7 +220,6 @@ memo' state opt = traceRenderM (">tie", residualiseState state) >> do
         x <- freshHName
         e' <- promise P { fun = x, abstracted = dynamic_vs_list, lexical = static_vs_list, meaning = state } $ do
             e' <- opt
-            --assertRender ("sc: FVs", _fvs', vs) (_fvs' `S.isSubsetOf` vs) $ return ()
     
             return $ letRec [(x, lambdas dynamic_vs_list e')]
                             (x `varApps` dynamic_vs_list)
