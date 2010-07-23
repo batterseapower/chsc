@@ -1,0 +1,6 @@
+root unk = let idish = id id -- NB: not a syntactic value, so will get residualised
+           in unk (idish 1, idish True) (idish 2, idish False)
+
+tests = [
+    (root (,), ((1, True), (2, False)))
+  ]
