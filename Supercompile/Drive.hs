@@ -21,15 +21,16 @@ import Renaming
 import StaticFlags
 import Utilities
 
+import Control.Monad.Fix
+
 import qualified Data.Map as M
-import Data.Ord
 import qualified Data.Set as S
 
 
 supercompile :: Term -> Term
-supercompile e = traceRender ("all input FVs", fvs) $ runScpM fvs $ fmap snd $ sc [] state
-  where fvs = termFreeVars e
-        state = (Heap M.empty reduceIdSupply, [], (mkIdentityRenaming $ S.toList fvs, tagTerm tagIdSupply e))
+supercompile e = traceRender ("all input FVs", input_fvs) $ runTieM input_fvs $ runScpM $ fmap snd $ sc [] state
+  where input_fvs = termFreeVars e
+        state = (Heap M.empty reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, tagTerm tagIdSupply e))
 
 
 --
@@ -61,7 +62,7 @@ tagTagBag cls = mkTagBag . return . injectTag cls
 
 
 --
--- == The drive loop ==
+-- == Bounded multi-step reduction ==
 --
 
 reduce :: State -> State
@@ -82,31 +83,65 @@ reduce = go emptyHistory
     intermediate _ = True
 
 
+--
+-- == The drive loop ==
+--
+
 data Promise = P {
-    fun     :: Var,       -- Name assigned in output program
-    fvs     :: [Out Var], -- Abstracted over these variables
-    meaning :: State      -- Minimum adequate term
+    fun        :: Var,       -- Name assigned in output program
+    abstracted :: [Out Var], -- Abstracted over these variables
+    lexical    :: [Out Var], -- Refers to these variables lexically (i.e. not via a lambda)
+    meaning    :: State      -- Minimum adequate term
   }
 
-data ScpState = ScpState {
-    inputFvs :: FreeVars, -- NB: we do not abstract the h functions over these variables. This helps typechecking and gives GHC a chance to inline the definitions.
-    promises :: [Promise],
-    outs     :: [(Var, Out Term)],
+data TieEnv = TieEnv {
+    statics :: Statics, -- NB: we do not abstract the h functions over these variables. This helps typechecking and gives GHC a chance to inline the definitions.
+    promises :: [Promise]
+  }
+
+newtype TieState = TieState {
     names    :: [Var]
   }
 
-get :: ScpM ScpState
-get = ScpM $ \s -> (s, s)
+newtype TieM a = TieM { unTieM :: TieEnv -> TieState -> (TieState, a) }
 
-put :: ScpState -> ScpM ()
-put s = ScpM $ \_ -> (s, ())
+instance Functor TieM where
+    fmap = liftM
 
-modify :: (ScpState -> ScpState) -> ScpM ()
-modify f = fmap f get >>= put
+instance Monad TieM where
+    return x = TieM $ \_ s -> (s, x)
+    (!mx) >>= fxmy = TieM $ \e s -> case unTieM mx e s of (s, x) -> unTieM (fxmy x) e s
 
-freshHName :: ScpM Var
-freshHName = ScpM $ \s -> (s { names = tail (names s) }, expectHead "freshHName" (names s))
+getStatics :: TieM FreeVars
+getStatics = TieM $ \e s -> (s, statics e)
 
+freshHName :: TieM Var
+freshHName = TieM $ \_ s -> (s { names = tail (names s) }, expectHead "freshHName" (names s))
+
+getPromises :: TieM [Promise]
+getPromises = TieM $ \e s -> (s, promises e)
+
+promise :: Promise -> TieM a -> TieM a
+promise p mx = TieM $ \e s -> unTieM mx e { promises = p : promises e } s
+
+runTieM :: FreeVars -> TieM a -> a
+runTieM input_fvs mx = snd (unTieM mx init_e init_s)
+  where
+    init_e = TieEnv { statics = input_fvs, promises = [] }
+    init_s = TieState { names = map (\i -> name $ "h" ++ show (i :: Int)) [0..] }
+
+
+type Statics = FreeVars
+
+data Seen = S {
+    seenMeaning :: State,
+    seenFvs :: FreeVars,
+    seenTie :: TieM (Out Term)
+  }
+
+newtype ScpState = ScpState {
+    seen :: [Seen]
+  }
 
 newtype ScpM a = ScpM { unScpM :: ScpState -> (ScpState, a) }
 
@@ -117,58 +152,80 @@ instance Monad ScpM where
     return x = ScpM $ \s -> (s, x)
     (!mx) >>= fxmy = ScpM $ \s -> case unScpM mx s of (s, x) -> unScpM (fxmy x) s
 
-runScpM :: FreeVars -> ScpM (Out Term) -> Out Term
-runScpM input_fvs (ScpM f) = letRec (sortBy (comparing ((read :: String -> Int) . drop 1 . name_string . fst)) $ outs s) e'
-  where (s, e') = f init_s
-        init_s = ScpState { promises = [], names = map (\i -> name $ "h" ++ show (i :: Int)) [0..], outs = [], inputFvs = input_fvs }
+instance MonadFix ScpM where
+    mfix fmx = ScpM $ \s -> let (s', x) = unScpM (fmx x) s in (s', x)
+
+getSeen :: ScpM [Seen]
+getSeen = ScpM $ \s -> (s, seen s)
+
+saw :: Seen -> ScpM ()
+saw n = ScpM $ \s -> (s { seen = n : seen s }, ())
+
+runScpM :: ScpM a -> a
+runScpM (ScpM f) = snd (f init_s)
+  where init_s = ScpState { seen = [] }
 
 
-sc, sc' :: History -> State -> ScpM (FreeVars, Out Term)
+sc, sc' :: History -> State -> ScpM (FreeVars, TieM (Out Term))
 sc hist = memo (sc' hist)
 sc' hist state = case terminate hist (stateTagBag state) of
     Stop           -> split (sc hist)  state
     Continue hist' -> split (sc hist') (reduce state)
 
 
-memo :: (State -> ScpM (FreeVars, Out Term))
-     -> State -> ScpM (FreeVars, Out Term)
-memo opt state = traceRenderM (">sc", residualiseState state) >>
-  do
-    (ps, input_fvs) <- fmap (promises &&& inputFvs) get
-    case [ (S.fromList (rn_fvs (fvs p)), fun p `varApps` rn_fvs tb_noninput_fvs)
+memo :: (State -> ScpM (FreeVars, TieM (Out Term)))
+     -> State  -> ScpM (FreeVars, TieM (Out Term))
+memo opt state = traceRenderM (">scp", residualiseState state) >> do
+    ns <- getSeen
+    case [ (S.fromList $ map (rename rn_lr) $ S.toList (seenFvs n),
+            fmap (\e' -> let xs_hack = S.toList (termFreeVars e' S.\\ seenFvs n) -- FIXME: the xs_hack is necessary so we can rename new "h" functions in the output (e.g. h1)
+                         in renameTerm (case state of (Heap _ ids, _, _) -> ids) (insertRenamings (xs_hack `zip` xs_hack) rn_lr) e')
+                 (seenTie n))
+         | n <- ns
+         , Just rn_lr <- [match (seenMeaning n) state] -- NB: If tb contains a dead PureHeap binding (hopefully impossible) then it may have a free variable that I can't rename, so "rename" will cause an error. Not observed in practice yet.
+         ] of
+      res:_ -> do
+        traceRenderM ("=scp", residualiseState state, fst res)
+        return res
+      [] -> do
+        res <- mfix $ \(~(_fvs, tiex)) -> saw S { seenMeaning = state, seenFvs = stateFreeVars state {- FIXME: _fvs causes block? Does using this approximation have -VE consequences? -}, seenTie = tiex } >> fmap (second (memo' state)) (opt state)
+        traceRenderM ("<scp", residualiseState state, fst res)
+        return res
+
+memo' :: State
+      -> TieM (Out Term)
+      -> TieM (Out Term)
+memo' state opt = traceRenderM (">tie", residualiseState state) >> do
+    statics <- getStatics
+    ps <- getPromises
+    case [ fun p `varApps` tb_dynamic_vs
          | p <- ps
          , Just rn_lr <- [match (meaning p) state]
-         , let rn_fvs = map (safeRename ("tieback: FVs " ++ pPrintRender (fun p)) rn_lr)  -- NB: If tb contains a dead PureHeap binding (hopefully impossible) then it may have a free variable that I can't rename, so "rename" will cause an error. Not observed in practice yet.
-               (tb_input_fvs, tb_noninput_fvs) = partition (`S.member` input_fvs) (fvs p)
-          -- Because we don't abstract over top-level free variables (this is necessary for type checking e.g. polymorphic uses of error):
-         , all (\x -> rename rn_lr x == x) tb_input_fvs
+         , let rn_fvs = map (safeRename ("tieback: FVs " ++ pPrintRender (fun p)) rn_lr) -- NB: If tb contains a dead PureHeap binding (hopefully impossible) then it may have a free variable that I can't rename, so "rename" will cause an error. Not observed in practice yet.
+               tb_dynamic_vs = rn_fvs (abstracted p)
+          -- Check that all of the things that were dynamic last time are dynamic this time
+         , all (\x' -> x' `S.notMember` statics) tb_dynamic_vs
+          -- Check that all of the things that were static last time are static this time *and refer to exactly the same thing*
+         , all (\x -> let x' = rename rn_lr x in x' == x && x' `S.member` statics) (lexical p)
          ] of
       res:_ -> {- traceRender ("tieback", residualiseState state, fst res) $ -} do
-        traceRenderM ("<sc", residualiseState state, res)
+        traceRenderM ("=tie", residualiseState state, res)
         return res
       [] -> {- traceRender ("new drive", residualiseState state) $ -} do
+        let (static_vs_list, dynamic_vs_list) = partition (`S.member` statics) (S.toList (stateFreeVars state))
+    
+        -- NB: promises are lexically scoped because they may refer to FVs
         x <- freshHName
-        let vs = stateFreeVars state
-            vs_list = S.toList vs
-            noninput_vs_list = filter (`S.notMember` input_fvs) vs_list
-        traceRenderM ("memo", x, vs_list) `seq` return ()
+        e' <- promise P { fun = x, abstracted = dynamic_vs_list, lexical = static_vs_list, meaning = state } $ do
+            e' <- opt
+            --assertRender ("sc: FVs", _fvs', vs) (_fvs' `S.isSubsetOf` vs) $ return ()
+    
+            return $ letRec [(x, lambdas dynamic_vs_list e')]
+                            (x `varApps` dynamic_vs_list)
         
-        promise P { fun = x, fvs = vs_list, meaning = state }
-        (_fvs', e') <- opt state
-        assertRender ("sc: FVs", _fvs', vs) (_fvs' `S.isSubsetOf` vs) $ return ()
-        
-        traceRenderM ("<sc", residualiseState state, (S.fromList vs_list, e'))
-        
-        bind x (lambdas noninput_vs_list e')
-        return (vs, x `varApps` noninput_vs_list)
+        traceRenderM ("<tie", residualiseState state, e')
+        return e'
 
-
-promise :: Promise -> ScpM ()
-promise p = modify (\s -> s { promises = p : promises s })
-
-bind :: Var -> Out Term -> ScpM ()
-bind x e = modify (\s -> s { outs = (x, e) : outs s })
-
-traceRenderM :: Pretty a => a -> ScpM ()
+traceRenderM :: (Pretty a, Monad m) => a -> m ()
 --traceRenderM x mx = fmap length history >>= \indent -> traceRender (nest indent (pPrint x)) mx
 traceRenderM x = traceRender (pPrint x) (return ())
