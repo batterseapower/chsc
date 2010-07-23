@@ -22,10 +22,10 @@ residualisePureHeap ids h = [(x', detagTerm $ renameIn renameTaggedTerm ids in_e
 
 residualiseStack :: IdSupply -> Stack -> Out Term -> ([(Out Var, Out Term)], Out Term)
 residualiseStack _   []     e = ([], e)
-residualiseStack ids (kf:k) (residualiseStackFrame ids (tagee kf) -> (floats, e)) = first (floats ++) $ residualiseStack ids k e
+residualiseStack ids (kf:k) (residualiseStackFrame ids kf -> (floats, e)) = first (floats ++) $ residualiseStack ids k e
 
 residualiseStackFrame :: IdSupply -> StackFrame -> Out Term -> ([(Out Var, Out Term)], Out Term)
-residualiseStackFrame _   (Apply x2')               e1 = ([], e1 `app` x2')
+residualiseStackFrame _   (Apply x2')               e1 = ([], e1 `app` tagee x2')
 residualiseStackFrame ids (Scrutinise in_alts)      e  = ([], case_ e (detagAlts $ renameIn renameTaggedAlts ids in_alts))
-residualiseStackFrame ids (PrimApply pop in_vs es') e  = ([], primOp pop (map (value . detagValue . renameIn renameTaggedValue ids) in_vs ++ [e] ++ map (detagTerm . renameIn renameTaggedTerm ids) es'))
-residualiseStackFrame _   (Update x')               e  = ([(x', e)], var x')
+residualiseStackFrame ids (PrimApply pop in_vs es') e  = ([], primOp pop (map (value . detagValue . renameIn renameTaggedValue ids . tagee) in_vs ++ [e] ++ map (detagTerm . renameIn renameTaggedTerm ids) es'))
+residualiseStackFrame _   (Update x')               e  = ([(tagee x', e)], var (tagee x'))

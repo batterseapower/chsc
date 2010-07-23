@@ -14,6 +14,8 @@ import Evaluator.Evaluate
 import Evaluator.FreeVars
 import Evaluator.Syntax
 
+import Size.Deeds
+
 import Termination.Terminate
 
 import Name
@@ -26,12 +28,38 @@ import Control.Monad.Fix
 import qualified Data.Map as M
 import Data.Ord
 import qualified Data.Set as S
+import Data.Tree
 
 
 supercompile :: Term -> Term
-supercompile e = traceRender ("all input FVs", input_fvs) $ runTieM input_fvs $ runScpM $ fmap snd $ sc [] state
+supercompile e = traceRender ("all input FVs", input_fvs) $ runTieM input_fvs $
+                 runScpM $ fmap thd3 $ sc [] (deeds, state)
   where input_fvs = termFreeVars e
-        state = (Heap M.empty reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, tagTerm tagIdSupply e))
+        state = (Heap M.empty reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, tagged_e))
+        tagged_e = tagTerm tagIdSupply e
+        
+        (t, rb) = extractDeeds tagged_e
+        deeds = mkDeeds (bLOAT_FACTOR - 1) (t, pPrint . rb)
+        extractDeeds (Tagged tg e) = -- traceRender ("extractDeeds", rb (fmap (fmap (const 1)) ts)) $
+                                     (Node tg ts, \(Node unc ts') -> Counted unc (rb ts'))
+          where (ts, rb) = extractDeeds' e
+        extractDeeds' e = case e of
+          Var x              -> ([], \[] -> Var x)
+          Value (Lambda x e) -> ([t], \[t'] -> Value (Lambda x (rb t')))
+            where (t, rb) = extractDeeds e
+          Value (Data dc xs) -> ([], \[] -> Value (Data dc xs))
+          Value (Literal l)  -> ([], \[] -> Value (Literal l))
+          App e x            -> ([t1, t2], \[t1', t2'] -> App (rb1 t1') (rb2 t2'))
+            where (t1, rb1) = extractDeeds e
+                  (t2, rb2) = (Node (tag x) [], \(Node unc []) -> Counted unc (tagee x))
+          PrimOp pop es      -> (ts, \ts' -> PrimOp pop (zipWith ($) rbs ts'))
+            where (ts, rbs) = unzip (map extractDeeds es)
+          Case e (unzip -> (alt_cons, alt_es)) -> (t : ts, \(t':ts') -> Case (rb t') (alt_cons `zip` zipWith ($) rbs ts'))
+            where (t, rb)   = extractDeeds e
+                  (ts, rbs) = unzip (map extractDeeds alt_es)
+          LetRec (unzip -> (xs, es)) e         -> (t : ts, \(t':ts') -> LetRec (xs `zip` zipWith ($) rbs ts') (rb t'))
+            where (t, rb)   = extractDeeds e
+                  (ts, rbs) = unzip (map extractDeeds es)
 
 
 --
@@ -47,13 +75,13 @@ stateTagBag :: State -> TagBag
 stateTagBag (Heap h _, k, (_, e)) = pureHeapTagBag h `plusTagBag` stackTagBag k `plusTagBag` taggedTermTagBag e
 
 pureHeapTagBag :: PureHeap -> TagBag
-pureHeapTagBag = plusTagBags . map (taggedTagBag 5 . unTaggedTerm . snd) . M.elems
+pureHeapTagBag = plusTagBags . map (taggedTagBag 5 . snd) . M.elems
 
 stackTagBag :: Stack -> TagBag
-stackTagBag = plusTagBags . map (taggedTagBag 3)
+stackTagBag = plusTagBags . map (tagTagBag 3) . concatMap stackFrameTags
 
 taggedTermTagBag :: TaggedTerm -> TagBag
-taggedTermTagBag = taggedTagBag 2 . unTaggedTerm
+taggedTermTagBag = taggedTagBag 2
 
 taggedTagBag :: Int -> Tagged a -> TagBag
 taggedTagBag cls = tagTagBag cls . tag
@@ -66,21 +94,22 @@ tagTagBag cls = mkTagBag . return . injectTag cls
 -- == Bounded multi-step reduction ==
 --
 
-reduce :: State -> State
+reduce :: (Deeds, State) -> (Deeds, State)
 reduce = go emptyHistory
   where
-    go hist state
-      | not eVALUATE_PRIMOPS, (_, _, (_, TaggedTerm (Tagged _ (PrimOp _ _)))) <- state = state
-      | otherwise = case step state of
-        Nothing -> state
-        Just state'
-          | intermediate state' -> go hist state'
+    go hist (deeds, state)
+      | traceRender ("reduce.go", deeds, residualiseState state) False = undefined
+      | not eVALUATE_PRIMOPS, (_, _, (_, Tagged _ (PrimOp _ _))) <- state = (deeds, state)
+      | otherwise = case step (deeds, state) of
+        Nothing -> (deeds, state)
+        Just (deeds', state')
+          | intermediate state' -> go hist (deeds', state')
           | otherwise           -> case terminate hist (stateTagBag state') of
-              Stop           -> state'
-              Continue hist' -> go hist' state'
+              Stop           -> (deeds', state')
+              Continue hist' -> go hist' (deeds', state')
     
     intermediate :: State -> Bool
-    intermediate (_, _, (_, TaggedTerm (Tagged _ (Var _)))) = False
+    intermediate (_, _, (_, Tagged _ (Var _))) = False
     intermediate _ = True
 
 
@@ -179,18 +208,19 @@ runScpM (ScpM f) = snd (f init_s)
   where init_s = ScpState { seen = [] }
 
 
-sc, sc' :: History -> State -> ScpM (FreeVars, TieM (Out Term))
+sc, sc' :: History -> (Deeds, State) -> ScpM (Deeds, FreeVars, TieM (Out Term))
 sc hist = memo (sc' hist)
-sc' hist state = case terminate hist (stateTagBag state) of
-    Stop           -> split (sc hist)  state
-    Continue hist' -> split (sc hist') (reduce state)
+sc' hist (deeds, state) = case terminate hist (stateTagBag state) of
+    Stop           -> split (sc hist)          (deeds, state)
+    Continue hist' -> split (sc hist') (reduce (deeds, state))
 
 
-memo :: (State -> ScpM (FreeVars, TieM (Out Term)))
-     -> State  -> ScpM (FreeVars, TieM (Out Term))
-memo opt state = traceRenderM (">scp", residualiseState state) >> do
+memo :: ((Deeds, State) -> ScpM (Deeds, FreeVars, TieM (Out Term)))
+     ->  (Deeds, State)  -> ScpM (Deeds, FreeVars, TieM (Out Term))
+memo opt (deeds, state) = traceRenderM (">scp", deeds, residualiseState state) >> do
     ns <- getSeen
-    case [ (S.fromList $ map (rename rn_lr) $ S.toList n_fvs,
+    case [ (releaseStateDeed deeds state,
+            S.fromList $ map (rename rn_lr) $ S.toList n_fvs,
             fmap (\e' -> let xs_hack = S.toList (termFreeVars e' S.\\ n_fvs) -- FIXME: the xs_hack is necessary so we can rename new "h" functions in the output (e.g. h1)
                          in renameTerm (case state of (Heap _ ids, _, _) -> ids) (insertRenamings (xs_hack `zip` xs_hack) rn_lr) e')
                  (seenTie n))
@@ -198,14 +228,14 @@ memo opt state = traceRenderM (">scp", residualiseState state) >> do
          , Just rn_lr <- [match (seenMeaning n) state] -- NB: If tb contains a dead PureHeap binding (hopefully impossible) then it may have a free variable that I can't rename, so "rename" will cause an error. Not observed in practice yet.
          , let n_fvs = stateFreeVars (seenMeaning n)
          ] of
-      res:_ -> do
-        traceRenderM ("=scp", residualiseState state, fst res)
-        return res
+      (deeds, fvs', e'):_ -> do
+        traceRenderM ("=scp", residualiseState state, (deeds, fvs'))
+        return (deeds, fvs', e')
       [] -> do
-        res <- mfix $ \(~(_fvs, tiex)) -> saw S { seenMeaning = state {- NB: Cannot use _fvs here to improve the FVs at the tieback point because that causes a loop -}, seenTie = tiex } >> fmap (second (memo' state)) (opt state)
+        (deeds, fvs', e') <- mfix $ \(~(_deeds, _fvs', tiex)) -> saw S { seenMeaning = state {- NB: Cannot use _fvs' here to improve the FVs at the tieback point because that causes a loop -}, seenTie = tiex } >> fmap (third3 (memo' state)) (opt (deeds, state))
         --assertRender ("sc: FVs", fst res, stateFreeVars state) (fst res `S.isSubsetOf` stateFreeVars state) $ return ()
-        traceRenderM ("<scp", residualiseState state, fst res)
-        return res
+        traceRenderM ("<scp", residualiseState state, (deeds, fvs'))
+        return (deeds, fvs', e')
 
 memo' :: State
       -> TieM (Out Term)
