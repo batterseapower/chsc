@@ -24,6 +24,7 @@ import Utilities
 import Control.Monad.Fix
 
 import qualified Data.Map as M
+import Data.Ord
 import qualified Data.Set as S
 
 
@@ -95,40 +96,53 @@ data Promise = P {
   }
 
 data TieEnv = TieEnv {
-    statics :: Statics, -- NB: we do not abstract the h functions over these variables. This helps typechecking and gives GHC a chance to inline the definitions.
+    statics  :: Statics, -- NB: we do not abstract the h functions over these variables. This helps typechecking and gives GHC a chance to inline the definitions.
     promises :: [Promise]
   }
 
+type TieTell = [(Promise, Out Term)]
+
 newtype TieState = TieState {
-    names    :: [Var]
+    names :: [Var]
   }
 
-newtype TieM a = TieM { unTieM :: TieEnv -> TieState -> (TieState, a) }
+newtype TieM a = TieM { unTieM :: TieEnv -> TieState -> (TieTell, TieState, a) }
 
 instance Functor TieM where
     fmap = liftM
 
 instance Monad TieM where
-    return x = TieM $ \_ s -> (s, x)
-    (!mx) >>= fxmy = TieM $ \e s -> case unTieM mx e s of (s, x) -> unTieM (fxmy x) e s
+    return x = TieM $ \_ s -> ([], s, x)
+    (!mx) >>= fxmy = TieM $ \e s -> case unTieM mx e s of (t1, s, x) -> case unTieM (fxmy x) e s of (t2, s, y) -> (t1 ++ t2, s, y)
 
 instance MonadStatics TieM where
-    withStatics xs mx = TieM $ \e s -> unTieM mx (e { statics = statics e `S.union` xs }) s
+    withStatics xs mx = bindFloats (\p -> any (`S.member` xs) (lexical p)) $ TieM $ \e s -> unTieM mx (e { statics = statics e `S.union` xs }) s
+
+bindFloats :: (Promise -> Bool) -> TieM a -> TieM ([(Out Var, Out Term)], a)
+bindFloats p mx = TieM $ \e s -> case unTieM mx e s of (partition (p . fst) -> (t_now, t_later), s, x) -> (t_later, s, (sortBy (comparing ((read :: String -> Int) . drop 1 . name_string . fst)) [(fun p, lambdas (abstracted p) e') | (p, e') <- t_now], x))
 
 getStatics :: TieM FreeVars
-getStatics = TieM $ \e s -> (s, statics e)
+getStatics = TieM $ \e s -> ([], s, statics e)
 
 freshHName :: TieM Var
-freshHName = TieM $ \_ s -> (s { names = tail (names s) }, expectHead "freshHName" (names s))
+freshHName = TieM $ \_ s -> ([], s { names = tail (names s) }, expectHead "freshHName" (names s))
 
 getPromises :: TieM [Promise]
-getPromises = TieM $ \e s -> (s, promises e)
+getPromises = TieM $ \e s -> ([], s, promises e)
 
-promise :: Promise -> TieM a -> TieM a
-promise p mx = TieM $ \e s -> unTieM mx e { promises = p : promises e } s
+promise :: (Name -> Promise) -> TieM (Out Term) -> TieM (Out Term)
+promise mk_p opt = do
+    x <- freshHName
+    let p = mk_p x
+    TieM $ \e s -> unTieM (mx p) e { promises = p : promises e } s
+  where
+    mx p = do
+      e' <- opt
+      TieM $ \_ s -> ([(p, e')], s, ())
+      return (fun p `varApps` abstracted p)
 
-runTieM :: FreeVars -> TieM a -> a
-runTieM input_fvs mx = snd (unTieM mx init_e init_s)
+runTieM :: FreeVars -> TieM (Out Term) -> Out Term
+runTieM input_fvs mx = uncurry letRec $ thd3 (unTieM (bindFloats (\_ -> True) mx) init_e init_s)
   where
     init_e = TieEnv { statics = input_fvs, promises = [] }
     init_s = TieState { names = map (\i -> name $ "h" ++ show (i :: Int)) [0..] }
@@ -217,12 +231,7 @@ memo' state opt = traceRenderM (">tie", residualiseState state) >> do
         let (static_vs_list, dynamic_vs_list) = partition (`S.member` statics) (S.toList (stateFreeVars state))
     
         -- NB: promises are lexically scoped because they may refer to FVs
-        x <- freshHName
-        e' <- promise P { fun = x, abstracted = dynamic_vs_list, lexical = static_vs_list, meaning = state } $ do
-            e' <- opt
-    
-            return $ letRec [(x, lambdas dynamic_vs_list e')]
-                            (x `varApps` dynamic_vs_list)
+        e' <- promise (\x -> P { fun = x, abstracted = dynamic_vs_list, lexical = static_vs_list, meaning = state }) opt
         
         traceRenderM ("<tie", residualiseState state, e')
         return e'

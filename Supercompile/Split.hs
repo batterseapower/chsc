@@ -21,7 +21,7 @@ import qualified Data.Set as S
 type Statics = FreeVars
 
 class Monad m => MonadStatics m where
-    withStatics :: FreeVars -> m a -> m a
+    withStatics :: FreeVars -> m a -> m ([(Out Var, Out Term)], a)
 
 
 --
@@ -224,10 +224,10 @@ optimiseSplit opt floats_h floats_compulsory = do
     --    residualisation, and then transitively inlines any bindings whose corresponding binders become free.
     let residualise m2xes_resid resid_bvs resid_fvs
           | M.null h_resid = -- traceRenderM ("residualise", resid_fvs, resid_bvs, (M.map (residualiseBracketed (residualiseState . first3 (flip Heap prettyIdSupply))) floats_h)) $
-                             return (resid_fvs S.\\ resid_bvs, m2xes_resid)
+                             return (resid_fvs, resid_bvs, m2xes_resid)
           | otherwise = {- traceRender ("optimiseSplit", xs_resid') $ -} do
             -- Recursively drive the new residuals arising from the need to bind the resid_fvs
-            (S.unions -> extra_resid_fvs', m2es_resid') <- mapMFunny (optimiseBracketed (\s -> liftM (second (withStatics (M.keysSet floats_h `S.intersection` stateFreeVars s))) (opt s))) bracks_resid
+            (S.unions -> extra_resid_fvs', m2es_resid') <- mapMFunny (optimiseBracketed opt) bracks_resid
             -- Recurse, because we might now need to residualise and drive even more stuff (as we have added some more FVs and BVs)
             residualise (liftM2 (\xes_resid es_resid' -> xes_resid ++ zip xs_resid' es_resid') m2xes_resid m2es_resid')
                         (resid_bvs `S.union` M.keysSet h_resid)
@@ -237,8 +237,10 @@ optimiseSplit opt floats_h floats_compulsory = do
             h_resid = M.filterWithKey (\x _br -> x `S.member` resid_fvs) (floats_h `exclude` resid_bvs)
             (xs_resid', bracks_resid) = unzip $ M.toList h_resid
 
-    (fvs', m2xes_resid) <- residualise (return []) S.empty fvs_compulsory'
-    return (fvs', liftM2 letRec m2xes_resid m2e_compulsory')
+    (fvs', bvs', m2xes_resid) <- residualise (return []) S.empty fvs_compulsory'
+    return (fvs' S.\\ bvs',
+            do (hes, (xes_resid, e_compulsory')) <- withStatics (M.keysSet floats_h `S.intersection` fvs') $ liftM2 (,) m2xes_resid m2e_compulsory'
+               return $ letRec (hes ++ xes_resid) e_compulsory')
 
 -- Whether the given variable was entered many times, with no context identifier information required
 -- I'm using this abstraction to make explicit the fact that we don't pass context identifiers between
