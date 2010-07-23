@@ -1,6 +1,6 @@
 {-# LANGUAGE ViewPatterns, TupleSections, PatternGuards #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
-module Supercompile.Split (split) where
+module Supercompile.Split (Statics, MonadStatics(..), split) where
 
 import Core.FreeVars
 import Core.Renaming
@@ -16,6 +16,12 @@ import Utilities
 
 import qualified Data.Map as M
 import qualified Data.Set as S
+
+
+type Statics = FreeVars
+
+class Monad m => MonadStatics m where
+    withStatics :: FreeVars -> m a -> m a
 
 
 --
@@ -59,7 +65,7 @@ plusEnteredEnvs = foldr plusEnteredEnv emptyEnteredEnv
 --
 
 
-split :: (Monad m1, Monad m2)
+split :: (Monad m1, MonadStatics m2)
       => (State -> m1 (FreeVars, m2 (Out Term)))
       -> State
       -> m1 (FreeVars, m2 (Out Term))
@@ -178,7 +184,7 @@ data Bracketed a = Bracketed {
 instance Functor Bracketed where
     fmap f b = b { fillers = map f (fillers b) }
 
-optimiseBracketed :: (Monad m1, Monad m2)
+optimiseBracketed :: (Monad m1, MonadStatics m2)
                   => (State -> m1 (FreeVars, m2 (Out Term)))
                   -> Bracketed State
                   -> m1 (FreeVars, m2 (Out Term))
@@ -186,7 +192,7 @@ optimiseBracketed opt b = do
     (fvs', m2ress) <- mapMFunny opt (fillers b)
     return (extra_fvs b `S.union` transfer b fvs', liftM (rebuild b) m2ress)
 
-mapMFunny :: (Monad m1, Monad m2)
+mapMFunny :: (Monad m1, MonadStatics m2)
           => (a -> m1 (b, m2 c))
           -> [a]
           -> m1 ([b], m2 [c])
@@ -204,7 +210,7 @@ transitiveInline h_inlineable h_output fvs
 transitiveInline' :: PureHeap -> State -> State
 transitiveInline' h_inlineable (Heap h ids, k, in_e) = (Heap (transitiveInline (h_inlineable `M.union` h) M.empty (stateFreeVars (Heap M.empty ids, k, in_e))) ids, k, in_e)
 
-optimiseSplit :: (Monad m1, Monad m2)
+optimiseSplit :: (Monad m1, MonadStatics m2)
               => (State -> m1 (FreeVars, m2 (Out Term)))
               -> M.Map (Out Var) (Bracketed State)
               -> Bracketed State
@@ -221,7 +227,7 @@ optimiseSplit opt floats_h floats_compulsory = do
                              return (resid_fvs S.\\ resid_bvs, m2xes_resid)
           | otherwise = {- traceRender ("optimiseSplit", xs_resid') $ -} do
             -- Recursively drive the new residuals arising from the need to bind the resid_fvs
-            (S.unions -> extra_resid_fvs', m2es_resid') <- mapMFunny (optimiseBracketed opt) bracks_resid
+            (S.unions -> extra_resid_fvs', m2es_resid') <- mapMFunny (optimiseBracketed (\s -> liftM (second (withStatics (M.keysSet floats_h `S.intersection` stateFreeVars s))) (opt s))) bracks_resid
             -- Recurse, because we might now need to residualise and drive even more stuff (as we have added some more FVs and BVs)
             residualise (liftM2 (\xes_resid es_resid' -> xes_resid ++ zip xs_resid' es_resid') m2xes_resid m2es_resid')
                         (resid_bvs `S.union` M.keysSet h_resid)

@@ -112,6 +112,9 @@ instance Monad TieM where
     return x = TieM $ \_ s -> (s, x)
     (!mx) >>= fxmy = TieM $ \e s -> case unTieM mx e s of (s, x) -> unTieM (fxmy x) e s
 
+instance MonadStatics TieM where
+    withStatics xs mx = TieM $ \e s -> unTieM mx (e { statics = statics e `S.union` xs }) s
+
 getStatics :: TieM FreeVars
 getStatics = TieM $ \e s -> (s, statics e)
 
@@ -130,8 +133,6 @@ runTieM input_fvs mx = snd (unTieM mx init_e init_s)
     init_e = TieEnv { statics = input_fvs, promises = [] }
     init_s = TieState { names = map (\i -> name $ "h" ++ show (i :: Int)) [0..] }
 
-
-type Statics = FreeVars
 
 data Seen = S {
     seenMeaning :: State,
