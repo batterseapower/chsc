@@ -100,35 +100,34 @@ data TieEnv = TieEnv {
     promises :: [Promise]
   }
 
-type TieTell = [(Promise, Out Term)]
-
-newtype TieState = TieState {
-    names :: [Var]
+data TieState = TieState {
+    names       :: [Var],
+    fulfilments :: [(Promise, Out Term)]
   }
 
-newtype TieM a = TieM { unTieM :: TieEnv -> TieState -> (TieTell, TieState, a) }
+newtype TieM a = TieM { unTieM :: TieEnv -> TieState -> (TieState, a) }
 
 instance Functor TieM where
     fmap = liftM
 
 instance Monad TieM where
-    return x = TieM $ \_ s -> ([], s, x)
-    (!mx) >>= fxmy = TieM $ \e s -> case unTieM mx e s of (t1, s, x) -> case unTieM (fxmy x) e s of (t2, s, y) -> (t1 ++ t2, s, y)
+    return x = TieM $ \_ s -> (s, x)
+    (!mx) >>= fxmy = TieM $ \e s -> case unTieM mx e s of (s, x) -> unTieM (fxmy x) e s
 
 instance MonadStatics TieM where
     withStatics xs mx = bindFloats (\p -> any (`S.member` xs) (lexical p)) $ TieM $ \e s -> unTieM mx (e { statics = statics e `S.union` xs }) s
 
 bindFloats :: (Promise -> Bool) -> TieM a -> TieM ([(Out Var, Out Term)], a)
-bindFloats p mx = TieM $ \e s -> case unTieM mx e s of (partition (p . fst) -> (t_now, t_later), s, x) -> (t_later, s, (sortBy (comparing ((read :: String -> Int) . drop 1 . name_string . fst)) [(fun p, lambdas (abstracted p) e') | (p, e') <- t_now], x))
+bindFloats p mx = TieM $ \e s -> case unTieM mx e s of (s@(TieState { fulfilments = (partition (p . fst) -> (fs_now, fs_later)) }), x) -> (s { fulfilments = fs_later }, (sortBy (comparing ((read :: String -> Int) . drop 1 . name_string . fst)) [(fun p, lambdas (abstracted p) e') | (p, e') <- fs_now], x))
 
 getStatics :: TieM FreeVars
-getStatics = TieM $ \e s -> ([], s, statics e)
+getStatics = TieM $ \e s -> (s, statics e)
 
 freshHName :: TieM Var
-freshHName = TieM $ \_ s -> ([], s { names = tail (names s) }, expectHead "freshHName" (names s))
+freshHName = TieM $ \_ s -> (s { names = tail (names s) }, expectHead "freshHName" (names s))
 
 getPromises :: TieM [Promise]
-getPromises = TieM $ \e s -> ([], s, promises e)
+getPromises = TieM $ \e s -> (s, promises e ++ map fst (fulfilments s))
 
 promise :: (Name -> Promise) -> TieM (Out Term) -> TieM (Out Term)
 promise mk_p opt = do
@@ -138,14 +137,14 @@ promise mk_p opt = do
   where
     mx p = do
       e' <- opt
-      TieM $ \_ s -> ([(p, e')], s, ())
+      TieM $ \_ s -> (s { fulfilments = (p, e') : fulfilments s }, ())
       return (fun p `varApps` abstracted p)
 
 runTieM :: FreeVars -> TieM (Out Term) -> Out Term
-runTieM input_fvs mx = uncurry letRec $ thd3 (unTieM (bindFloats (\_ -> True) mx) init_e init_s)
+runTieM input_fvs mx = uncurry letRec $ snd (unTieM (bindFloats (\_ -> True) mx) init_e init_s)
   where
     init_e = TieEnv { statics = input_fvs, promises = [] }
-    init_s = TieState { names = map (\i -> name $ "h" ++ show (i :: Int)) [0..] }
+    init_s = TieState { names = map (\i -> name $ "h" ++ show (i :: Int)) [0..], fulfilments = [] }
 
 
 data Seen = S {
