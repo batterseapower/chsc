@@ -69,7 +69,7 @@ split :: (Monad m1, MonadStatics m2)
       => (State -> m1 (FreeVars, m2 (Out Term)))
       -> State
       -> m1 (FreeVars, m2 (Out Term))
-split opt (simplify -> (Heap h ids, k, qa)) = uncurry (optimiseSplit opt) (split' (Heap h ids) k (case tagee qa of Question x' -> [x']; Answer _ -> []) (splitQA ids qa))
+split opt (simplify -> (Heap h (splitIdSupply -> (ids1, ids2)), k, qa)) = uncurry (optimiseSplit opt) (split' (Heap h ids1) k (case tagee qa of Question x' -> [x']; Answer _ -> []) (splitQA ids2 qa))
 
 -- Non-expansive simplification that we can safely do just before splitting to make the splitter a bit simpler
 data QA = Question (Out Var)
