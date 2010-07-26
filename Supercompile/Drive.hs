@@ -115,13 +115,16 @@ instance Monad TieM where
     (!mx) >>= fxmy = TieM $ \e s -> case unTieM mx e s of (s, x) -> unTieM (fxmy x) e s
 
 instance MonadStatics TieM where
-    withStatics xs mx = bindFloats (\p -> any (`S.member` xs) (lexical p)) $ TieM $ \e s -> unTieM mx (e { statics = statics e `S.union` xs }) s
+    withStatics xs mx = bindFloats (\p -> any (`S.member` xs) (lexical p)) $ TieM $ \e s -> (\(!res) -> traceRender ("withStatics", xs) res) $ unTieM mx (e { statics = statics e `S.union` xs }) s
 
 bindFloats :: (Promise -> Bool) -> TieM a -> TieM ([(Out Var, Out Term)], a)
-bindFloats p mx = TieM $ \e s -> case unTieM mx e s of (s@(TieState { fulfilments = (partition (p . fst) -> (fs_now, fs_later)) }), x) -> (s { fulfilments = fs_later }, (sortBy (comparing ((read :: String -> Int) . drop 1 . name_string . fst)) [(fun p, lambdas (abstracted p) e') | (p, e') <- fs_now], x))
+bindFloats p mx = TieM $ \e s -> case unTieM mx e s of (s@(TieState { fulfilments = (partition (p . fst) -> (fs_now, fs_later)) }), x) -> traceRender ("bindFloats", map (fun . fst) fs_now, map (fun . fst) fs_later) $ (s { fulfilments = fs_later }, (sortBy (comparing ((read :: String -> Int) . drop 1 . name_string . fst)) [(fun p, lambdas (abstracted p) e') | (p, e') <- fs_now], x))
 
 getStatics :: TieM FreeVars
 getStatics = TieM $ \e s -> (s, statics e)
+
+renameStatics :: Renaming -> TieM a -> TieM a
+renameStatics rn mx = TieM $ \e s -> unTieM mx (e { statics = mapMaybeSet (rename_maybe rn) (statics e) }) s
 
 freshHName :: TieM Var
 freshHName = TieM $ \_ s -> (s { names = tail (names s) }, expectHead "freshHName" (names s))
@@ -133,7 +136,7 @@ promise :: (Name -> Promise) -> TieM (Out Term) -> TieM (Out Term)
 promise mk_p opt = do
     x <- freshHName
     let p = mk_p x
-    TieM $ \e s -> unTieM (mx p) e { promises = p : promises e } s
+    TieM $ \e s -> traceRender ("promise", x) $ unTieM (mx p) e { promises = p : promises e } s
   where
     mx p = do
       e' <- opt
@@ -193,7 +196,7 @@ memo opt state = traceRenderM (">scp", residualiseState state) >> do
     case [ (S.fromList $ map (rename rn_lr) $ S.toList n_fvs,
             fmap (\e' -> let xs_hack = S.toList (termFreeVars e' S.\\ n_fvs) -- FIXME: the xs_hack is necessary so we can rename new "h" functions in the output (e.g. h1)
                          in renameTerm (case state of (Heap _ ids, _, _) -> ids) (insertRenamings (xs_hack `zip` xs_hack) rn_lr) e')
-                 (seenTie n))
+                 (renameStatics rn_lr (seenTie n)))
          | n <- ns
          , Just rn_lr <- [match (seenMeaning n) state] -- NB: If tb contains a dead PureHeap binding (hopefully impossible) then it may have a free variable that I can't rename, so "rename" will cause an error. Not observed in practice yet.
          , let n_fvs = stateFreeVars (seenMeaning n)
@@ -221,7 +224,8 @@ memo' state opt = traceRenderM (">tie", residualiseState state) >> do
           -- Check that all of the things that were dynamic last time are dynamic this time
          , all (\x' -> x' `S.notMember` statics) tb_dynamic_vs
           -- Check that all of the things that were static last time are static this time *and refer to exactly the same thing*
-         , all (\x -> let x' = rename rn_lr x in x' == x && x' `S.member` statics) (lexical p)
+         , all (\x -> let x' = rename rn_lr x in x' == x && x' `S.member` statics) (lexical p) -- FIXME: lexical should include transitive lexical vars?
+         , traceRender ("memo'", statics, stateFreeVars state, rn_lr, (fun p, lexical p, abstracted p)) True
          ] of
       res:_ -> {- traceRender ("tieback", residualiseState state, fst res) $ -} do
         traceRenderM ("=tie", residualiseState state, res)

@@ -88,6 +88,9 @@ restrict m s = M.filterWithKey (\k _ -> k `S.member` s) m
 exclude :: Ord k => M.Map k v -> S.Set k -> M.Map k v
 exclude m s = M.filterWithKey (\k _ -> k `S.notMember` s) m
 
+mapMaybeSet :: (Ord a, Ord b) => (a -> Maybe b) -> S.Set a -> S.Set b
+mapMaybeSet f = S.fromList . mapMaybe f . S.toList
+
 
 {-# NOINLINE parseIdSupply #-}
 parseIdSupply :: IdSupply
