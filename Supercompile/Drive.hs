@@ -126,8 +126,23 @@ data Promise = P {
 instance MonadStatics ScpM where
     withStatics xs mx = bindFloats (\p -> any (`S.member` xs) (lexical p)) $ ScpM $ \e s -> (\(!res) -> traceRender ("withStatics", xs) res) $ unScpM mx (e { statics = statics e `S.union` xs }) s
 
+-- NB: be careful of this subtle problem:
+--
+--  let h6 = D[e1]
+--      residual = ...
+--      h7 = D[... let residual = ...
+--                 in Just residual]
+--  in ...
+--
+-- If we first drive e1 and create a fulfilment for the h6 promise, then when driving h7 we will eventually come across a residual binding for the
+-- "residual" variable. If we aren't careful, we will notice that "residual" is a FV of the h6 fulfilment and residualise it deep within h7. But
+-- what if the body of the outermost let drove to something referring to h6? We have a FV - disaster!
+--
+-- The right thing to do is to make sure that fulfilments created in different "branches" of the process tree aren't eligible for early binding in
+-- that manner, but we still want to tie back to them if possible. The bindFloats function achieves this by carefully shuffling information between the
+-- fulfulmints and promises parts of the monadic-carried state.
 bindFloats :: (Promise -> Bool) -> ScpM a -> ScpM ([(Out Var, Out Term)], a)
-bindFloats p mx = ScpM $ \e s -> case unScpM mx e s of (s@(ScpState { fulfilments = (partition (p . fst) -> (fs_now, fs_later)) }), x) -> traceRender ("bindFloats", map (fun . fst) fs_now, map (fun . fst) fs_later) $ (s { fulfilments = fs_later }, (sortBy (comparing ((read :: String -> Int) . drop 1 . name_string . fst)) [(fun p, lambdas (abstracted p) e') | (p, e') <- fs_now], x))
+bindFloats p mx = ScpM $ \e s -> case unScpM mx (e { promises = map fst (fulfilments s) ++ promises e }) (s { fulfilments = [] }) of (s'@(ScpState { fulfilments = (partition (p . fst) -> (fs_now, fs_later)) }), x) -> traceRender ("bindFloats", map (fun . fst) fs_now, map (fun . fst) fs_later) $ (s' { fulfilments = fs_later ++ fulfilments s }, (sortBy (comparing ((read :: String -> Int) . drop 1 . name_string . fst)) [(fun p, lambdas (abstracted p) e') | (p, e') <- fs_now], x))
 
 getStatics :: ScpM FreeVars
 getStatics = ScpM $ \e s -> (s, statics e)
