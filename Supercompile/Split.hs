@@ -65,10 +65,10 @@ plusEnteredEnvs = foldr plusEnteredEnv emptyEnteredEnv
 --
 
 
-split :: (Monad m1, MonadStatics m2)
-      => (State -> m1 (FreeVars, m2 (Out Term)))
+split :: (MonadStatics m)
+      => (State -> m (FreeVars, Out Term))
       -> State
-      -> m1 (FreeVars, m2 (Out Term))
+      -> m (FreeVars, Out Term)
 split opt (simplify -> (Heap h (splitIdSupply -> (ids1, ids2)), k, qa)) = uncurry (optimiseSplit opt) (split' (Heap h ids1) k (case tagee qa of Question x' -> [x']; Answer _ -> []) (splitQA ids2 qa))
 
 -- Non-expansive simplification that we can safely do just before splitting to make the splitter a bit simpler
@@ -184,21 +184,13 @@ data Bracketed a = Bracketed {
 instance Functor Bracketed where
     fmap f b = b { fillers = map f (fillers b) }
 
-optimiseBracketed :: (Monad m1, MonadStatics m2)
-                  => (State -> m1 (FreeVars, m2 (Out Term)))
+optimiseBracketed :: (MonadStatics m)
+                  => (State -> m (FreeVars, Out Term))
                   -> Bracketed State
-                  -> m1 (FreeVars, m2 (Out Term))
+                  -> m (FreeVars, Out Term)
 optimiseBracketed opt b = do
-    (fvs', m2ress) <- mapMFunny opt (fillers b)
-    return (extra_fvs b `S.union` transfer b fvs', liftM (rebuild b) m2ress)
-
-mapMFunny :: (Monad m1, MonadStatics m2)
-          => (a -> m1 (b, m2 c))
-          -> [a]
-          -> m1 ([b], m2 [c])
-mapMFunny f xs = do
-    (bs, m2cs) <- liftM unzip $ mapM f xs
-    return (bs, sequence m2cs)
+    (fvs', m2ress) <- liftM unzip $ mapM opt (fillers b)
+    return (extra_fvs b `S.union` transfer b fvs', rebuild b m2ress)
 
 -- We are going to use this helper function to inline any eligible inlinings to produce the expressions for driving
 transitiveInline :: PureHeap -> PureHeap -> FreeVars -> PureHeap
@@ -210,26 +202,26 @@ transitiveInline h_inlineable h_output fvs
 transitiveInline' :: PureHeap -> State -> State
 transitiveInline' h_inlineable (Heap h ids, k, in_e) = (Heap (transitiveInline (h_inlineable `M.union` h) M.empty (stateFreeVars (Heap M.empty ids, k, in_e))) ids, k, in_e)
 
-optimiseSplit :: (Monad m1, MonadStatics m2)
-              => (State -> m1 (FreeVars, m2 (Out Term)))
+optimiseSplit :: (MonadStatics m)
+              => (State -> m (FreeVars, Out Term))
               -> M.Map (Out Var) (Bracketed State)
               -> Bracketed State
-              -> m1 (FreeVars, m2 (Out Term))
+              -> m (FreeVars, Out Term)
 optimiseSplit opt floats_h floats_compulsory = do
     -- 1) Recursively drive the compulsory floats
-    (fvs_compulsory', m2e_compulsory') <- optimiseBracketed opt floats_compulsory
+    (fvs_compulsory', e_compulsory') <- optimiseBracketed opt floats_compulsory
     
     -- 2) We now need to think about how we are going to residualise the letrec. We only want to drive (and residualise) as
     --    much as we actually refer to. This loop does this: it starts by residualising the free variables of the compulsory
     --    residualisation, and then transitively inlines any bindings whose corresponding binders become free.
-    let residualise m2xes_resid resid_bvs resid_fvs
+    let residualise xes_resid resid_bvs resid_fvs
           | M.null h_resid = -- traceRenderM ("residualise", resid_fvs, resid_bvs, (M.map (residualiseBracketed (residualiseState . first3 (flip Heap prettyIdSupply))) floats_h)) $
-                             return (resid_fvs, resid_bvs, m2xes_resid)
+                             return (resid_fvs, resid_bvs, xes_resid)
           | otherwise = {- traceRender ("optimiseSplit", xs_resid') $ -} do
             -- Recursively drive the new residuals arising from the need to bind the resid_fvs
-            (S.unions -> extra_resid_fvs', m2es_resid') <- mapMFunny (optimiseBracketed opt) bracks_resid
+            (S.unions -> extra_resid_fvs', es_resid') <- liftM unzip $ mapM (optimiseBracketed (\s -> liftM (\(hes', (fvs, e')) -> (fvs, letRec hes' e')) $ withStatics (M.keysSet floats_h `S.intersection` stateFreeVars s) $ opt s)) bracks_resid
             -- Recurse, because we might now need to residualise and drive even more stuff (as we have added some more FVs and BVs)
-            residualise (liftM2 (\xes_resid es_resid' -> xes_resid ++ zip xs_resid' es_resid') m2xes_resid m2es_resid')
+            residualise (xes_resid ++ zip xs_resid' es_resid')
                         (resid_bvs `S.union` M.keysSet h_resid)
                         (resid_fvs `S.union` extra_resid_fvs')
           where
@@ -237,10 +229,8 @@ optimiseSplit opt floats_h floats_compulsory = do
             h_resid = M.filterWithKey (\x _br -> x `S.member` resid_fvs) (floats_h `exclude` resid_bvs)
             (xs_resid', bracks_resid) = unzip $ M.toList h_resid
 
-    (fvs', bvs', m2xes_resid) <- residualise (return []) S.empty fvs_compulsory'
-    return (fvs' S.\\ bvs',
-            do (hes, (xes_resid, e_compulsory')) <- withStatics (M.keysSet floats_h `S.intersection` fvs') $ liftM2 (,) m2xes_resid m2e_compulsory'
-               return $ letRec (hes ++ xes_resid) e_compulsory')
+    (fvs', bvs', xes_resid) <- residualise [] S.empty fvs_compulsory'
+    return (fvs' S.\\ bvs', letRec xes_resid e_compulsory')
 
 -- Whether the given variable was entered many times, with no context identifier information required
 -- I'm using this abstraction to make explicit the fact that we don't pass context identifiers between
