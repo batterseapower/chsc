@@ -237,30 +237,32 @@ optimiseSplit :: MonadStatics m
               -> Bracketed State
               -> m (Deeds, FreeVars, Out Term)
 optimiseSplit opt deeds floats_h floats_compulsory = do
-    -- 1) Recursively drive the compulsory floats
-    (deeds, fvs_compulsory', e_compulsory') <- optimiseBracketed opt (deeds, floats_compulsory)
+    (hes, (deeds, fvs', xes', e_compulsory')) <- withStatics (M.keysSet floats_h) $ do
+        -- 1) Recursively drive the compulsory floats
+        (deeds, fvs_compulsory', e_compulsory') <- optimiseBracketed opt (deeds, floats_compulsory)
     
-    -- 2) We now need to think about how we are going to residualise the letrec. We only want to drive (and residualise) as
-    --    much as we actually refer to. This loop does this: it starts by residualising the free variables of the compulsory
-    --    residualisation, and then transitively inlines any bindings whose corresponding binders become free.
-    let residualise deeds xes_resid resid_bvs resid_fvs
-          | M.null h_resid = -- traceRenderM ("residualise", resid_fvs, resid_bvs, (M.map (residualiseBracketed (residualiseState . first3 (flip Heap prettyIdSupply))) floats_h)) $
-                             return (foldl' (\deeds b -> foldl' releaseStateDeed deeds (fillers b)) deeds (M.elems floats_not_resid), resid_fvs S.\\ resid_bvs, xes_resid)
-          | otherwise = {- traceRender ("optimiseSplit", xs_resid') $ -} do
-            -- Recursively drive the new residuals arising from the need to bind the resid_fvs
-            (deeds, S.unions -> extra_resid_fvs', es_resid') <- optimiseMany (optimiseBracketed (\(deeds, s) -> liftM (\(hes', (deeds', vs', e')) -> (deeds', vs', letRec hes' e')) $ withStatics (M.keysSet floats_h `S.intersection` stateFreeVars s) $ opt (deeds, s))) (deeds, bracks_resid)
-            -- Recurse, because we might now need to residualise and drive even more stuff (as we have added some more FVs and BVs)
-            residualise deeds (xes_resid ++ zip xs_resid' es_resid')
-                              (resid_bvs `S.union` M.keysSet h_resid)
-                              (resid_fvs `S.union` extra_resid_fvs')
-          where
-            -- When assembling the final list of things to drive, ensure that we exclude already-driven things
-            floats_not_resid = floats_h `exclude` resid_bvs
-            h_resid = M.filterWithKey (\x _br -> x `S.member` resid_fvs) floats_not_resid
-            (xs_resid', bracks_resid) = unzip $ M.toList h_resid
+        -- 2) We now need to think about how we are going to residualise the letrec. We only want to drive (and residualise) as
+        --    much as we actually refer to. This loop does this: it starts by residualising the free variables of the compulsory
+        --    residualisation, and then transitively inlines any bindings whose corresponding binders become free.
+        let residualise deeds xes_resid resid_bvs resid_fvs
+              | M.null h_resid = -- traceRenderM ("residualise", resid_fvs, resid_bvs, (M.map (residualiseBracketed (residualiseState . first3 (flip Heap prettyIdSupply))) floats_h)) $
+                                 return (foldl' (\deeds b -> foldl' releaseStateDeed deeds (fillers b)) deeds (M.elems floats_not_resid), resid_fvs S.\\ resid_bvs, xes_resid)
+              | otherwise = {- traceRender ("optimiseSplit", xs_resid') $ -} do
+                -- Recursively drive the new residuals arising from the need to bind the resid_fvs
+                (deeds, S.unions -> extra_resid_fvs', es_resid') <- optimiseMany (optimiseBracketed opt) (deeds, bracks_resid)
+                -- Recurse, because we might now need to residualise and drive even more stuff (as we have added some more FVs and BVs)
+                residualise deeds (xes_resid ++ zip xs_resid' es_resid')
+                                  (resid_bvs `S.union` M.keysSet h_resid)
+                                  (resid_fvs `S.union` extra_resid_fvs')
+              where
+                -- When assembling the final list of things to drive, ensure that we exclude already-driven things
+                floats_not_resid = floats_h `exclude` resid_bvs
+                h_resid = M.filterWithKey (\x _br -> x `S.member` resid_fvs) floats_not_resid
+                (xs_resid', bracks_resid) = unzip $ M.toList h_resid
 
-    (deeds, fvs', xes') <- residualise deeds [] S.empty fvs_compulsory'
-    return (deeds, fvs', letRec xes' e_compulsory')
+        (deeds, fvs', xes') <- residualise deeds [] S.empty fvs_compulsory'
+        return (deeds, fvs', xes', e_compulsory')
+    return (deeds, fvs', letRec (hes ++ xes') e_compulsory')
 
 -- Whether the given variable was entered many times, with no context identifier information required
 -- I'm using this abstraction to make explicit the fact that we don't pass context identifiers between
