@@ -18,21 +18,22 @@ data AltCon = DataAlt DataCon [Var] | LiteralAlt Literal | DefaultAlt (Maybe Var
 data Literal = Int Integer | Char Char
              deriving (Eq, Show)
 
-newtype Term = Term { unTerm :: TermF Term }
-             deriving (Eq, Show)
-newtype TaggedTerm = TaggedTerm { unTaggedTerm :: Tagged (TermF TaggedTerm) }
-                   deriving (Eq, Show)
-data TermF term = Var Var | Value (ValueF term) | App term Var | PrimOp PrimOp [term] | Case term [AltF term] | LetRec [(Var, term)] term
+type Term = Identity (TermF Identity)
+type TaggedTerm = Tagged (TermF Tagged)
+type CountedTerm = Counted (TermF Counted)
+data TermF ann = Var Var | Value (ValueF ann) | App (ann (TermF ann)) (ann Var) | PrimOp PrimOp [ann (TermF ann)] | Case (ann (TermF ann)) [AltF ann] | LetRec [(Var, ann (TermF ann))] (ann (TermF ann))
+               deriving (Eq, Show)
+
+type Alt = AltF Identity
+type TaggedAlt = AltF Tagged
+type CountedAlt = AltF Counted
+type AltF ann = (AltCon, ann (TermF ann))
+
+type Value = ValueF Identity
+type TaggedValue = ValueF Tagged
+type CountedValue = ValueF Counted
+data ValueF ann = Lambda Var (ann (TermF ann)) | Data DataCon [Var] | Literal Literal
                 deriving (Eq, Show)
-
-type Alt = AltF Term
-type TaggedAlt = AltF TaggedTerm
-type AltF term = (AltCon, term)
-
-type Value = ValueF Term
-type TaggedValue = ValueF TaggedTerm
-data ValueF term = Lambda Var term | Data DataCon [Var] | Literal Literal
-                 deriving (Eq, Show)
 
 instance NFData PrimOp
 
@@ -45,13 +46,7 @@ instance NFData Literal where
     rnf (Int a) = rnf a
     rnf (Char a) = rnf a
 
-instance NFData Term where
-    rnf (Term a) = rnf a
-
-instance NFData TaggedTerm where
-    rnf (TaggedTerm a) = rnf a
-
-instance NFData term => NFData (TermF term) where
+instance NFData1 ann => NFData (TermF ann) where
     rnf (Var a) = rnf a
     rnf (Value a) = rnf a
     rnf (App a b) = rnf a `seq` rnf b
@@ -59,7 +54,7 @@ instance NFData term => NFData (TermF term) where
     rnf (Case a b) = rnf a `seq` rnf b
     rnf (LetRec a b) = rnf a `seq` rnf b
 
-instance NFData term => NFData (ValueF term) where
+instance NFData1 ann => NFData (ValueF ann) where
     rnf (Lambda a b) = rnf a `seq` rnf b
     rnf (Data a b) = rnf a `seq` rnf b
     rnf (Literal a) = rnf a
@@ -85,13 +80,7 @@ instance Pretty Literal where
                                   | otherwise             = pPrintPrec level prec i
     pPrintPrec _     _    (Char c) = text $ show c
 
-instance Pretty Term where
-    pPrintPrec level prec (Term e) = pPrintPrec level prec e
-
-instance Pretty TaggedTerm where
-    pPrintPrec level prec (TaggedTerm e) = pPrintPrec level prec e
-
-instance Pretty term => Pretty (TermF term) where
+instance Pretty1 ann => Pretty (TermF ann) where
     pPrintPrec level prec e = case e of
         LetRec xes e  -> pPrintPrecLetRec level prec xes e
         Var x         -> pPrintPrec level prec x
@@ -123,9 +112,9 @@ pPrintPrecLetRec level prec xes e_body
   | [] <- xes = pPrintPrec level prec e_body
   | otherwise = prettyParen (prec > noPrec) $ hang (if level == haskellLevel then text "let" else text "letrec") 2 (vcat [pPrintPrec level noPrec x <+> text "=" <+> pPrintPrec level noPrec e | (x, e) <- xes]) $$ text "in" <+> pPrintPrec level noPrec e_body
 
-instance Pretty term => Pretty (ValueF term) where
+instance Pretty1 ann => Pretty (ValueF ann) where
     pPrintPrec level prec v = case v of
-        -- Unfortunately, this nicer pretty-printing doesn't work for general (TermF term):
+        -- Unfortunately, this nicer pretty-printing doesn't work for general (TermF ann):
         --Lambda x e    -> pPrintPrecLam level prec (x:xs) e'
         --  where (xs, e') = collectLambdas e
         Lambda x e    -> pPrintPrecLam level prec [x] e
@@ -140,10 +129,11 @@ pPrintPrecApps level prec e1 es2 = prettyParen (not (null es2) && prec >= appPre
 
 
 tagTerm :: IdSupply -> Term -> TaggedTerm
-tagTerm ids (Term e) = TaggedTerm $ Tagged (hashedId i) $ case e of
+tagTerm ids (I e) = Tagged (hashedId i) $ case e of
     Var x         -> Var x
     Value v       -> Value (tagValue ids' v)
-    App e x       -> App (tagTerm ids' e) x
+    App e (I x)   -> App (tagTerm ids'' e) (Tagged (hashedId i') x)
+      where (ids'', i') = stepIdSupply ids'
     PrimOp pop es -> PrimOp pop (zipWith tagTerm idss' es)
       where idss' = splitIdSupplyL ids
     Case e alts   -> Case (tagTerm ids0' e) (tagAlts ids1' alts)
@@ -167,10 +157,10 @@ tagAlts :: IdSupply -> [Alt] -> [TaggedAlt]
 tagAlts = zipWith tagAlt . splitIdSupplyL
 
 detagTerm :: TaggedTerm -> Term
-detagTerm (TaggedTerm (Tagged _ e)) = case e of
+detagTerm (Tagged _ e) = case e of
     Var x         -> var x
     Value v       -> value (detagValue v)
-    App e x       -> app (detagTerm e) x
+    App e x       -> app (detagTerm e) (tagee x)
     PrimOp pop es -> primOp pop (map detagTerm es)
     Case e alts   -> case_ (detagTerm e) (detagAlts alts)
     LetRec xes e  -> letRec (map (second detagTerm) xes) (detagTerm e)
@@ -184,33 +174,33 @@ detagAlts :: [TaggedAlt] -> [Alt]
 detagAlts = map (second detagTerm)
 
 
-isValue :: TermF term -> Bool
+isValue :: TermF ann -> Bool
 isValue (Value _) = True
 isValue _         = False
 
 termIsValue :: Term -> Bool
-termIsValue = isValue . unTerm
+termIsValue = isValue . unI
 
-isCheap :: TermF term -> Bool
+isCheap :: TermF ann -> Bool
 isCheap (Var _)   = True
 isCheap (Value _) = True
 isCheap _         = False
 
 termIsCheap :: Term -> Bool
-termIsCheap = isCheap . unTerm
+termIsCheap = isCheap . unI
 
 taggedTermIsCheap :: TaggedTerm -> Bool
-taggedTermIsCheap = isCheap . tagee . unTaggedTerm
+taggedTermIsCheap = isCheap . tagee
 
 letRec :: [(Var, Term)] -> Term -> Term
 letRec []  e = e
-letRec xes e = Term $ LetRec xes e
+letRec xes e = I $ LetRec xes e
 
 var :: Var -> Term
-var = Term . Var
+var = I . Var
 
 value :: Value -> Term
-value = Term . Value
+value = I . Value
 
 literal :: Literal -> Term
 literal = value . Literal
@@ -225,10 +215,10 @@ data_ :: DataCon -> [Var] -> Term
 data_ dc = value . Data dc
 
 primOp :: PrimOp -> [Term] -> Term
-primOp pop es = Term (PrimOp pop es)
+primOp pop es = I (PrimOp pop es)
 
 app :: Term -> Var -> Term
-app e x = Term (App e x)
+app e x = I (App e (I x))
 
 apps :: Term -> [Var] -> Term
 apps = foldl app
@@ -237,15 +227,15 @@ varApps :: Var -> [Var] -> Term
 varApps h xs = var h `apps` xs
 
 case_ :: Term -> [Alt] -> Term
-case_ e = Term . Case e
+case_ e = I . Case e
 
 collectLambdas :: Term -> ([Var], Term)
-collectLambdas (Term (Value (Lambda x e))) = first (x:) $ collectLambdas e
-collectLambdas e                           = ([], e)
+collectLambdas (I (Value (Lambda x e))) = first (x:) $ collectLambdas e
+collectLambdas e                        = ([], e)
 
 freshFloatVar :: IdSupply -> String -> Term -> (IdSupply, Maybe (Name, Term), Name)
-freshFloatVar ids _ (Term (Var x)) = (ids,  Nothing,     x)
-freshFloatVar ids s e              = (ids', Just (y, e), y)
+freshFloatVar ids _ (I (Var x)) = (ids,  Nothing,     x)
+freshFloatVar ids s e           = (ids', Just (y, e), y)
   where (ids', y) = freshName ids s
 
 freshFloatVars :: IdSupply -> String -> [Term] -> (IdSupply, [(Name, Term)], [Name])

@@ -47,7 +47,7 @@ isStop _    = False
 terminate :: History -> TagBag -> TermRes
 terminate hist here
   -- | traceRender (length hist, tagBag here) && False = undefined
-  | tERMINATION_CHECK && any (\prev -> if prev <| here then traceRender (hang (text "terminate") 2 (pPrint hist $$ pPrint here)) True else False) hist
+  | tERMINATION_CHECK && any (\prev -> if prev <| here then {- traceRender (hang (text "terminate") 2 (pPrint hist $$ pPrint here)) -} True else False) hist
   = Stop
   | otherwise
   = Continue (here : hist)

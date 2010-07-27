@@ -64,6 +64,7 @@ buildWrappers ps
     | (pop, f) <- M.toList (prim_wrappers ps) ] ++
     [ (name "error", lam (name "msg") $ case_ (var (name "prelude_error") `app` name "msg") []) ]
   where
+    dataConArity :: String -> Int
     dataConArity "()"      = 0
     dataConArity "(,)"     = 2
     dataConArity "(,,)"    = 3
@@ -102,8 +103,8 @@ freshName :: String -> ParseM Name
 freshName n = ParseM $ \s -> let (ids', x) = Name.freshName (ids s) n in (s { ids = ids' }, x)
 
 freshFloatName :: String -> Term -> ParseM (Maybe (Var, Term), Name)
-freshFloatName _ (Term (Var x)) = return (Nothing, x)
-freshFloatName n e              = freshName n >>= \x -> return (Just (x, e), x)
+freshFloatName _ (I (Var x)) = return (Nothing, x)
+freshFloatName n e           = freshName n >>= \x -> return (Just (x, e), x)
 
 nameIt :: Term -> (Var -> ParseM Term) -> ParseM Term
 nameIt e f = freshFloatName "a" e >>= \(mb_float, x) -> fmap (bind (maybeToList mb_float)) $ f x
@@ -236,8 +237,8 @@ qNameCore (LHE.Special sc) = fmap var $ dataConWrapper $ specialConDataCon sc
 qNameCore qn = panic "qNameCore" (text $ show qn)
 
 qNameDataCon :: LHE.QName -> DataCon
-qNameDataCon (LHE.UnQual name) = nameString name
-qNameDataCon (LHE.Special sc)  = specialConDataCon sc
+qNameDataCon (LHE.UnQual n)   = nameString n
+qNameDataCon (LHE.Special sc) = specialConDataCon sc
 
 patCores :: [LHE.Pat] -> ([Var], [Var], Term -> Term)
 patCores []     = ([], [], id)

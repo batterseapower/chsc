@@ -1,4 +1,5 @@
-{-# LANGUAGE TupleSections, PatternGuards, ExistentialQuantification #-}
+{-# LANGUAGE TupleSections, PatternGuards, ExistentialQuantification, DeriveFunctor,
+             FlexibleInstances, IncoherentInstances, OverlappingInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Utilities (
     module IdSupply,
@@ -24,10 +25,14 @@ import Control.DeepSeq (NFData(..), rnf)
 import Control.Monad
 
 import Data.Maybe
+import Data.Monoid
 import Data.List
 import qualified Data.Map as M
 import qualified Data.Set as S
+import Data.Tree
 import Data.Time.Clock.POSIX (getPOSIXTime)
+import qualified Data.Foldable as Foldable
+import qualified Data.Traversable as Traversable
 
 import Debug.Trace
 
@@ -38,8 +43,65 @@ import System.IO
 import System.IO.Unsafe (unsafePerformIO)
 
 
+class Show1 f where
+    showsPrec1 :: Show a => Int -> f a -> ShowS
+
+instance (Show1 f, Show a) => Show (f a) where
+    showsPrec = showsPrec1
+
+
+class Eq1 f where
+    eq1 :: Eq a => f a -> f a -> Bool
+
+instance (Eq1 f, Eq a) => Eq (f a) where
+    (==) = eq1
+
+
+class Eq1 f => Ord1 f where
+    compare1 :: Ord a => f a -> f a -> Ordering
+
+instance (Ord1 f, Ord a) => Ord (f a) where
+    compare = compare1
+
+
+class NFData1 f where
+    rnf1 :: NFData a => f a -> ()
+
+instance (NFData1 f, NFData a) => NFData (f a) where
+    rnf = rnf1
+
+
+class Pretty1 f where
+    pPrintPrec1 :: Pretty a => PrettyLevel -> Rational -> f a -> Doc
+
+instance (Pretty1 f, Pretty a) => Pretty (f a) where
+    pPrintPrec = pPrintPrec1
+
+
 instance NFData Id where
     rnf i = rnf (hashedId i)
+
+
+data Counted a = Counted { count :: Int, countee :: a }
+               deriving (Eq)
+
+instance Show1 Counted where
+    showsPrec1 prec (Counted c x) = showParen (prec >= appPrec) (showString "Counted" . showsPrec appPrec c . showsPrec appPrec x)
+
+instance Eq1 Counted where
+    eq1 (Counted c1 x1) (Counted c2 x2) = c1 == c2 && x1 == x2
+
+instance Ord1 Counted where
+    compare1 (Counted c1 x1) (Counted c2 x2) = (c1, x1) `compare` (c2, x2)
+
+instance NFData1 Counted where
+    rnf1 (Counted a b) = rnf a `seq` rnf b
+
+instance Pretty1 Counted where
+    pPrintPrec1 level _prec (Counted count x) = text ("[" ++ show count ++ "]") <> pPrintPrec level appPrec x
+
+instance Functor Counted where
+    fmap f (Counted c x) = Counted c (f x)
 
 
 type Tag = Int
@@ -50,14 +112,23 @@ injectTag cls tg = cls * tg
 data Tagged a = Tagged { tag :: Tag, tagee :: a }
               deriving (Eq, Show)
 
-instance NFData a => NFData (Tagged a) where
-    rnf (Tagged a b) = rnf a `seq` rnf b
+instance Show1 Tagged where
+    showsPrec1 prec (Tagged tg x) = showParen (prec >= appPrec) (showString "Tagged" . showsPrec appPrec tg . showsPrec appPrec x)
+
+instance Eq1 Tagged where
+    eq1 (Tagged tg1 x1) (Tagged tg2 x2) = tg1 == tg2 && x1 == x2
+
+instance Ord1 Tagged where
+    compare1 (Tagged tg1 x1) (Tagged tg2 x2) = (tg1, x1) `compare` (tg2, x2)
+
+instance NFData1 Tagged where
+    rnf1 (Tagged a b) = rnf a `seq` rnf b
+
+instance Pretty1 Tagged where
+    pPrintPrec1 level prec (Tagged tg x) = braces (pPrint tg) <+> pPrintPrec level prec x
 
 instance Functor Tagged where
     fmap f (Tagged tg x) = Tagged tg (f x)
-
-instance Pretty a => Pretty (Tagged a) where
-    pPrintPrec level prec (Tagged tg x) = braces (pPrint tg) <+> pPrintPrec level prec x
 
 
 instance Show IdSupply where
@@ -75,6 +146,9 @@ instance Pretty a => Pretty (S.Set a) where
 
 instance (Pretty k, Pretty v) => Pretty (M.Map k v) where
     pPrint m = brackets $ fsep (punctuate comma [pPrint k <+> text "|->" <+> pPrint v | (k, v) <- M.toList m])
+
+instance Pretty a => Pretty (Tree a) where
+    pPrint = text . drawTree . fmap (show . pPrint)
 
 fmapSet :: (Ord a, Ord b) => (a -> b) -> S.Set a -> S.Set b
 fmapSet f = S.fromList . map f . S.toList
@@ -120,7 +194,7 @@ data Train a b = Wagon a (Train a b)
                | Caboose b
 
 
-appPrec, opPrec, noPrec :: Rational
+appPrec, opPrec, noPrec :: Num a => a
 appPrec = 2    -- Argument of a function application
 opPrec  = 1    -- Argument of an infix operator
 noPrec  = 0    -- Others
@@ -162,6 +236,12 @@ assertRender a False _ = error (pPrintRender a)
 removeOnes :: [a] -> [[a]]
 removeOnes [] = []
 removeOnes (x:xs) = xs : map (x:) (removeOnes xs)
+
+listContexts :: [a] -> [([a], a, [a])]
+listContexts xs = zipWith (\is (t:ts) -> (is, t, ts)) (inits xs) (init (tails xs))
+
+bagContexts :: [a] -> [(a, [a])]
+bagContexts xs = [(x, is ++ ts) | (is, x, ts) <- listContexts xs]
 
 
 accumL :: (acc -> (acc, a)) -> acc -> Int -> (acc, [a])
@@ -316,6 +396,60 @@ zipWithEqual _ _ _ = fail "zipWithEqual"
 
 implies :: Bool -> Bool -> Bool
 implies cond consq = not cond || consq
+
+
+mapAccumM :: (Traversable.Traversable t, Monoid m) => (a -> (m, b)) -> t a -> (m, t b)
+mapAccumM f ta = Traversable.mapAccumL (\m a -> case f a of (m', b) -> (m `mappend` m', b)) mempty ta
+
+
+newtype Identity a = I { unI :: a } deriving (Functor)
+
+instance Show1 Identity where
+    showsPrec1 prec (I x) = showParen (prec >= appPrec) (showString "Identity" . showsPrec appPrec x)
+
+instance Eq1 Identity where
+    eq1 (I x1) (I x2) = x1 == x2
+
+instance Ord1 Identity where
+    compare1 (I x1) (I x2) = x1 `compare` x2
+
+instance NFData1 Identity where
+    rnf1 (I x) = rnf x
+
+instance Pretty1 Identity where
+    pPrintPrec1 level prec (I x) = pPrintPrec level prec x
+
+instance Monad Identity where
+    return = I
+    mx >>= fxmy = fxmy (unI mx)
+
+
+class (Functor t, Foldable.Foldable t) => Accumulatable t where
+    mapAccumT  ::            (acc -> x ->   (acc, y)) -> acc -> t x ->   (acc, t y)
+    mapAccumTM :: Monad m => (acc -> x -> m (acc, y)) -> acc -> t x -> m (acc, t y)
+    
+    mapAccumT f acc x = unI (mapAccumTM (\acc' x' -> I (f acc' x')) acc x)
+
+fmapDefault :: (Accumulatable t) => (a -> b) -> t a -> t b
+fmapDefault f = snd . mapAccumT (\() x -> ((), f x)) ()
+
+foldMapDefault :: (Accumulatable t, Monoid m) => (a -> m) -> t a -> m
+foldMapDefault f = fst . mapAccumT (\acc x -> (f x `mappend` acc, ())) mempty
+
+instance Accumulatable [] where
+    mapAccumT  = mapAccumL
+    mapAccumTM = mapAccumLM
+
+mapAccumLM :: Monad m => (acc -> x -> m (acc, y)) -> acc -> [x] -> m (acc, [y])
+mapAccumLM f = go []
+  where
+    go ys acc []     = return (acc, reverse ys)
+    go ys acc (x:xs) = do
+      (acc, y) <- f acc x
+      go (y:ys) acc xs
+
+instance Ord k => Accumulatable (M.Map k) where
+    mapAccumTM f acc = liftM (second M.fromList) . mapAccumTM (\acc (k, x) -> liftM (second (k,)) (f acc x)) acc . M.toList
 
 
 type Seconds = Double

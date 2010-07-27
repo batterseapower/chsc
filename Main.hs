@@ -72,6 +72,7 @@ testOne file = do
         -- Save a copy of the supercompiled code somewhere so I can consult it at my leisure
         let output_dir = foldl1 (</>) [ "output"
                                       , if eVALUATE_PRIMOPS then "primops" else "no-primops"
+                                      , if gENERALISATION   then "gen"     else "no-gen"
                                       ]
         createDirectoryIfMissing True (takeDirectory $ output_dir </> file)
         writeFile (output_dir </> replaceExtension file ".hs") after_code
