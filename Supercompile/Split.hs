@@ -366,7 +366,7 @@ split' old_deeds old_h@((cheapifyHeap . (old_deeds,)) -> (deeds, Heap h (splitId
     promoteToBracket :: In TaggedTerm -> Bracketed State
     promoteToBracket in_e = Bracketed (\[e'] -> e') S.empty (\[fvs'] -> fvs') [promoteToState in_e]
 
-splitPureHeap :: PureHeap -> M.Map Var Bool -> EnteredEnv -> (PureHeap, EnteredEnv, FreeVars)
+splitPureHeap :: PureHeap -> EnteredManyEnv -> EnteredEnv -> (PureHeap, EnteredEnv, FreeVars)
 splitPureHeap h was_entered_many entered_k = -- traceRender ("splitPureHeap", (residualisePureHeap prettyIdSupply h), (entered, entered_k), "=>", entered', must_resid_k_xs') $
                                              (h_inlineable, entered', must_resid_k_xs')
   where
