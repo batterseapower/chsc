@@ -153,11 +153,8 @@ freshHName = ScpM $ \_ s -> (s { names = tail (names s) }, expectHead "freshHNam
 getPromises :: ScpM [Promise]
 getPromises = ScpM $ \e s -> (s, promises e ++ map fst (fulfilments s))
 
-promise :: (Name -> Promise) -> ScpM (a, b, Out Term) -> ScpM (a, b, Out Term)
-promise mk_p opt = do
-    x <- freshHName
-    let p = mk_p x
-    ScpM $ \e s -> traceRender ("promise", x) $ unScpM (mx p) e { promises = p : promises e } s
+promise :: Promise -> ScpM (a, b, Out Term) -> ScpM (a, b, Out Term)
+promise p opt = ScpM $ \e s -> traceRender ("promise", fun p, abstracted p, lexical p) $ unScpM (mx p) e { promises = p : promises e } s
   where
     mx p = do
       (a, b, e') <- opt
@@ -206,7 +203,7 @@ memo :: ((Deeds, State) -> ScpM (Deeds, FreeVars, Out Term))
 memo opt (deeds, state) = do
     statics <- getStatics
     ps <- getPromises
-    case [ (releaseStateDeed deeds state, S.fromList (tb_dynamic_vs ++ tb_static_vs), fun p `varApps` tb_dynamic_vs)
+    case [ (fun p, (releaseStateDeed deeds state, S.fromList (tb_dynamic_vs ++ tb_static_vs), fun p `varApps` tb_dynamic_vs))
          | p <- ps
          , Just rn_lr <- [match (meaning p) state]
          , let rn_fvs = map (safeRename ("tieback: FVs " ++ pPrintRender (fun p)) rn_lr) -- NB: If tb contains a dead PureHeap binding (hopefully impossible) then it may have a free variable that I can't rename, so "rename" will cause an error. Not observed in practice yet.
@@ -218,19 +215,22 @@ memo opt (deeds, state) = do
          , and $ zipWith (\x x' -> x' == x && x' `S.member` statics) (lexical p) tb_static_vs -- FIXME: lexical should include transitive lexical vars?
          , traceRender ("memo'", statics, stateFreeVars state, rn_lr, (fun p, lexical p, abstracted p)) True
          ] of
-      res:_ -> {- traceRender ("tieback", residualiseState state, fst res) $ -} do
-        traceRenderM ("=sc", residualiseState state, deeds, res)
+      (_x, res):_ -> {- traceRender ("tieback", residualiseState state, fst res) $ -} do
+        traceRenderM ("=sc", _x, residualiseState state, deeds, res)
         return res
       [] -> {- traceRender ("new drive", residualiseState state) $ -} do
         let vs = stateFreeVars state
             (static_vs_list, dynamic_vs_list) = partition (`S.member` statics) (S.toList vs)
     
         -- NB: promises are lexically scoped because they may refer to FVs
-        traceRenderM (">sc", residualiseState state, deeds)
-        (deeds, _vs', e') <- promise (\x -> P { fun = x, abstracted = dynamic_vs_list, lexical = static_vs_list, meaning = state }) (opt (deeds, state))
-        traceRenderM ("<sc", residualiseState state, (deeds, vs, e'))
+        x <- freshHName
+        (deeds, _vs', e') <- promise (P { fun = x, abstracted = dynamic_vs_list, lexical = static_vs_list, meaning = state }) $ do
+            traceRenderM (">sc", x, residualiseState state, deeds)
+            res <- opt (deeds, state)
+            traceRenderM ("<sc", x, residualiseState state, res)
+            return res
         
-        assertRender ("sc: FVs", _vs' S.\\ vs, vs) (_vs' `S.isSubsetOf` vs) $ return ()
+        assertRender ("sc: FVs", x, _vs' S.\\ vs, vs) (_vs' `S.isSubsetOf` vs) $ return ()
         
         return (deeds, vs, e')
 

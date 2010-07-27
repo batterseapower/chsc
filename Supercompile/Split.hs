@@ -291,7 +291,7 @@ split' old_deeds old_h@((cheapifyHeap . (old_deeds,)) -> (deeds, Heap h (splitId
       | entered_many == entered_many'
       , must_resid_k_xs == must_resid_k_xs'
       = -- (\res -> traceRender ("split'", entered_hole, "==>", entered_k, "==>", entered', must_resid_k_xs, [x' | Tagged _ (Update x') <- k], M.keysSet floats_k_bound) res) $
-        (\res@(_, avail_h, _) -> traceRender ("split'", M.keysSet h_strictly_inlined, deeds, deeds0, deeds3, M.keysSet (case old_h of Heap h _ -> h), M.keysSet h, M.keysSet avail_h, M.keysSet h_inlineable, entered_many, entered') res) $
+        (\res@(_, avail_h, _) -> traceRender ("split'", (M.keysSet h, M.keysSet floats_k_bound) {- available for residualisation in letrec -}, M.keysSet h_strictly_inlined, deeds, deeds0, deeds3, M.keysSet (case old_h of Heap h _ -> h), M.keysSet h, M.keysSet avail_h, M.keysSet h_inlineable, entered_many, entered') res) $
         (deeds3, brackets_h `M.union` brackets_k_bound, bracket_k')
       | otherwise = go must_resid_k_xs' entered_many'
       where

@@ -277,6 +277,14 @@ instance (Pretty a, Pretty b, Pretty c, Pretty d,
 
 instance (Pretty a, Pretty b, Pretty c, Pretty d,
           Pretty e, Pretty f, Pretty g, Pretty h,
+          Pretty i, Pretty j, Pretty k, Pretty l) => Pretty (a, b, c, d, e, f, g, h, i, j, k, l) where
+    pPrint (a, b, c, d, e, f, g, h, i, j, k, l)
+      = pPrintTuple [pPrint a, pPrint b, pPrint c, pPrint d,
+                     pPrint e, pPrint f, pPrint g, pPrint h,
+                     pPrint i, pPrint j, pPrint k, pPrint l]
+
+instance (Pretty a, Pretty b, Pretty c, Pretty d,
+          Pretty e, Pretty f, Pretty g, Pretty h,
           Pretty i, Pretty j, Pretty k, Pretty l,
           Pretty m, Pretty n, Pretty o) => Pretty (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o) where
     pPrint (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o)
