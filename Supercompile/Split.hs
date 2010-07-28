@@ -424,9 +424,12 @@ splitPureHeap h was_entered_many entered_k = -- traceRender ("splitPureHeap", (r
         doesnt_dup_work x' = maybe True isOnce (M.lookup x' entered')
 
     -- The h_nonvalue_noninlineable are the bindings which *ABSOLUTELY MUST* be residualised right now, because they are free
-    -- in at least one place and furthermore are both expensive and may be used more than once. The free variables of those bindings
-    -- are exactly what we need to feed to splitStack on the next iteration to ensure that things referred to by them
-    -- but bound in the evaluation context are bound right here.
+    -- in at least one place and furthermore are either:
+    --  1) Both expensive and may be used more than once
+    --  2) OR were residualised the last time around the loop, so we aren't allowed to inline them.
+    --
+    -- The free variables of those bindings are exactly what we need to feed to splitStack on the next iteration to ensure that
+    -- things referred to by them but bound in the evaluation context are bound right here.
     --
     -- FIXME: must include the FVs of elements of h_inlineable that were not inlined into QA/Stack contexts due to generalisation.
     -- FIXME: surely should also contain FVs of h_value bindings reachable via h_nonvalue_noninlineable FVs?
