@@ -22,7 +22,7 @@ import StaticFlags
 
 import Control.Arrow (first, second, (***), (&&&))
 import Control.DeepSeq (NFData(..), rnf)
-import Control.Monad
+import Control.Monad hiding (join)
 
 import Data.Maybe
 import Data.Monoid
