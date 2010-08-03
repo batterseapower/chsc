@@ -19,3 +19,7 @@ tERMINATION_CHECK = not $ "--no-termination" `elem` (unsafePerformIO getArgs)
 {-# NOINLINE eVALUATE_PRIMOPS #-}
 eVALUATE_PRIMOPS :: Bool
 eVALUATE_PRIMOPS = not $ "--no-primops" `elem` (unsafePerformIO getArgs)
+
+{-# NOINLINE sPECULATION #-}
+sPECULATION :: Bool
+sPECULATION = not $ "--no-speculation" `elem` (unsafePerformIO getArgs)

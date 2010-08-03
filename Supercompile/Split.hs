@@ -70,7 +70,7 @@ data QA = Question (Out Var)
         | Answer   (In TaggedValue)
 
 simplify :: State -> (Heap, Stack, Tagged QA)
-simplify s = expectHead "simplify" [res | s <- s : unfoldr (\s -> fmap (\x -> (x, x)) (step s)) s, Just res <- [stop s]]
+simplify s = expectHead "simplify" [res | s <- s : unfoldr (\s -> fmap (\x -> (x, x)) (step id s)) s, Just res <- [stop s]]
   where
     stop (h, k, (rn, TaggedTerm (Tagged tg (Var x))))   = Just (h, k, Tagged tg (Question (rename rn x)))
     stop (h, k, (rn, TaggedTerm (Tagged tg (Value v)))) = Just (h, k, Tagged tg (Answer (rn, v)))

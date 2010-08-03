@@ -69,13 +69,12 @@ reduce = go emptyHistory
   where
     go hist state
       | not eVALUATE_PRIMOPS, (_, _, (_, TaggedTerm (Tagged _ (PrimOp _ _)))) <- state = state
-      | otherwise = case step state of
-        Nothing -> state
-        Just state'
-          | intermediate state' -> go hist state'
-          | otherwise           -> case terminate hist (stateTagBag state') of
-              Stop           -> state'
-              Continue hist' -> go hist' state'
+      | otherwise = fromMaybe state $ do
+          hist <- case terminate hist (stateTagBag state) of
+                     _ | intermediate state -> Just hist
+                     Continue hist'         -> Just hist'
+                     Stop                   -> Nothing
+          fmap (go hist) $ step (go hist) state
     
     intermediate :: State -> Bool
     intermediate (_, _, (_, TaggedTerm (Tagged _ (Var _)))) = False
