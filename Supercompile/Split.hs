@@ -342,36 +342,6 @@ splitt (old_deeds, ((cheapifyHeap . (old_deeds,)) -> (deeds, Heap h (splitIdSupp
         (deeds1, fvs_paths_focus', entered_focus, bracketed_focus') =             inlineBracketHeap deeds0 bracketed_focus
         (deeds2, fvs_paths_heap',  entered_heap,  bracketeds_heap') = inlineHeapT inlineBracketHeap deeds1 bracketeds_heap
 
-        -- Note [Better fixed points of Entered information]
-        --
-        -- Consider this example:
-        --
-        --   ex_used_once |-> if unk then False else True
-        --   ex_uses_ex |-> if ex_used_once then True else False
-        --   one |-> f ex_uses_ex
-        --   two |-> g ex_uses_ex
-        --   (one, two)
-        --
-        -- If we just optimistically inline all heap bindings in the first step, we get:
-        --
-        --   one |-> < ex_used_once |-> if unk then False else True,
-        --             ex_uses_ex |-> if ex_used_once then True else False
-        --           | f ex_uses_ex | >
-        --   two |-> < ex_used_once |-> if unk then False else True,
-        --             ex_uses_ex |-> if ex_used_once then True else False
-        --           | g ex_uses_ex | >
-        --   (one, two)
-        --
-        -- If we now compute the Entered information based on this proposal, we mark both
-        -- ex_used_once and ex_uses_ex as Many but non-cheap and hence force them to be residualised.
-        -- However, this is too pessimistic because once we residualise ex_uses_ex there is only one
-        -- occurrenc of ex_used_once.
-        --
-        -- The right thing to do is to only mark as residualised due to expense concens those bindings
-        -- that would have been marked as expensive *regardless of the choice of any other binding's expense*.
-        -- So ex_used_once should not be marked as residualised because we only inlined it due to it being
-        -- a free variable of something which transitioned from inlineable to non-inlineable.
-
         -- 4) Construct the next element of the fixed point process:
         --  a) We should also residualise bindings that occur as free variables of any of the
         --     elements of the (post-inlining) residualised heap or focus. As a side effect, this will pick up
@@ -396,10 +366,60 @@ splitt (old_deeds, ((cheapifyHeap . (old_deeds,)) -> (deeds, Heap h (splitIdSupp
                                           lfpFrom (S.empty, M.keysSet h_cheap `S.union` resid_xs) entered_resid_step
         resid_xs' = fvs' `S.union` newly_resid
 
+-- Note [Better fixed points of Entered information]
+--
+-- Consider this example:
+--
+--   ex_used_once |-> if unk then False else True
+--   ex_uses_ex |-> if ex_used_once then True else False
+--   one |-> f ex_uses_ex
+--   two |-> g ex_uses_ex
+--   (one, two)
+--
+-- If we just optimistically inline all heap bindings in the first step, we get:
+--
+--   one |-> < ex_used_once |-> if unk then False else True,
+--             ex_uses_ex |-> if ex_used_once then True else False
+--           | f ex_uses_ex | >
+--   two |-> < ex_used_once |-> if unk then False else True,
+--             ex_uses_ex |-> if ex_used_once then True else False
+--           | g ex_uses_ex | >
+--   (one, two)
+--
+-- If we now compute the Entered information based on this proposal, we mark both
+-- ex_used_once and ex_uses_ex as Many but non-cheap and hence force them to be residualised.
+-- However, this is too pessimistic because once we residualise ex_uses_ex there is only one
+-- occurrenc of ex_used_once.
+--
+-- The right thing to do is to only mark as residualised due to expense concrens those bindings
+-- that would have been marked as expensive *regardless of the choice of any other binding's expense*.
+-- So ex_used_once should not be marked as residualised because we only inlined it due to it being
+-- a free variable of something which transitioned from inlineable to non-inlineable.
+--
+--
+-- The solution works as follows:
+--  * When inlining the heap into brackets, we record for each heap binding that we inline all the
+--    "paths" through which they got inlined. If something was a direct FV of one of the brackets,
+--    that will lead to a path of []. If something was a FV of a binding x that was itself a FV
+--    of the bracket then the path will be [x].
+--  * When deciding what to residualise for work-duplication reasons, we only force residualisation
+--    for bindings that are BOTH:
+--     a) Non-cheap and non-linear
+--     b) Inlined through *any* path where each of the bindings on that path is certainly not
+--        going to be residualised *this* time around the fixed point when it *wasn't last time*
+--
+--    This last condition ensures that we do not mark expensive bindings that are only *temporarily*
+--    non-linear as residualised. Only bindings that actually have non-linearity arising from some
+--    binding that is use that is not going to be fiddled with by future residualisations is permitted.
+--    
+--    In particular, this prevents ex_used_once from being marked Many even though the agressive inlining
+--    outlined above causes it to be temporarily used non-linearly. Instead we delay until ex_uses_ex is
+--    residualised and then see the truth -- ex_used_once is actually linear and can be inlined safely.
+
 -- | Used to record which chain of inlinings caused some variable to be inlined
 type Path = [Out Var]
 
--- | The paths through which we demand particular free variables
+-- | The paths through a bracket demands particular free variables
 type FreeVarPaths = M.Map (Out Var) [Path]
 
 -- We are going to use this helper function to inline any eligible inlinings to produce the expressions for driving.
