@@ -2,6 +2,8 @@
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 module Supercompile.Split (Statics, MonadStatics(..), split) where
 
+--import Supercompile.Residualise
+
 import Core.FreeVars
 import Core.Renaming
 import Core.Syntax
@@ -12,6 +14,7 @@ import Evaluator.Syntax
 
 import Size.Deeds
 
+import Algebra.PartialOrd
 import Algebra.Lattice
 import Name
 import Renaming
@@ -60,11 +63,8 @@ plusEntered e1 e2 = Many (enteredInResidual e1 || enteredInResidual e2)
 
 type EnteredEnv = M.Map (Out Var) Entered
 
-emptyEnteredEnv :: EnteredEnv
-emptyEnteredEnv = M.empty
-
 mkEnteredEnv :: Entered -> FreeVars -> EnteredEnv
-mkEnteredEnv ent = M.fromList . map (, ent) . S.toList
+mkEnteredEnv = setToMap
 
 
 --
@@ -280,7 +280,8 @@ splitt :: (Deeds, (Heap, Stack, Tagged QA))   -- ^ The thing to split, and the D
            M.Map (Out Var) (Bracketed State), -- ^ The residual "let" bindings
            Bracketed State)                   -- ^ The residual "let" body
 splitt (old_deeds, ((cheapifyHeap . (old_deeds,)) -> (deeds, Heap h (splitIdSupply -> (ids_brack, splitIdSupply -> (ids1, ids2)))), k, qa))
-    = snd $ split_step resid_xs -- TODO: eliminate redundant recomputation here?
+    = -- traceRender ("splitt", residualiseHeap (Heap h ids_brack) (\ids -> residualiseStack ids k (case tagee qa of Question x' -> var x'; Answer in_v -> value $ detagValue $ renameIn renameTaggedValue ids in_v))) $
+      snd $ split_step resid_xs -- TODO: eliminate redundant recomputation here?
   where
     -- Note that as an optimisation, optimiseSplit will only actually creates those residual bindings if the
     -- corresponding variables are free *after driving*. Of course, we have no way of knowing which bindings
@@ -289,7 +290,7 @@ splitt (old_deeds, ((cheapifyHeap . (old_deeds,)) -> (deeds, Heap h (splitIdSupp
     
     -- Simultaneously computes the next fixed-point step and some artifacts computed along the way,
     -- which happen to correspond to exactly what I need to return from splitt.
-    split_step resid_xs = (resid_xs', (deeds2, bracketeds_heap', bracketed_focus'))
+    split_step resid_xs = {- traceRender ("split_step", resid_xs) -} (resid_xs', (deeds2, bracketeds_heap', bracketed_focus'))
       where
         -- 1) Build a candidate splitting for the Stack and QA components
         -- When creating the candidate stack split, we ensure that we create a residual binding
@@ -321,243 +322,114 @@ splitt (old_deeds, ((cheapifyHeap . (old_deeds,)) -> (deeds, Heap h (splitIdSupp
         
         -- 3b) Work out which part of the heap is admissable for inlining
         -- We are allowed to inline anything which is duplicatable or is not residualised right here and now
-        (h_cheap, h_expensive) = M.partition (\(_, e) -> taggedTermIsCheap e) h
+        h_cheap = M.filter (\(_, e) -> taggedTermIsCheap e) h
         h_inlineable = h_not_residualised `M.union` h_cheap
         
         -- Generalising the final proposed floats may cause some bindings that we *thought* were going to be inlined to instead be
         -- residualised. We need to account for this in the Entered information (for work-duplication purposes), and in that we will
         -- also require any FVs of the new residualised things that are bound in the stack to residualise more frames.
         inlineHeapT :: Accumulatable t
-                    => (Deeds -> a   -> (Deeds, FreeVars, EnteredEnv, b))
-                    ->  Deeds -> t a -> (Deeds, FreeVars, EnteredEnv, t b)
-        inlineHeapT f deeds b = (deeds', fvs', entered', b')
-          where ((deeds', fvs', entered'), b') = mapAccumT (\(deeds, fvs, entered) s -> case f deeds s of (deeds, fvs', entered', s) -> ((deeds, fvs `S.union` fvs', entered `join` entered'), s)) (deeds, S.empty, bottom) b
+                    => (Deeds -> a   -> (Deeds, FreeVarPaths, EnteredEnv, b))
+                    ->  Deeds -> t a -> (Deeds, FreeVarPaths, EnteredEnv, t b)
+        inlineHeapT f deeds b = (deeds', fvs_paths', entered', b')
+          where ((deeds', fvs_paths', entered'), b') = mapAccumT (\(deeds, fvs_paths, entered) s -> case f deeds s of (deeds, fvs_paths', entered', s) -> ((deeds, M.unionWith (++) fvs_paths fvs_paths', entered `join` entered'), s)) (deeds, M.empty, bottom) b
 
-        inlineBracketHeap :: Deeds -> Bracketed (Entered, State) -> (Deeds, FreeVars, EnteredEnv, Bracketed State)
+        inlineBracketHeap :: Deeds -> Bracketed (Entered, State) -> (Deeds, FreeVarPaths, EnteredEnv, Bracketed State)
         inlineBracketHeap = inlineHeapT (flip transitiveInline h_inlineable)
         
         -- 3c) Actually do the inlining of as much of the heap as possible into the proposed floats
-        (deeds1, gen_fvs_focus', entered_focus, bracketed_focus') =             inlineBracketHeap deeds0 bracketed_focus
-        (deeds2, gen_fvs_heap',  entered_heap,  bracketeds_heap') = inlineHeapT inlineBracketHeap deeds1 bracketeds_heap
+        -- We also take this opportunity to strip out the Entered information from each context.
+        (deeds1, fvs_paths_focus', entered_focus, bracketed_focus') =             inlineBracketHeap deeds0 bracketed_focus
+        (deeds2, fvs_paths_heap',  entered_heap,  bracketeds_heap') = inlineHeapT inlineBracketHeap deeds1 bracketeds_heap
+
+        -- Note [Better fixed points of Entered information]
+        --
+        -- Consider this example:
+        --
+        --   ex_used_once |-> if unk then False else True
+        --   ex_uses_ex |-> if ex_used_once then True else False
+        --   one |-> f ex_uses_ex
+        --   two |-> g ex_uses_ex
+        --   (one, two)
+        --
+        -- If we just optimistically inline all heap bindings in the first step, we get:
+        --
+        --   one |-> < ex_used_once |-> if unk then False else True,
+        --             ex_uses_ex |-> if ex_used_once then True else False
+        --           | f ex_uses_ex | >
+        --   two |-> < ex_used_once |-> if unk then False else True,
+        --             ex_uses_ex |-> if ex_used_once then True else False
+        --           | g ex_uses_ex | >
+        --   (one, two)
+        --
+        -- If we now compute the Entered information based on this proposal, we mark both
+        -- ex_used_once and ex_uses_ex as Many but non-cheap and hence force them to be residualised.
+        -- However, this is too pessimistic because once we residualise ex_uses_ex there is only one
+        -- occurrenc of ex_used_once.
+        --
+        -- The right thing to do is to only mark as residualised due to expense concens those bindings
+        -- that would have been marked as expensive *regardless of the choice of any other binding's expense*.
+        -- So ex_used_once should not be marked as residualised because we only inlined it due to it being
+        -- a free variable of something which transitioned from inlineable to non-inlineable.
 
         -- 4) Construct the next element of the fixed point process:
-        --  a) We additionally need to residualise bindings for any generalised variables
-        --  b) We should also residualise bindings that occur as free variables of any of the
-        --     elements of the (post-inlining) residualised heap or focus
-        --  c) Lastly, we should residualise non-cheap bindings that got Entered more than once in the proposal
-        --
-        -- FIXME: I'm almost certain that condition a) is redundant given that we have b)
-        gen_fvs' = gen_fvs_focus' `S.union` gen_fvs_heap'
-        entered  = entered_focus `join` entered_heap
-        resid_xs' = gen_fvs' `S.union`
-                    bracketedFreeVars stateFreeVars bracketed_focus' `S.union` S.unions [bracketedFreeVars stateFreeVars bracketed | (_, bracketed) <- M.toList bracketeds_heap'] `S.union`
-                    S.filter (\x' -> maybe False (not . isOnce) $ M.lookup x' entered) (M.keysSet h_expensive)
+        --  a) We should also residualise bindings that occur as free variables of any of the
+        --     elements of the (post-inlining) residualised heap or focus. As a side effect, this will pick up
+        --     any variables that should be residualised due to generalisation
+        --  b) Lastly, we should residualise non-cheap bindings that got Entered more than once in the proposal
+        --     to make the splitter more agressive (see Note [Better fixed points of Entered information]), I only
+        --     do this for bindings that were actually direct free variables of the original term.
+        fvs' = bracketedFreeVars stateFreeVars bracketed_focus' `S.union` S.unions [bracketedFreeVars stateFreeVars bracketed' | (_, bracketed') <- M.toList bracketeds_heap']
+        entered    = entered_focus `join` entered_heap
+        fvs_paths' = M.unionWith (++) fvs_paths_focus' fvs_paths_heap'
+        entered_resid_substep x' paths no_change@(newly_resid, not_newly_resid)
+          = -- If *all* the paths leading here certainly don't contain something we are going to change our mind about residualising...
+            if all (all (`S.member` not_newly_resid)) paths
+            then -- ...and the binding is cheap or linear
+                 if x' `M.member` h_cheap || maybe True isOnce (M.lookup x' entered)
+                 then (newly_resid,             S.insert x' not_newly_resid) -- ...the binding is certainly not going to be residualised
+                 else (S.insert x' newly_resid, not_newly_resid)             -- Otherwise, it certainly should be residualised to make a new root
+            else no_change -- Can't decide yet
+        entered_resid_step (nr, nnr) = -- traceRender ("entered_resid_step", (nr, nnr)) $
+                                       M.foldWithKey entered_resid_substep (nr, nnr) fvs_paths'
+        (newly_resid, _not_newly_resid) = -- traceRender ("entered_resid", fvs_paths') $
+                                          lfpFrom (S.empty, M.keysSet h_cheap `S.union` resid_xs) entered_resid_step
+        resid_xs' = fvs' `S.union` newly_resid
+
+-- | Used to record which chain of inlinings caused some variable to be inlined
+type Path = [Out Var]
+
+-- | The paths through which we demand particular free variables
+type FreeVarPaths = M.Map (Out Var) [Path]
 
 -- We are going to use this helper function to inline any eligible inlinings to produce the expressions for driving.
 -- Returns (along with the augmented state) the names of those bindings in the input PureHeap that could have been inlined
 -- but were not due to generalisation.
-transitiveInline :: Deeds -> PureHeap -> (Entered, State) -> (Deeds, FreeVars, EnteredEnv, State)
+transitiveInline :: Deeds -> PureHeap -> (Entered, State) -> (Deeds, FreeVarPaths, EnteredEnv, State)
 transitiveInline deeds h_inlineable (ent, (Heap h ids, k, in_e))
-    = (if not (S.null not_inlined_vs') then traceRender ("transitiveInline: generalise", not_inlined_vs') else id) $
-      (deeds', not_inlined_vs', mkEnteredEnv ent (M.keysSet h' S.\\ M.keysSet h), (Heap h' ids, k, in_e))
+    = -- (if not (S.null not_inlined_vs') then traceRender ("transitiveInline: generalise", not_inlined_vs') else id) $
+      (deeds', paths, mkEnteredEnv ent (M.keysSet h' S.\\ M.keysSet h), (Heap h' ids, k, in_e))
   where
-    (deeds', not_inlined_vs', h') = go 0 deeds (h_inlineable `M.union` h) M.empty (stateFreeVars (Heap M.empty ids, k, in_e))
+    (deeds', paths, h') = go 0 deeds (h_inlineable `M.union` h) M.empty (setToMap [[]] (stateFreeVars (Heap M.empty ids, k, in_e)))
     
-    go :: Int -> Deeds -> PureHeap -> PureHeap -> FreeVars -> (Deeds, FreeVars, PureHeap)
-    go n deeds h_inlineable h_output fvs = -- traceRender ("go", n, M.keysSet h_inlineable, M.keysSet h_output, fvs) $
-                                           if M.null h_inline then (deeds', M.keysSet h_not_inlined, h_output)
-                                                              else go (n + 1) deeds' (h_inlineable' `M.union` h_not_inlined) (h_output `M.union` h_inline) fvs'
+    go :: Int -> Deeds -> PureHeap -> PureHeap -> M.Map (Out Var) [Path] -> (Deeds, M.Map (Out Var) [Path], PureHeap)
+    go n deeds h_inlineable h_output fvs_paths = -- traceRender ("go", n, M.keysSet h_inlineable, M.keysSet h_output, fvs) $
+                                                 if M.null h_inline then (deeds', fvs_paths, h_output)
+                                                                    else go (n + 1) deeds' (h_inlineable' `M.union` h_not_inlined) (h_output `M.union` h_inline) fvs'
       where -- Generalisation heuristic: only inline those members of the heap which do not cause us to blow the whistle
+            --
             -- NB: we rely here on the fact that our caller will still be able to fill in bindings for stuff from h_inlineable
             -- even if we choose not to inline it into the State, and that such bindings will not be evaluated until they are
             -- actually demanded (or we could get work duplication by inlining into only *some* Once contexts).
+            --
+            -- NB: we rely here on the fact that the original h contains "optional" bindings in the sense that they are shadowed
+            -- by something bound above.
             consider_inlining x' in_e@(_, e) (deeds, h_inline, h_not_inlined) = case claimDeed deeds (tag e) of
                 Nothing    -> traceRender ("transitiveInline: deed claim failure", x') (deeds,                  h_inline, M.insert x' in_e h_not_inlined)
                 Just deeds ->                                                          (deeds, M.insert x' in_e h_inline,                  h_not_inlined)
             (deeds', h_inline, h_not_inlined) = M.foldWithKey consider_inlining (deeds, M.empty, M.empty) h_inline_candidates
-            (h_inline_candidates, h_inlineable') = M.partitionWithKey (\x' _ -> x' `S.member` fvs) h_inlineable
-            fvs' = M.fold (\in_e fvs -> fvs `S.union` inFreeVars taggedTermFreeVars in_e) fvs h_inline
-
-{-
-
--- Whether the given variable was entered many times, with no context identifier information required
--- I'm using this abstraction to make explicit the fact that we don't pass context identifiers between
--- iterations of the splitter "go" loop. This is important because they are potentially unstable!
-type EnteredManyEnv = M.Map (Out Var) Bool
-
-toEnteredManyEnv :: EnteredEnv -> EnteredManyEnv
-toEnteredManyEnv = M.map (not . isOnce)
-
-
-
-split'
-  :: Deeds
-  -> Heap
-  -> Stack
-  -> [Out Var]
-  -> (EnteredEnv, Bracketed State)
-  -> (Deeds,
-      M.Map (Out Var) (Bracketed State), -- FIXME: for best Deeds performance, should only contain stuff that genuinely might be residualised! Should have Deed for each entry.
-      Bracketed State)
-split' old_deeds old_h@((cheapifyHeap . (old_deeds,)) -> (deeds, Heap h (splitIdSupply -> (ids1, ids2)))) k scruts (entered_hole, bracketed_hole)
-  = go S.empty (toEnteredManyEnv entered_hole)
-  where
-    go must_resid_k_xs entered_many
-      | not (S.null gen_fvs) && traceRender ("split.go", gen_fvs, must_resid_k_xs, entered_many) False = undefined
-      -- | traceRender ("split.release", M.keysSet h_strictly_inlined) False = undefined
-      -- | traceRender ("split.go", entered, entered_k, xs_nonvalue_inlinings) False = undefined
-      | entered_many == entered_many'
-      , must_resid_k_xs == must_resid_k_xs'
-      = -- (\res -> traceRender ("split'", entered_hole, "==>", entered_k, "==>", entered', must_resid_k_xs, [x' | Tagged _ (Update x') <- k], M.keysSet floats_k_bound) res) $
-        (\res@(_, avail_h, _) -> traceRender ("split'", (M.keysSet h, M.keysSet floats_k_bound) {- available for residualisation in letrec -}, M.keysSet h_strictly_inlined, deeds, deeds0, deeds3, M.keysSet (case old_h of Heap h _ -> h), M.keysSet h, M.keysSet avail_h, M.keysSet h_inlineable, entered_many, entered') res) $
-        (deeds3, brackets_h `M.union` brackets_k_bound, bracket_k')
-      | otherwise = go must_resid_k_xs' entered_many'
-      where
-        -- Evaluation context splitting
-        -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        
-        -- Guess how to split up the evaluation context, based on residualising those update frames
-        -- that bound any variables free the last time around the loop.
-        -- NB: we add the FVs of the part of the heap that we *have* to residualise to the entered_hole
-        -- information. This ensures that splitStack residualises the update frames for any of
-        -- those FVs that it happens to bind, which is essential for correctness.
-        (deeds0_unreleased, floats_k_bound, (entered_k, bracket_k)) = splitStack ids1 deeds scruts k (entered_hole `plusEnteredEnv` mkEnteredEnv (Once Nothing) must_resid_k_xs, bracketed_hole)
-        
-        -- Heap splitting
-        -- ~~~~~~~~~~~~~~
-        
-        -- Guess which parts of the heap are safe for inlining based on the current Entered information
-        (h_inlineable, entered', before_must_resid_k_xs') = splitPureHeap h entered_many entered_k
-        
-        -- NB: We must NOT take non-values that we have decided to inline and then bind them in the residual term. This does not
-        -- usually happen because such things won't be free variables of the immediate output term, but with strict bindings the
-        -- optimiser will be forced to residualise such bindings anyway.
-        --
-        -- Explicitly filter them out to be sure we don't spuriously recompute such bindings, BUT make sure to retain non-value
-        -- bindings that are used Once by the *residual itself*:
-        --
-        -- NB: the below comment is outdated. It turns out we could fix the bug by just using must_resid_k_xs to communicate
-        -- residualised stuff between iterations.
-        -- NB: I used to do this, but no longer! The reason is that with generalisation we might choose not to inline some non-value,
-        -- so it must be available to optimiseSplit if it turns out to be free.
-        h_strictly_inlined    = M.filterWithKey (\x _ -> maybe True (not . enteredInResidual) (M.lookup x entered')) h_inlineable
-        xs_nonvalue_inlinings = M.keysSet h_strictly_inlined -- $ M.filterWithKey (\x (_, e) -> maybe False (/= Once Nothing) (M.lookup x entered') && not (taggedTermIsCheap e)) h_inlineable
-        
-        -- Generalisation
-        -- ~~~
-        
-        -- In order to make the Deeds-based stuff less conservative, my first action here is to release our claims to those deeds
-        -- which we do *not* intend to create a residual let binding for here and now. This will let us always inline a heap-bound
-        -- thing into *at least one* context (unless it really is referred to by the residual code).
-        --
-        -- The equivalent process is done for the stack in splitStack itself: we just subtract 1 from the number of deeds we need to
-        -- claim when duplicating a stack frame.
-        deeds0 = M.fold (\(_, e) deeds -> releaseDeedDeep deeds (tag e)) deeds0_unreleased h_strictly_inlined
-        
-        -- Generalising the final proposed floats may cause some bindings that we *thought* were going to be inlined to instead be
-        -- residualised. We need to account for this in the Entered information (for work-duplication purposes), and in that we will
-        -- also require any FVs of the new residualised things that are bound in the stack to residualise more frames.
-        inlineHeapT :: Accumulatable t
-                    => (Deeds -> a   -> (Deeds, FreeVars, b))
-                    ->  Deeds -> t a -> (Deeds, FreeVars, t b)
-        inlineHeapT f deeds b = (deeds', fvs', b')
-          where ((deeds', fvs'), b') = mapAccumT (\(deeds, fvs) s -> case f deeds s of (deeds, fvs', s) -> ((deeds, fvs `S.union` fvs'), s)) (deeds, S.empty) b
-        
-        inlineBracketHeap :: Deeds -> Bracketed State -> (Deeds, FreeVars, Bracketed State)
-        inlineBracketHeap = inlineHeapT (flip transitiveInline h_inlineable)
-        
-        (deeds1, gen_fvs_k',      bracket_k')       = inlineBracketHeap deeds0 bracket_k
-        (deeds2, gen_fvs_h,       brackets_h)       = inlineHeapT (\deeds b -> inlineBracketHeap deeds (promoteToBracket b)) deeds1 (h              `exclude` xs_nonvalue_inlinings) -- NB: exclude *before* allowing
-        (deeds3, gen_fvs_k_bound, brackets_k_bound) = inlineHeapT inlineBracketHeap                                          deeds2 (floats_k_bound `exclude` xs_nonvalue_inlinings) -- these guys to claim Deeds
-        gen_fvs = gen_fvs_k' `S.union` gen_fvs_h `S.union` gen_fvs_k_bound
-        
-        -- FIXME: bit of a hack. At least needs some renaming. Basically just want to ensure that generalised variables are residualised,
-        -- and that the resulting modifications to the Entered information takes effect.
-        must_resid_k_xs' = gen_fvs `S.union` before_must_resid_k_xs'
-                            `S.union` must_resid_k_xs -- NB: empirically, I have observed non-termination unless I make this set strictly growing (e.g. in TreeFlip-NoLiterals)
-        
-        entered_many' = toEnteredManyEnv entered'
-
-    promoteToState :: In TaggedTerm -> State
-    promoteToState in_e = (Heap M.empty ids2, [], in_e)
-
-    promoteToBracket :: In TaggedTerm -> Bracketed State
-    promoteToBracket in_e = Bracketed (\[e'] -> e') S.empty (\[fvs'] -> fvs') [promoteToState in_e]
-
-splitPureHeap :: PureHeap -> EnteredManyEnv -> EnteredEnv -> (PureHeap, EnteredEnv, FreeVars)
-splitPureHeap h was_entered_many entered_k = -- traceRender ("splitPureHeap", (residualisePureHeap prettyIdSupply h), (entered, entered_k), "=>", entered', must_resid_k_xs') $
-                                             (h_inlineable, entered', must_resid_k_xs')
-  where
-    -- Linearity
-    -- ~~~~~~~~~
-    
-    -- We have already gathered entry information from the Stack. Carry on, gathering
-    -- it from the Heap as well. Assume Heap bindings are used as many times as they were used
-    -- the last time we went around the loop.
-    entered' = M.foldWithKey (\x' in_e entered' -> entered' `plusEnteredEnv` incorporate (fromJust $ name_id x') (M.lookup x' was_entered_many) in_e) entered_k h
-    incorporate _ Nothing         _    = emptyEnteredEnv
-    incorporate i (Just was_many) in_e = -- (\res -> traceRender ("incorporate", mb_id, ent, inFreeVars taggedTermFreeVars in_e) res) $
-                                         mkEnteredEnv (if taggedTermIsCheap (snd in_e) && was_many then Many False else Once (Just i)) (inFreeVars taggedTermFreeVars in_e)
-     -- Cheap things may be duplicated, so if they are used Many times so will their FVs be. Non-cheap things are either:
-     --   a) Residualised immediately and so they enter their FVs at most Once
-     --   b) Duplicated downwards, but used linearly anyway, so their FVs are still used Once
-    
-    -- Heap splitting
-    -- ~~~~~~~~~~~~~~
-    
-    -- Assuming that we now have the correct and final entered information, we are in a position
-    -- to decide how to split the heap. We are forced to output a residualisable heap binding if:
-    --  1) EITHER it binds a variable free in the residual expression we have already committed to.
-    --     Note that we do NOT have to residualise a binding if it binds something free only in
-    --     the RHSs of some already-residual binding. Instead, we may want to float it in.
-    --  2) OR it is a non-value with an overall demand of Many (taking into account demand from
-    --     floats AND from already-residual bindings).
-    --
-    -- Anything else (a value or non-value with demand of Once) can be floated inwards into the
-    -- Heaps of the appropriate float(s). We *may* still create a residual heap binding here if it
-    -- turns out that the driven expressions still contained the binder as a free variable (as is
-    -- typical with lazy supercompilation). This is handled by optimiseSplit.
-    --
-    -- Partition heap into values and non-values
-    -- 1) Values *may* always be residualised or inlined
-    -- 2) Non-values *must* be *either* inlined or residualised. You don't get a choice! They *may*
-    --   be inlined only if:
-    --    a) All things in h which refer to the non-value may also be inlined
-    --    b) AND the non-value is used linearly, so sending down won't duplicate work
-    --
-    -- Of course, even if we *may* residualise/inline something, we should only *actually* do it if it is a free variable
-    -- of the respective place.
-    (h_value, h_nonvalue) = M.partition (taggedTermIsCheap . snd) h -- TODO: add cheapness analysis here instead, so we can deal with e.g. saturated datacon wrappers
-
-    -- Split the non-value part of the heap into linear bindings it is safe to try to "send down", and non-linear ones we
-    -- will have to residualise if they are ever actually referred to.
-    (h_nonvalue_inlineable, h_nonvalue_noninlineable) = gather M.empty h_nonvalue
-    gather h_inlineable h_undecided -- NB: these two heaps are disjoint
-       -- Any non-value left undecided at this point must be unsafe to send down
-      | M.null h_extra_inlineable = (h_inlineable, h_undecided)
-       -- Send down any linear non-value we can ensure won't break the BV check
-      | otherwise = gather (h_inlineable `M.union` h_extra_inlineable) h_undecided'
-      where
-        (h_extra_inlineable, h_undecided') = M.partitionWithKey (\x' _ -> doesnt_dup_work x' && not_generalised x') h_undecided
-        doesnt_dup_work x' = maybe True isOnce (M.lookup x' entered')
-        not_generalised x' = True -- FIXME
-
-    -- The h_nonvalue_noninlineable are the bindings which *ABSOLUTELY MUST* be residualised right now, because they are free
-    -- in at least one place and furthermore are either:
-    --  1) Both expensive and may be used more than once
-    --  2) OR were residualised the last time around the loop, so we aren't allowed to inline them.
-    --
-    -- The free variables of those bindings are exactly what we need to feed to splitStack on the next iteration to ensure that
-    -- things referred to by them but bound in the evaluation context are bound right here.
-    --
-    -- FIXME: must include the FVs of elements of h_inlineable that were not inlined into QA/Stack contexts due to generalisation.
-    -- FIXME: surely should also contain FVs of h_value bindings reachable via h_nonvalue_noninlineable FVs?
-    must_resid_k_xs' = S.unions $ map (inFreeVars taggedTermFreeVars) (M.elems h_nonvalue_noninlineable)
-
-    -- Construct the final environment that is safe for inlining
-    h_inlineable = h_value `M.union` h_nonvalue_inlineable
-
--}
+            (h_inline_candidates, h_inlineable') = M.partitionWithKey (\x' _ -> x' `M.member` fvs_paths) h_inlineable
+            fvs' = M.foldWithKey (\x' in_e fvs_paths -> M.unionWith (++) fvs_paths (setToMap (map (x' :) (fromJust (M.lookup x' fvs_paths))) (inFreeVars taggedTermFreeVars in_e))) fvs_paths h_inline
 
 
 -- TODO: replace with a genuine evaluator. However, think VERY hard about the termination implications of this!
@@ -647,8 +519,8 @@ splitStack ids must_bind_updates deeds scruts (kf:k) bracketed_hole = case kf of
     altConToValue (DefaultAlt _)  = Nothing
 
 splitValue :: IdSupply -> In TaggedValue -> Bracketed (Entered, IdSupply -> State)
-splitValue ids in_v@(rn, Lambda x e) = zipBracketeds (\[e'] -> lambda x' e') (\[fvs'] -> fvs') (\[fvs'] -> S.delete x' fvs') [oneBracketed (Many False, \ids -> (Heap M.empty ids, [], (rn', e)))]
-  where (state_ids', rn', x') = renameBinder ids rn x
+splitValue ids (rn, Lambda x e) = zipBracketeds (\[e'] -> lambda x' e') (\[fvs'] -> fvs') (\[fvs'] -> S.delete x' fvs') [oneBracketed (Many False, \ids -> (Heap M.empty ids, [], (rn', e)))]
+  where (_ids', rn', x') = renameBinder ids rn x
 splitValue ids in_v                  = noneBracketed (value v') (valueFreeVars v')
   where v' = detagValue $ renameIn renameTaggedValue ids in_v
 
