@@ -18,6 +18,7 @@ import Algebra.PartialOrd
 import Algebra.Lattice
 import Name
 import Renaming
+import StaticFlags
 import Utilities
 
 import qualified Data.Foldable as Foldable
@@ -455,6 +456,7 @@ transitiveInline deeds h_inlineable (ent, (Heap h ids, k, in_e))
 -- TODO: replace with a genuine evaluator. However, think VERY hard about the termination implications of this!
 -- I think we can only do it when the splitter is being invoked by a non-whistling invocation of sc.
 cheapifyHeap :: (Deeds, Heap) -> (Deeds, Heap)
+cheapifyHeap deedsheap | not sPLITTER_CHEAPIFICATION = deedsheap
 cheapifyHeap (deeds, Heap h (splitIdSupply -> (ids, ids'))) = (deeds', Heap (M.fromList floats `M.union` h') ids')
   where
     ((deeds', _, floats), h') = M.mapAccum (\(deeds, ids, floats0) in_e -> case cheapify deeds ids in_e of (deeds, ids, floats1, in_e') -> ((deeds, ids, floats0 ++ floats1), in_e')) (deeds, ids, []) h

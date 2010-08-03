@@ -54,6 +54,11 @@ bLOAT_FACTOR = fromMaybe 10 $ listToMaybe [read arg | '-':'-':'b':'l':'o':'a':'t
 sPECULATION :: Bool
 sPECULATION = not $ "--no-speculation" `elem` (unsafePerformIO getArgs)
 
+{-# NOINLINE sPLITTER_CHEAPIFICATION #-}
+sPLITTER_CHEAPIFICATION :: Bool
+sPLITTER_CHEAPIFICATION = "--cheapification" `elem` (unsafePerformIO getArgs)
+ -- TODO: test my hypothesis that given that we already do speculation, let-floating in the splitter won't make much difference
+
 {-# NOINLINE lOCAL_TIEBACKS #-}
 lOCAL_TIEBACKS :: Bool
 lOCAL_TIEBACKS = not $ "--no-local-tiebacks" `elem` (unsafePerformIO getArgs)
