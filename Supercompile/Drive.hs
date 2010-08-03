@@ -123,7 +123,9 @@ data Promise = P {
   }
 
 instance MonadStatics ScpM where
-    withStatics xs mx = bindFloats (\p -> any (`S.member` xs) (lexical p)) $ ScpM $ \e s -> (\(!res) -> traceRender ("withStatics", xs) res) $ unScpM mx (e { statics = statics e `S.union` xs }) s
+    withStatics xs mx
+      | lOCAL_TIEBACKS = bindFloats (\p -> any (`S.member` xs) (lexical p)) $ ScpM $ \e s -> (\(!res) -> traceRender ("withStatics", xs) res) $ unScpM mx (e { statics = statics e `S.union` xs }) s
+      | otherwise      = fmap ([],) mx
 
 -- NB: be careful of this subtle problem:
 --
