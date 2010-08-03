@@ -99,13 +99,12 @@ reduce = go emptyHistory
     go hist (deeds, state)
       | traceRender ("reduce.go", deeds, residualiseState state) False = undefined
       | not eVALUATE_PRIMOPS, (_, _, (_, Tagged _ (PrimOp _ _))) <- state = (deeds, state)
-      | otherwise = case step (deeds, state) of
-        Nothing -> (deeds, state)
-        Just (deeds', state')
-          | intermediate state' -> go hist (deeds', state')
-          | otherwise           -> case terminate hist (stateTagBag state') of
-              Stop           -> (deeds', state')
-              Continue hist' -> go hist' (deeds', state')
+      | otherwise = fromMaybe (deeds, state) $ do
+          hist <- case terminate hist (stateTagBag state) of
+                     _ | intermediate state -> Just hist
+                     Continue hist'         -> Just hist'
+                     Stop                   -> Nothing
+          fmap (go hist) $ step (go hist) (deeds, state)
     
     intermediate :: State -> Bool
     intermediate (_, _, (_, Tagged _ (Var _))) = False

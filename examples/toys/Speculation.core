@@ -1,0 +1,7 @@
+root = let id = \x -> x
+           speculate_me = id id
+       in (if speculate_me True then 1337 else -1, if speculate_me False then -2 else 1338) -- Don't want any negative numbers in the output!
+
+tests = [
+    (root, (1337, 1338))
+  ]

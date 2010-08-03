@@ -73,6 +73,7 @@ testOne file = do
         let output_dir = foldl1 (</>) [ "output"
                                       , if eVALUATE_PRIMOPS then "primops" else "no-primops"
                                       , if gENERALISATION   then "gen"     else "no-gen"
+                                      , if sPECULATION      then "spec"    else "no-spec"
                                       ]
         createDirectoryIfMissing True (takeDirectory $ output_dir </> file)
         writeFile (output_dir </> replaceExtension file ".hs") after_code
