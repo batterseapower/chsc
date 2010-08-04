@@ -97,7 +97,7 @@ reduce :: (Deeds, State) -> (Deeds, State)
 reduce = go emptyHistory S.empty
   where
     go hist lives (deeds, state)
-      | traceRender ("reduce.go", deeds, residualiseState state) False = undefined
+      -- | traceRender ("reduce.go", deeds, residualiseState state) False = undefined
       | not eVALUATE_PRIMOPS, (_, _, (_, Tagged _ (PrimOp _ _))) <- state = (deeds, state)
       | otherwise = fromMaybe (deeds, state) $ do
           hist' <- case terminate hist (stateTagBag state) of
@@ -166,6 +166,8 @@ data Promise = P {
 --  from the set, but *included* lexical FVs of any h functions called). This simplifies the description of the
 --  supercompiler but also means that in the future I might just be able to return a TermWithFVs or something --
 --  memoising the FVs on the term structure itself.
+--
+-- FIXME: implement one of these solutions
 
 instance MonadStatics ScpM where
     withStatics xs mx
