@@ -84,7 +84,7 @@ data QA = Question (Out Var)
         | Answer   (In TaggedValue)
 
 simplify :: (Deeds, State) -> (Deeds, (Heap, Stack, Tagged QA))
-simplify (deeds, s) = expectHead "simplify" [(deeds, res) | (deeds, s) <- (deeds, s) : unfoldr (\(deeds, s) -> fmap (\x -> (x, x)) (step id (deeds, s))) (deeds, s), Just res <- [stop s]]
+simplify (deeds, s) = expectHead "simplify" [(deeds, res) | (deeds, s) <- (deeds, s) : unfoldr (\(deeds, s) -> fmap (\x -> (x, x)) (step (const id) S.empty (deeds, s))) (deeds, s), Just res <- [stop s]]
   where
     stop (h, k, (rn, Tagged tg (Var x)))   = Just (h, k, Tagged tg (Question (rename rn x)))
     stop (h, k, (rn, Tagged tg (Value v))) = Just (h, k, Tagged tg (Answer (rn, v)))
@@ -291,7 +291,8 @@ splitt (old_deeds, ((cheapifyHeap . (old_deeds,)) -> (deeds, Heap h (splitIdSupp
     
     -- Simultaneously computes the next fixed-point step and some artifacts computed along the way,
     -- which happen to correspond to exactly what I need to return from splitt.
-    split_step resid_xs = {- traceRender ("split_step", resid_xs) -} (resid_xs', (deeds2, bracketeds_heap', bracketed_focus'))
+    split_step resid_xs = -- traceRender ("split_step", resid_xs, fvs', resid_xs') $
+                          (resid_xs', (deeds2, bracketeds_heap', bracketed_focus'))
       where
         -- 1) Build a candidate splitting for the Stack and QA components
         -- When creating the candidate stack split, we ensure that we create a residual binding

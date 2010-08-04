@@ -19,8 +19,8 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 
 
-step :: ((Deeds, State) -> (Deeds, State)) -> (Deeds, State) -> Maybe (Deeds, State)
-step reduce (deeds, (h, k, (rn, Tagged tg e))) = case e of
+step :: (FreeVars -> (Deeds, State) -> (Deeds, State)) -> FreeVars -> (Deeds, State) -> Maybe (Deeds, State)
+step reduce live (deeds, (h, k, (rn, Tagged tg e))) = case e of
     Var x             -> force  deeds h k tg (rename rn x)
     Value v           -> unwind deeds h k tg (rn, v)
     App e1 x2         -> Just (deeds', (h, Apply (renameTaggedVar rn x2)   : k, (rn, e1)))
@@ -81,10 +81,17 @@ step reduce (deeds, (h, k, (rn, Tagged tg e))) = case e of
         -- Unconditionally release the tag associated with the update frame
         deeds' = releaseDeedDeep deeds tg_x'
 
-        -- If we can GC the update frame (because it can't be referred to in the continuation) then we don't have to actually update the heap or even claim a new deed
+        -- If we can GC the update frame (because it can't be referred to in the continuation) then:
+        --  1) We don't have to actually update the heap or even claim a new deed
+        --  2) We make the supercompiler less likely to terminate, because doing so tends to reduce TagBag sizes
+        --
+        -- NB: to prevent incorrectly garbage collecting bindings from the enclosing heap when we have speculation on,
+        -- we pass around an extra "live set" of parts of the heap that might be referred to later on
+        --
         -- TODO: make finding FVs much cheaper (i.e. memoise it in the syntax functor construction)
         -- TODO: could GC cycles as well (i.e. don't consider stuff from the Heap that was only referred to by the thing being removed as "GC roots")
-        linear = x' `S.notMember` (pureHeapFreeVars h (stackFreeVars k (inFreeVars taggedValueFreeVars (rn, v))))
+        linear = x' `S.notMember` (pureHeapFreeVars h (stackFreeVars k (inFreeVars taggedValueFreeVars (rn, v)))) &&
+                 x' `S.notMember` live
 
     allocate :: Deeds -> Heap -> Stack -> In ([(Var, TaggedTerm)], TaggedTerm) -> (Deeds, State)
     allocate deeds (Heap h ids) k (rn, (xes, e)) = (deeds', (heap', k, (rn', e)))
@@ -92,7 +99,12 @@ step reduce (deeds, (h, k, (rn, Tagged tg e))) = case e of
         (ids', rn', xes') = renameBounds (\_ x' -> x') ids rn xes
         (deeds', heap')
           | not sPECULATION = (deeds, Heap (h `M.union` M.fromList xes') ids')
-          | otherwise = foldl' (\(deeds, Heap h ids) (x', in_e) -> case reduce (deeds, (Heap h ids, [], in_e)) of
-                                                                     (deeds', (Heap h' ids', [], in_e'@(_, Tagged _ (Value _)))) -> (deeds', Heap (M.insert x' in_e' h') ids') -- Speculation: if we can evaluate to a value "quickly" then use that value,
-                                                                     _                                                           -> (deeds,  Heap (M.insert x' in_e  h)  ids)) -- otherwise throw away the half-evaluated mess that we reach
-                               (deeds, Heap h ids') xes'
+          | otherwise = foldl' (\(deeds, Heap h ids) ((x', in_e), live') -> case reduce live' (deeds, (Heap h ids, [], in_e)) of
+                                                                              (deeds', (Heap h' ids', [], in_e'@(_, Tagged _ (Value _)))) -> (deeds', Heap (M.insert x' in_e' h') ids') -- Speculation: if we can evaluate to a value "quickly" then use that value,
+                                                                              _                                                           -> (deeds,  Heap (M.insert x' in_e  h)  ids)) -- otherwise throw away the half-evaluated mess that we reach
+                               (deeds, Heap h ids') (xes' `zip` lives')
+            where
+              -- Construct the live set for use when speculating each heap binding. This prevent us from accidentally GCing something that is live
+              -- in the "continuation" when speculating a heap binding. We ensure that only those heap bindings that occur *strictly later* than
+              -- the binding being speculated contribute to the live set -- this means that GC can still collect stuff that speculation truly makes dead.
+              (_, lives') = mapAccumR (\live (_x', in_e) -> (live `S.union` inFreeVars taggedTermFreeVars in_e, live)) (live `S.union` snd (stackFreeVars k (inFreeVars taggedTermFreeVars (rn', e)))) xes'

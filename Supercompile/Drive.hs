@@ -94,9 +94,9 @@ tagTagBag cls = mkTagBag . return . injectTag cls
 --
 
 reduce :: (Deeds, State) -> (Deeds, State)
-reduce = go emptyHistory
+reduce = go emptyHistory S.empty
   where
-    go hist (deeds, state)
+    go hist lives (deeds, state)
       | traceRender ("reduce.go", deeds, residualiseState state) False = undefined
       | not eVALUATE_PRIMOPS, (_, _, (_, Tagged _ (PrimOp _ _))) <- state = (deeds, state)
       | otherwise = fromMaybe (deeds, state) $ do
@@ -104,7 +104,7 @@ reduce = go emptyHistory
                      _ | intermediate state -> Just hist
                      Continue hist'         -> Just hist'
                      Stop                   -> Nothing
-          fmap (go hist) $ step (go hist) (deeds, state)
+          fmap (go hist lives) $ step (go hist) lives (deeds, state)
     
     intermediate :: State -> Bool
     intermediate (_, _, (_, Tagged _ (Var _))) = False
