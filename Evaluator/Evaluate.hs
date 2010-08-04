@@ -100,6 +100,9 @@ step reduce live (deeds, (h, k, (rn, Tagged tg e))) = case e of
         (deeds', heap')
           | not sPECULATION = (deeds, Heap (h `M.union` M.fromList xes') ids')
           | otherwise = foldl' (\(deeds, Heap h ids) ((x', in_e), live') -> case reduce live' (deeds, (Heap h ids, [], in_e)) of
+                                                                              -- NB: commenting in this line is useful if you want to test whether speculation is causing
+                                                                              -- a benchmark to be slow due to the cost of the speculation OR due to the extra info. propagation
+                                                                              --(rnf -> ()) | False -> undefined
                                                                               (deeds', (Heap h' ids', [], in_e'@(_, Tagged _ (Value _)))) -> (deeds', Heap (M.insert x' in_e' h') ids') -- Speculation: if we can evaluate to a value "quickly" then use that value,
                                                                               _                                                           -> (deeds,  Heap (M.insert x' in_e  h)  ids)) -- otherwise throw away the half-evaluated mess that we reach
                                (deeds, Heap h ids') (xes' `zip` lives')
