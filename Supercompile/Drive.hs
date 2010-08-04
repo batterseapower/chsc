@@ -168,9 +168,8 @@ data Promise = P {
 --  memoising the FVs on the term structure itself.
 
 instance MonadStatics ScpM where
-    withStatics xs mx
-      | lOCAL_TIEBACKS = bindFloats (\p -> any (`S.member` xs) (lexical p)) $ ScpM $ \e s -> (\(!res) -> traceRender ("withStatics", xs) res) $ unScpM mx (e { statics = statics e `S.union` xs }) s
-      | otherwise      = fmap ([],) mx
+    withStatics xs_before mx = bindFloats (\p -> any (`S.member` xs) (lexical p)) $ ScpM $ \e s -> (\(!res) -> traceRender ("withStatics", xs) res) $ unScpM mx (e { statics = statics e `S.union` xs }) s
+      where xs = if lOCAL_TIEBACKS then xs_before else S.empty -- NB: we still need to deal with h functions themselves being statics even if we don't have local h functions
 
 -- NB: be careful of this subtle problem:
 --
@@ -187,8 +186,16 @@ instance MonadStatics ScpM where
 -- The right thing to do is to make sure that fulfilments created in different "branches" of the process tree aren't eligible for early binding in
 -- that manner, but we still want to tie back to them if possible. The bindFloats function achieves this by carefully shuffling information between the
 -- fulfulmints and promises parts of the monadic-carried state.
-bindFloats :: (Promise -> Bool) -> ScpM a -> ScpM ([(Out Var, Out Term)], a)
-bindFloats p mx = ScpM $ \e s -> case unScpM mx (e { promises = map fst (fulfilments s) ++ promises e }) (s { fulfilments = [] }) of (s'@(ScpState { fulfilments = (partition (p . fst) -> (fs_now, fs_later)) }), x) -> traceRender ("bindFloats", map (fun . fst) fs_now, map (fun . fst) fs_later) $ (s' { fulfilments = fs_later ++ fulfilments s }, (sortBy (comparing ((read :: String -> Int) . drop 1 . name_string . fst)) [(fun p, lambdas (abstracted p) e') | (p, e') <- fs_now], x))
+bindFloats :: (Promise -> Bool) -> ScpM a -> ScpM ([(Out Var, Out Term)], FreeVars, a)
+bindFloats p mx = ScpM $ \e s -> case unScpM mx (e { promises = map fst (fulfilments s) ++ promises e }) (s { fulfilments = [] }) of (s'@(ScpState { fulfilments = (partitionFloats -> (fs_now, fs_later)) }), x) -> traceRender ("bindFloats", map (fun . fst) fs_now, map (fun . fst) fs_later) $ (s' { fulfilments = fs_later ++ fulfilments s }, (sortBy (comparing ((read :: String -> Int) . drop 1 . name_string . fst)) [(fun p, lambdas (abstracted p) e') | (p, e') <- fs_now], S.unions [S.fromList (lexical p) | (p, _) <- fs_now], x))
+  where
+    partitionFloats :: [(Promise, Out Term)] -> ([(Promise, Out Term)], [(Promise, Out Term)]) -- Returns things to bind here and things to keep floating, respectively
+    partitionFloats promises = go (partition (p . fst) promises)
+      where
+        -- This fixed point ensures that we residualise any floats that refer to other floats that we have residualised
+        go (stick, float) | null stick' = (stick, float)
+                          | otherwise   = go (stick ++ stick', float')
+          where (stick', float') = partition (\(floating_promise, _) -> any (\stick_x' -> stick_x' `elem` lexical floating_promise) (map (fun . fst) stick)) float
 
 getStatics :: ScpM FreeVars
 getStatics = ScpM $ \e s -> (s, statics e)
@@ -199,13 +206,14 @@ freshHName = ScpM $ \_ s -> (s { names = tail (names s) }, expectHead "freshHNam
 getPromises :: ScpM [Promise]
 getPromises = ScpM $ \e s -> (s, promises e ++ map fst (fulfilments s))
 
-promise :: Promise -> ScpM (a, b, Out Term) -> ScpM (a, b, Out Term)
-promise p opt = ScpM $ \e s -> traceRender ("promise", fun p, abstracted p, lexical p) $ unScpM (mx p) e { promises = p : promises e } s
+promise :: Promise -> ScpM (a, FreeVars, Out Term) -> ScpM (a, FreeVars, Out Term)
+promise p opt = ScpM $ \e s -> traceRender ("promise", fun p, abstracted p, lexical p) $ unScpM (mx p) e { promises = p : promises e, statics = S.insert (fun p) (statics e) } s
   where
     mx p = do
-      (a, b, e') <- opt
+      (a, fvs', e') <- opt
+      let vs = S.fromList (abstracted p ++ lexical p) in assertRender ("sc: FVs", fun p, fvs' S.\\ vs, vs) (fvs' `S.isSubsetOf` vs) $ return ()
       ScpM $ \_ s -> (s { fulfilments = (p, e') : fulfilments s }, ())
-      return (a, b, fun p `varApps` abstracted p)
+      return (a, S.insert (fun p) (S.fromList (abstracted p)), fun p `varApps` abstracted p)
 
 
 data ScpEnv = ScpEnv {
@@ -231,8 +239,10 @@ instance MonadFix ScpM where
     mfix fmx = ScpM $ \e s -> let (s', x) = unScpM (fmx x) e s in (s', x)
 
 runScpM :: FreeVars -> ScpM (Out Term) -> Out Term
-runScpM input_fvs me = uncurry letRec $ snd (unScpM (bindFloats (\_ -> True) me) init_e init_s)
+runScpM input_fvs me = letRec hes e'
   where
+    (hes, _, e') = snd $ unScpM (bindFloats (\_ -> True) me) init_e init_s
+      
     init_e = ScpEnv { statics = input_fvs, promises = [] }
     init_s = ScpState { names = map (\i -> name $ "h" ++ show (i :: Int)) [0..], fulfilments = [] }
 
@@ -249,7 +259,7 @@ memo :: ((Deeds, State) -> ScpM (Deeds, FreeVars, Out Term))
 memo opt (deeds, state) = do
     statics <- getStatics
     ps <- getPromises
-    case [ (fun p, (releaseStateDeed deeds state, S.fromList (tb_dynamic_vs ++ tb_static_vs), fun p `varApps` tb_dynamic_vs))
+    case [ (fun p, (releaseStateDeed deeds state, S.insert (fun p) $ S.fromList (tb_dynamic_vs), fun p `varApps` tb_dynamic_vs))
          | p <- ps
          , Just rn_lr <- [match (meaning p) state]
          , let rn_fvs = map (safeRename ("tieback: FVs " ++ pPrintRender (fun p)) rn_lr) -- NB: If tb contains a dead PureHeap binding (hopefully impossible) then it may have a free variable that I can't rename, so "rename" will cause an error. Not observed in practice yet.
@@ -270,15 +280,11 @@ memo opt (deeds, state) = do
     
         -- NB: promises are lexically scoped because they may refer to FVs
         x <- freshHName
-        (deeds, _vs', e') <- promise (P { fun = x, abstracted = dynamic_vs_list, lexical = static_vs_list, meaning = state }) $ do
+        promise (P { fun = x, abstracted = dynamic_vs_list, lexical = static_vs_list, meaning = state }) $ do
             traceRenderM (">sc", x, residualiseState state, deeds)
             res <- opt (deeds, state)
             traceRenderM ("<sc", x, residualiseState state, res)
             return res
-        
-        assertRender ("sc: FVs", x, _vs' S.\\ vs, vs) (_vs' `S.isSubsetOf` vs) $ return ()
-        
-        return (deeds, vs, e')
 
 traceRenderM :: (Pretty a, Monad m) => a -> m ()
 --traceRenderM x mx = fmap length history >>= \indent -> traceRender (nest indent (pPrint x)) mx

@@ -30,7 +30,7 @@ import qualified Data.Set as S
 type Statics = FreeVars
 
 class Monad m => MonadStatics m where
-    withStatics :: FreeVars -> m a -> m ([(Out Var, Out Term)], a)
+    withStatics :: FreeVars -> m a -> m ([(Out Var, Out Term)], FreeVars, a)
 
 
 --
@@ -248,7 +248,7 @@ optimiseSplit :: MonadStatics m
               -> Bracketed State
               -> m (Deeds, FreeVars, Out Term)
 optimiseSplit opt deeds floats_h floats_compulsory = do
-    (hes, (deeds, fvs', xes', e_compulsory')) <- withStatics (M.keysSet floats_h) $ do
+    (hes, hes_fvs', (deeds, bvs', fvs', xes', e_compulsory')) <- withStatics (M.keysSet floats_h) $ do
         -- 1) Recursively drive the compulsory floats
         (deeds, fvs_compulsory', e_compulsory') <- optimiseBracketed opt (deeds, floats_compulsory)
     
@@ -257,7 +257,7 @@ optimiseSplit opt deeds floats_h floats_compulsory = do
         --    residualisation, and then transitively inlines any bindings whose corresponding binders become free.
         let residualise deeds xes_resid resid_bvs resid_fvs
               | M.null h_resid = -- traceRenderM ("residualise", resid_fvs, resid_bvs, (M.map (residualiseBracketed (residualiseState . first3 (flip Heap prettyIdSupply))) floats_h)) $
-                                 return (foldl' (\deeds b -> foldl' releaseStateDeed deeds (fillers b)) deeds (M.elems floats_not_resid), resid_fvs S.\\ resid_bvs, xes_resid)
+                                 return (foldl' (\deeds b -> foldl' releaseStateDeed deeds (fillers b)) deeds (M.elems floats_not_resid), resid_bvs, resid_fvs, xes_resid)
               | otherwise = {- traceRender ("optimiseSplit", xs_resid') $ -} do
                 -- Recursively drive the new residuals arising from the need to bind the resid_fvs
                 (deeds, S.unions -> extra_resid_fvs', es_resid') <- optimiseMany (optimiseBracketed opt) (deeds, bracks_resid)
@@ -271,9 +271,9 @@ optimiseSplit opt deeds floats_h floats_compulsory = do
                 h_resid = M.filterWithKey (\x _br -> x `S.member` resid_fvs) floats_not_resid
                 (xs_resid', bracks_resid) = unzip $ M.toList h_resid
 
-        (deeds, fvs', xes') <- residualise deeds [] S.empty fvs_compulsory'
-        return (deeds, fvs', xes', e_compulsory')
-    return (deeds, fvs', letRec (hes ++ xes') e_compulsory')
+        (deeds, bvs', fvs', xes') <- residualise deeds [] S.empty fvs_compulsory'
+        return (deeds, bvs', fvs', xes', e_compulsory')
+    return (deeds, (hes_fvs' `S.union` fvs') S.\\ (S.fromList (map fst hes) `S.union` bvs'), letRec (hes ++ xes') e_compulsory')
 
 
 splitt :: (Deeds, (Heap, Stack, Tagged QA))   -- ^ The thing to split, and the Deeds we have available to do it
