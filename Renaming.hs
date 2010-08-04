@@ -1,4 +1,4 @@
-{-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE PatternGuards, GeneralizedNewtypeDeriving #-}
 module Renaming (
     Renaming(..),
     emptyRenaming, mkRenaming, mkIdentityRenaming,
@@ -20,7 +20,7 @@ type Out a = a
 
 
 newtype Renaming = Renaming { unRenaming :: M.Map (In Name) (Out Name) }
-                 deriving (Show)
+                 deriving (Show, NFData)
 
 instance Pretty Renaming where
     pPrintPrec level _ rn = vcat [ pPrintPrec level 0 x <+> text "|->" <+> pPrintPrec level 0 x'

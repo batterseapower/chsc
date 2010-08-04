@@ -23,6 +23,9 @@ data Deeds = Deeds {
 -- TODO: could be slightly neater: only need to store Deeds for the *leaves* of the tree, and a mapping that
 -- tells us which leaves the node corresponding to any given Tag dominates.
 
+instance NFData Deeds where
+    rnf (Deeds a b c) = rnf a `seq` b `seq` rnf c
+
 instance Pretty Deeds where
     pPrint deeds = rebuild deeds (reifyDeedsTree deeds)
 

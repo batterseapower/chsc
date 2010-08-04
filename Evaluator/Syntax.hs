@@ -16,12 +16,21 @@ type PureHeap = M.Map (Out Var) (In TaggedTerm)
 data Heap = Heap PureHeap IdSupply
           deriving (Show)
 
+instance NFData Heap where
+    rnf (Heap a b) = rnf a `seq` rnf b
+
 type Stack = [StackFrame]
 data StackFrame = Apply (Out (Tagged Var))
                 | Scrutinise (In [TaggedAlt])
                 | PrimApply PrimOp [Tagged (In TaggedValue)] [In TaggedTerm]
                 | Update (Out (Tagged Var))
                 deriving (Show)
+
+instance NFData StackFrame where
+    rnf (Apply a)         = rnf a
+    rnf (Scrutinise a)    = rnf a
+    rnf (PrimApply a b c) = rnf a `seq` rnf b `seq` rnf c
+    rnf (Update a)        = rnf a
 
 instance Pretty StackFrame where
     pPrintPrec level prec kf = case kf of
