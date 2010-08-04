@@ -100,11 +100,11 @@ reduce = go emptyHistory S.empty
       | traceRender ("reduce.go", deeds, residualiseState state) False = undefined
       | not eVALUATE_PRIMOPS, (_, _, (_, Tagged _ (PrimOp _ _))) <- state = (deeds, state)
       | otherwise = fromMaybe (deeds, state) $ do
-          hist <- case terminate hist (stateTagBag state) of
-                     _ | intermediate state -> Just hist
-                     Continue hist'         -> Just hist'
-                     Stop                   -> Nothing
-          fmap (go hist lives) $ step (go hist) lives (deeds, state)
+          hist' <- case terminate hist (stateTagBag state) of
+                      _ | intermediate state -> Just hist
+                      Continue hist'         -> Just hist'
+                      Stop                   -> Nothing
+          fmap (go hist' lives) $ step (go hist') lives (deeds, state)
     
     intermediate :: State -> Bool
     intermediate (_, _, (_, Tagged _ (Var _))) = False
@@ -121,6 +121,51 @@ data Promise = P {
     lexical    :: [Out Var], -- Refers to these variables lexically (i.e. not via a lambda)
     meaning    :: State      -- Minimum adequate term
   }
+
+-- Note [Which h functions to residualise in withStatics]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+--
+-- Imagine we have driven to this situation:
+--
+--  let map = ...
+--  in ...
+--
+-- With these "h" functions floating out:
+--
+--  h1 = \fvs1 -> ... map ...
+--  h2 = \fvs2 -> let map = ...
+--                in ... h1 ...
+--
+-- Previously, what withStatics did was residualise those floating "h" function that have lexical
+-- free variables that intersect with the set of statics (which is just {map} in this case).
+--
+-- However, this is insufficient in this example, because we built a map binding locally within h2
+-- and so it does not occur as a lexical FV of h2. However, h2 refers to h1 (which does have map as a
+-- lexical FV) so what is going to happen is that h2 will float out past h1 and we will get a variable
+-- out of scope error at the reference to h1.
+--
+-- There are two solutions:
+--  1) When pushing heap bindings down into several different contexts, give them different names in each
+--     context. Then we will end up in a situation like:
+--
+--  let map1 = ...
+--  in ...
+--
+--  h1 = \fvs1 -> ... map1 ...
+--  h2 = \fvs2 -> let map2 = ...
+--                in ... h1 ...
+--
+-- Now map1 will be a lexical FV of h1 and all will be well.
+--
+--  2) Make the h functions that get called into lexical FVs of the h function making the call, and then
+--     compute the least fixed point of the statics set in withStatics, residualising h functions that are
+--     referred to only by other h functions.
+--
+--  This solution is rather elegant because it falls out naturally if I make the FreeVars set returned by the
+--  supercompiler exactly equal to the free variables of the term returned (previously I excluded h functions
+--  from the set, but *included* lexical FVs of any h functions called). This simplifies the description of the
+--  supercompiler but also means that in the future I might just be able to return a TermWithFVs or something --
+--  memoising the FVs on the term structure itself.
 
 instance MonadStatics ScpM where
     withStatics xs mx
