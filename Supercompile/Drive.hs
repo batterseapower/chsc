@@ -260,7 +260,7 @@ memo opt (deeds, state) = do
           -- Check that all of the things that were dynamic last time are dynamic this time
          , all (\x' -> x' `S.notMember` statics) tb_dynamic_vs
           -- Check that all of the things that were static last time are static this time *and refer to exactly the same thing*
-         , and $ zipWith (\x x' -> x' == x && x' `S.member` statics) (lexical p) tb_static_vs -- FIXME: lexical should include transitive lexical vars?
+         , and $ zipWith (\x x' -> x' == x && x' `S.member` statics) (lexical p) tb_static_vs
          , traceRender ("memo'", statics, stateFreeVars state, rn_lr, (fun p, lexical p, abstracted p)) True
          ] of
       (_x, res):_ -> {- traceRender ("tieback", residualiseState state, fst res) $ -} do
