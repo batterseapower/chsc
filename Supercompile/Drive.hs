@@ -9,6 +9,7 @@ import Supercompile.Split
 import Core.FreeVars
 import Core.Renaming
 import Core.Syntax
+import Core.Tag
 
 import Evaluator.Evaluate
 import Evaluator.FreeVars
@@ -35,7 +36,7 @@ supercompile :: Term -> Term
 supercompile e = traceRender ("all input FVs", input_fvs) $ runScpM input_fvs $ fmap thd3 $ sc [] (deeds, state)
   where input_fvs = termFreeVars e
         state = (Heap M.empty reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, tagged_e))
-        tagged_e = tagTerm tagIdSupply e
+        tagged_e = tagTerm e
         
         (t, rb) = extractDeeds tagged_e
         deeds = mkDeeds (bLOAT_FACTOR - 1) (t, pPrint . rb)

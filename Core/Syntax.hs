@@ -130,52 +130,6 @@ pPrintPrecApps :: (Pretty a, Pretty b) => PrettyLevel -> Rational -> a -> [b] ->
 pPrintPrecApps level prec e1 es2 = prettyParen (not (null es2) && prec >= appPrec) $ pPrintPrec level opPrec e1 <+> hsep (map (pPrintPrec level appPrec) es2)
 
 
-tagTerm :: IdSupply -> Term -> TaggedTerm
-tagTerm ids (I e) = Tagged (hashedId i) $ case e of
-    Var x         -> Var x
-    Value v       -> Value (tagValue ids' v)
-    App e (I x)   -> App (tagTerm ids'' e) (Tagged (hashedId i') x)
-      where (ids'', i') = stepIdSupply ids'
-    PrimOp pop es -> PrimOp pop (zipWith tagTerm idss' es)
-      where idss' = splitIdSupplyL ids
-    Case e alts   -> Case (tagTerm ids0' e) (tagAlts ids1' alts)
-      where (ids0', ids1') = splitIdSupply ids'
-    LetRec xes e  -> LetRec (zipWith (\ids'' (x, e) -> (x, tagTerm ids'' e)) idss' xes) (tagTerm ids1' e)
-      where (ids0', ids1') = splitIdSupply ids'
-            idss' = splitIdSupplyL ids0'
-  where
-    (ids', i) = stepIdSupply ids
-
-tagValue :: IdSupply -> Value -> TaggedValue
-tagValue ids v = case v of
-    Lambda x e -> Lambda x (tagTerm ids e)
-    Data dc xs -> Data dc xs
-    Literal l  -> Literal l
-
-tagAlt :: IdSupply -> Alt -> TaggedAlt
-tagAlt ids (con, e) = (con, tagTerm ids e)
-
-tagAlts :: IdSupply -> [Alt] -> [TaggedAlt]
-tagAlts = zipWith tagAlt . splitIdSupplyL
-
-detagTerm :: TaggedTerm -> Term
-detagTerm (Tagged _ e) = case e of
-    Var x         -> var x
-    Value v       -> value (detagValue v)
-    App e x       -> app (detagTerm e) (tagee x)
-    PrimOp pop es -> primOp pop (map detagTerm es)
-    Case e alts   -> case_ (detagTerm e) (detagAlts alts)
-    LetRec xes e  -> letRec (map (second detagTerm) xes) (detagTerm e)
-
-detagValue :: TaggedValue -> Value
-detagValue (Lambda x e) = Lambda x (detagTerm e)
-detagValue (Data dc xs) = Data dc xs
-detagValue (Literal l)  = Literal l
-
-detagAlts :: [TaggedAlt] -> [Alt]
-detagAlts = map (second detagTerm)
-
-
 isValue :: TermF ann -> Bool
 isValue (Value _) = True
 isValue _         = False

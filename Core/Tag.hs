@@ -53,19 +53,31 @@ mkTag rec = term tagIdSupply
     alternative ids (con, e) = (con, term ids e)
 
 
-detagTerm :: TaggedTerm -> Term
-detagTerm (Tagged _ e) = case e of
-    Var x         -> var x
-    Value v       -> value (detagValue v)
-    App e x       -> app (detagTerm e) (tagee x)
-    PrimOp pop es -> primOp pop (map detagTerm es)
-    Case e alts   -> case_ (detagTerm e) (detagAlts alts)
-    LetRec xes e  -> letRec (map (second detagTerm) xes) (detagTerm e)
+(detagTaggedTerm,     detagTaggedAlts,     detagTaggedValue)     = mkDetag (\f e -> I (f (tagee e)))
+(detagTaggedFVedTerm, detagTaggedFVedAlts, detagTaggedFVedValue) = mkDetag (\f e -> I (f (fvee (tagee (unComp e)))))
 
-detagValue :: TaggedValue -> Value
-detagValue (Lambda x e) = Lambda x (detagTerm e)
-detagValue (Data dc xs) = Data dc xs
-detagValue (Literal l)  = Literal l
 
-detagAlts :: [TaggedAlt] -> [Alt]
-detagAlts = map (second detagTerm)
+{-# INLINE mkDetag #-}
+mkDetag :: (forall a b. (a -> b) -> ann a -> ann' b)
+        -> (ann (TermF ann) -> ann' (TermF ann'),
+            [AltF ann]      -> [AltF ann'],
+            ValueF ann      -> ValueF ann')
+mkDetag rec = (term, alternatives, value)
+  where
+    var = rec var'
+    var' x = x
+    
+    term = rec term'
+    term' e = case e of
+        Var x         -> Var x
+        Value v       -> Value (value v)
+        App e x       -> App (term e) (var x)
+        PrimOp pop es -> PrimOp pop (map term es)
+        Case e alts   -> Case (term e) (alternatives alts)
+        LetRec xes e  -> LetRec (map (second term) xes) (term e)
+
+    value (Lambda x e) = Lambda x (term e)
+    value (Data dc xs) = Data dc xs
+    value (Literal l)  = Literal l
+
+    alternatives = map (second term)

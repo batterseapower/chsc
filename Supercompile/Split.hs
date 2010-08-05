@@ -7,6 +7,7 @@ module Supercompile.Split (Statics, MonadStatics(..), split) where
 import Core.FreeVars
 import Core.Renaming
 import Core.Syntax
+import Core.Tag
 
 import Evaluator.Evaluate (step)
 import Evaluator.FreeVars
@@ -305,7 +306,7 @@ splitt :: (Deeds, (Heap, Stack, Tagged QA))   -- ^ The thing to split, and the D
            M.Map (Out Var) (Bracketed State), -- ^ The residual "let" bindings
            Bracketed State)                   -- ^ The residual "let" body
 splitt (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply -> (ids_brack, splitIdSupply -> (ids1, ids2)))), k, qa))
-    = -- traceRender ("splitt", residualiseHeap (Heap h ids_brack) (\ids -> residualiseStack ids k (case tagee qa of Question x' -> var x'; Answer in_v -> value $ detagValue $ renameIn renameTaggedValue ids in_v))) $
+    = -- traceRender ("splitt", residualiseHeap (Heap h ids_brack) (\ids -> residualiseStack ids k (case tagee qa of Question x' -> var x'; Answer in_v -> value $ detagTaggedValue $ renameIn renameTaggedValue ids in_v))) $
       snd $ split_step resid_xs -- TODO: eliminate redundant recomputation here?
   where
     -- Note that as an optimisation, optimiseSplit will only actually creates those residual bindings if the
@@ -569,7 +570,7 @@ splitValue :: IdSupply -> In TaggedValue -> Bracketed (Entered, IdSupply -> Stat
 splitValue ids (rn, Lambda x e) = zipBracketeds (\[e'] -> lambda x' e') (\[fvs'] -> fvs') (\[fvs'] -> S.delete x' fvs') [oneBracketed (Many False, \ids -> (Heap M.empty ids, [], (rn', e)))]
   where (_ids', rn', x') = renameBinder ids rn x
 splitValue ids in_v                  = noneBracketed (value v') (valueFreeVars v')
-  where v' = detagValue $ renameIn renameTaggedValue ids in_v
+  where v' = detagTaggedValue $ renameIn renameTaggedValue ids in_v
 
 splitQA :: IdSupply -> Tagged QA -> Bracketed (Entered, IdSupply -> State)
 splitQA _   (Tagged _ (Question x')) = noneBracketed (var x') (S.singleton x')
