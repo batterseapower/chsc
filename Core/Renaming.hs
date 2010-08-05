@@ -1,14 +1,21 @@
 {-# LANGUAGE ViewPatterns, TupleSections, Rank2Types #-}
 module Core.Renaming where
 
+import Core.FreeVars
 import Core.Syntax
 
 import Renaming
 import Utilities
 
+import qualified Data.Set as S
+
 
 type In a = (Renaming, a)
 type Out a = a
+
+
+renameFreeVars :: Renaming -> FreeVars -> FreeVars
+renameFreeVars rn = S.map (rename rn)
 
 
 renameTagged :: (IdSupply -> Renaming -> a -> a) -> IdSupply -> Renaming -> Tagged a -> Tagged a
@@ -29,21 +36,23 @@ renameBounds f ids rn (unzip -> (xs, es)) = (ids', rn', zipWith f xs xs' `zip` m
   where (ids', rn', xs') = renameBinders ids rn xs
 
 
-(renameVar,       renameTerm,       renameAlts,       renameValue)       = mkRename (\f (I e) -> I (f e))
-(renameTaggedVar, renameTaggedTerm, renameTaggedAlts, renameTaggedValue) = mkRename (\f (Tagged tg e) -> Tagged tg (f e))
+(renameVar,           renameTerm,           renameAlts,           renameValue)           = mkRename (\f rn (I e) -> I (f rn e))
+(renameFVedVar,       renameFVedTerm,       renameFVedAlts,       renameFVedValue)       = mkRename (\f rn (FVed fvs e) -> FVed (renameFreeVars rn fvs) (f rn e))
+(renameTaggedVar,     renameTaggedTerm,     renameTaggedAlts,     renameTaggedValue)     = mkRename (\f rn (Tagged tg e) -> Tagged tg (f rn e))
+(renameTaggedFVedVar, renameTaggedFVedTerm, renameTaggedFVedAlts, renameTaggedFVedValue) = mkRename (\f rn (Comp (Tagged tg (FVed fvs e))) -> Comp (Tagged tg (FVed (renameFreeVars rn fvs) (f rn e))))
 
 {-# INLINE mkRename #-}
-mkRename :: (forall a. (a -> a) -> ann a -> ann a)
+mkRename :: (forall a. (Renaming -> a -> a) -> Renaming -> ann a -> ann a)
          -> (            Renaming -> ann Var -> ann Var,
              IdSupply -> Renaming -> ann (TermF ann) -> ann (TermF ann),
              IdSupply -> Renaming -> [AltF ann]      -> [AltF ann],
              IdSupply -> Renaming -> ValueF ann      -> ValueF ann)
 mkRename rec = (var, term, alternatives, value)
   where
-    var rn = rec (var' rn)
+    var rn = rec var' rn
     var' = rename
     
-    term ids rn = rec (term' ids rn)
+    term ids rn = rec (term' ids) rn
     term' ids rn e = case e of
       Var x -> Var (safeRename "renameTerm" rn x)
       Value v -> Value (value ids rn v)

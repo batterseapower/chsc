@@ -1,5 +1,4 @@
 module Evaluator.FreeVars (
-    renamingFreeVars,
     inFreeVars,
     pureHeapFreeVars, pureHeapOpenFreeVars,
     stackFreeVars, stackFrameFreeVars,
@@ -18,11 +17,8 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 
 
-renamingFreeVars :: Renaming -> FreeVars -> FreeVars
-renamingFreeVars rn = S.map (rename rn)
-
 inFreeVars :: (a -> FreeVars) -> In a -> FreeVars
-inFreeVars thing_fvs (rn, thing) = renamingFreeVars rn (thing_fvs thing)
+inFreeVars thing_fvs (rn, thing) = renameFreeVars rn (thing_fvs thing)
 
 pureHeapFreeVars :: PureHeap -> (BoundVars, FreeVars) -> FreeVars
 pureHeapFreeVars h (bvs, fvs) = fvs' S.\\ bvs'
