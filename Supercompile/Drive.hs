@@ -60,35 +60,6 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ runScpM input_fvs $ 
             where (t, rb)   = extractDeeds e
                   (ts, rbs) = unzip (map extractDeeds es)
 
-
---
--- == Termination ==
---
-
--- Other functions:
---  Termination.Terminate.terminate
-
--- This family of functions is the whole reason that I have to thread Tag information throughout the rest of the code:
-
-stateTagBag :: State -> TagBag
-stateTagBag (Heap h _, k, (_, e)) = pureHeapTagBag h `plusTagBag` stackTagBag k `plusTagBag` taggedTermTagBag e
-
-pureHeapTagBag :: PureHeap -> TagBag
-pureHeapTagBag = plusTagBags . map (taggedTagBag 5 . snd) . M.elems
-
-stackTagBag :: Stack -> TagBag
-stackTagBag = plusTagBags . map (tagTagBag 3) . concatMap stackFrameTags
-
-taggedTermTagBag :: TaggedTerm -> TagBag
-taggedTermTagBag = taggedTagBag 2
-
-taggedTagBag :: Int -> Tagged a -> TagBag
-taggedTagBag cls = tagTagBag cls . tag
-
-tagTagBag :: Int -> Tag -> TagBag
-tagTagBag cls = mkTagBag . return . injectTag cls
-
-
 --
 -- == Bounded multi-step reduction ==
 --
@@ -100,10 +71,10 @@ reduce = go emptyHistory S.empty
       -- | traceRender ("reduce.go", deeds, residualiseState state) False = undefined
       | not eVALUATE_PRIMOPS, (_, _, (_, Tagged _ (PrimOp _ _))) <- state = (deeds, state)
       | otherwise = fromMaybe (deeds, state) $ do
-          hist' <- case terminate hist (stateTagBag state) of
+          hist' <- case terminate hist state of
                       _ | intermediate state -> Just hist
                       Continue hist'         -> Just hist'
-                      Stop                   -> Nothing
+                      Stop     _             -> Nothing
           fmap (go hist' lives) $ step (go hist') lives (deeds, state)
     
     intermediate :: State -> Bool
@@ -241,8 +212,8 @@ runScpM input_fvs me = uncurry letRec $ snd (unScpM (bindFloats (\_ -> True) me)
 
 sc, sc' :: History -> (Deeds, State) -> ScpM (Deeds, FreeVars, Out Term)
 sc  hist = memo (sc' hist)
-sc' hist (deeds, state) = case terminate hist (stateTagBag state) of
-    Stop           -> trace "stop" $ split (sc hist)          (deeds, state)
+sc' hist (deeds, state) = case terminate hist state of
+    Stop     _     -> trace "stop" $ split (sc hist)          (deeds, state)
     Continue hist' ->                split (sc hist') (reduce (deeds, state))
 
 
