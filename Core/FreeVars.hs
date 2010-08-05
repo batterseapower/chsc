@@ -12,35 +12,37 @@ type FreeVars = S.Set Var
 type BoundVars = S.Set Var
 
 
-(termVarFreeVars',           termFreeVars,           termFreeVars',           altsFreeVars,           valueFreeVars)           = mkFreeVars (\f (I e) -> f e)
-(fvedTermVarFreeVars',       fvedTermFreeVars,       fvedTermFreeVars',       fvedAltsFreeVars,       fvedValueFreeVars)       = mkFreeVars (\_ (FVed fvs _) -> fvs)
-(taggedTermVarFreeVars',     taggedTermFreeVars,     taggedTermFreeVars',     taggedAltsFreeVars,     taggedValueFreeVars)     = mkFreeVars (\f (Tagged _ e) -> f e)
-(taggedFvedTermVarFreeVars', taggedFvedTermFreeVars, taggedFvedTermFreeVars', taggedFvedAltsFreeVars, taggedFvedValueFreeVars) = mkFreeVars (\_ (Comp (Tagged _ (FVed fvs _))) -> fvs)
+(termVarFreeVars',       termFreeVars,           termFreeVars',           altsFreeVars,           valueFreeVars,           valueFreeVars')           = mkFreeVars (\f (I e) -> f e)
+(fvedTermVarFreeVars',   fvedTermFreeVars,       fvedTermFreeVars',       fvedAltsFreeVars,       fvedValueFreeVars,       fvedValueFreeVars')       = mkFreeVars (\_ (FVed fvs _) -> fvs)
+(taggedTermVarFreeVars', taggedTermFreeVars,     taggedTermFreeVars',     taggedAltsFreeVars,     taggedValueFreeVars,     taggedValueFreeVars')     = mkFreeVars (\f (Tagged _ e) -> f e)
+(taggedFVedVarFreeVars', taggedFVedTermFreeVars, taggedFVedTermFreeVars', taggedFVedAltsFreeVars, taggedFVedValueFreeVars, taggedFVedValueFreeVars') = mkFreeVars (\_ (Comp (Tagged _ (FVed fvs _))) -> fvs)
 
 {-# INLINE mkFreeVars #-}
 mkFreeVars :: (forall a. (a -> FreeVars) -> ann a -> FreeVars)
-           -> (Var             -> FreeVars,
-               ann (TermF ann) -> FreeVars,
-               TermF ann       -> FreeVars,
-               [AltF ann]      -> FreeVars,
-               ValueF ann      -> FreeVars)
-mkFreeVars rec = (var', term, term', alternatives, value)
+           -> (Var              -> FreeVars,
+               ann (TermF ann)  -> FreeVars,
+               TermF ann        -> FreeVars,
+               [AltF ann]       -> FreeVars,
+               ann (ValueF ann) -> FreeVars,
+               ValueF ann       -> FreeVars)
+mkFreeVars rec = (var', term, term', alternatives, value, value')
   where
     var = rec var'
     var' = S.singleton
     
     term = rec term'
     term' (Var x)        = S.singleton x
-    term' (Value v)      = value v
+    term' (Value v)      = value' v
     term' (App e x)      = term e `S.union` var x
     term' (PrimOp _ es)  = S.unions $ map term es
     term' (Case e alts)  = term e `S.union` alternatives alts
     term' (LetRec xes e) = deleteList xs $ S.unions (map term es) `S.union` term e
       where (xs, es) = unzip xes
     
-    value (Lambda x e) = S.delete x $ term e
-    value (Data _ xs)  = S.fromList xs
-    value (Literal _)  = S.empty
+    value = rec value'
+    value' (Lambda x e) = S.delete x $ term e
+    value' (Data _ xs)  = S.fromList xs
+    value' (Literal _)  = S.empty
     
     alternatives = S.unions . map alternative
     

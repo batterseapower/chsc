@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections, PatternGuards #-}
+{-# LANGUAGE TupleSections, PatternGuards, ViewPatterns #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 module Supercompile.Match (match) where
 
@@ -22,17 +22,17 @@ match (Heap h_l _, k_l, in_e_l) (Heap h_r _, k_r, in_e_r) = -- (\res -> traceRen
     (bound_eqs, free_eqs2) <- matchEC k_l k_r
     matchHeapExact h_l h_r (bound_eqs, free_eqs1 ++ free_eqs2)
 
-matchTagged :: (In a -> In a -> b)
-            -> In (Tagged a) -> In (Tagged a) -> b
-matchTagged f (rn_l, Tagged _ e_l) (rn_r, Tagged _ e_r) = f (rn_l, e_l) (rn_r, e_r)
+matchAnned :: (In a -> In a -> b)
+           -> In (Anned a) -> In (Anned a) -> b
+matchAnned f (rn_l, annee -> e_l) (rn_r, annee -> e_r) = f (rn_l, e_l) (rn_r, e_r)
 
-matchInTerm :: IdSupply -> In TaggedTerm -> In TaggedTerm -> Maybe [(Var, Var)]
-matchInTerm ids = matchTagged (matchInTerm' ids)
+matchInTerm :: IdSupply -> In AnnedTerm -> In AnnedTerm -> Maybe [(Var, Var)]
+matchInTerm ids = matchAnned (matchInTerm' ids)
 
-matchInTerm' :: IdSupply -> In (TermF Tagged) -> In (TermF Tagged) -> Maybe [(Var, Var)]
+matchInTerm' :: IdSupply -> In (TermF Anned) -> In (TermF Anned) -> Maybe [(Var, Var)]
 matchInTerm' _   (rn_l, Var x_l)           (rn_r, Var x_r)           = Just [matchInVar (rn_l, x_l) (rn_r, x_r)]
 matchInTerm' ids (rn_l, Value v_l)         (rn_r, Value v_r)         = matchInValue ids (rn_l, v_l) (rn_r, v_r)
-matchInTerm' ids (rn_l, App e_l x_l)       (rn_r, App e_r x_r)       = matchInTerm ids (rn_l, e_l) (rn_r, e_r) >>= \eqs -> return (matchTagged matchInVar (rn_l, x_l) (rn_r, x_r) : eqs)
+matchInTerm' ids (rn_l, App e_l x_l)       (rn_r, App e_r x_r)       = matchInTerm ids (rn_l, e_l) (rn_r, e_r) >>= \eqs -> return (matchAnned matchInVar (rn_l, x_l) (rn_r, x_r) : eqs)
 matchInTerm' ids (rn_l, PrimOp pop_l es_l) (rn_r, PrimOp pop_r es_r) = guard (pop_l == pop_r) >> matchInList (matchInTerm ids) (rn_l, es_l) (rn_r, es_r)
 matchInTerm' ids (rn_l, Case e_l alts_l)   (rn_r, Case e_r alts_r)   = liftM2 (++) (matchInTerm ids (rn_l, e_l) (rn_r, e_r)) (matchInAlts ids (rn_l, alts_l) (rn_r, alts_r))
 matchInTerm' ids (rn_l, LetRec xes_l e_l)  (rn_r, LetRec xes_r e_r)  = matchInTerm ids'' (rn_l', e_l) (rn_r', e_r) >>= \eqs -> matchPureHeapExact ids'' [] eqs (M.fromList xes_l') (M.fromList xes_r')
@@ -40,7 +40,7 @@ matchInTerm' ids (rn_l, LetRec xes_l e_l)  (rn_r, LetRec xes_r e_r)  = matchInTe
         (ids'', rn_r', xes_r') = renameBounds (\_ x' -> x') ids' rn_r xes_r
 matchInTerm' _ _ _ = Nothing
 
-matchInValue :: IdSupply -> In TaggedValue -> In TaggedValue -> Maybe [(Var, Var)]
+matchInValue :: IdSupply -> In AnnedValue -> In AnnedValue -> Maybe [(Var, Var)]
 matchInValue ids (rn_l, Lambda x_l e_l) (rn_r, Lambda x_r e_r) = matchInTerm ids'' (rn_l', e_l) (rn_r', e_r) >>= \eqs -> matchRigidBinders [(x_l', x_r')] eqs
   where (ids',  rn_l', x_l') = renameBinder ids  rn_l x_l
         (ids'', rn_r', x_r') = renameBinder ids' rn_r x_r
@@ -48,10 +48,10 @@ matchInValue _   (rn_l, Data dc_l xs_l) (rn_r, Data dc_r xs_r) = guard (dc_l == 
 matchInValue _   (_,    Literal l_l)    (_,    Literal l_r)    = guard (l_l == l_r) >> return []
 matchInValue _ _ _ = Nothing
 
-matchInAlts :: IdSupply -> In [TaggedAlt] -> In [TaggedAlt] -> Maybe [(Var, Var)]
+matchInAlts :: IdSupply -> In [AnnedAlt] -> In [AnnedAlt] -> Maybe [(Var, Var)]
 matchInAlts ids (rn_l, alts_l) (rn_r, alts_r) = zipWithEqual (matchInAlt ids) (map (rn_l,) alts_l) (map (rn_r,) alts_r) >>= (fmap concat . sequence)
 
-matchInAlt :: IdSupply -> In TaggedAlt -> In TaggedAlt -> Maybe [(Var, Var)]
+matchInAlt :: IdSupply -> In AnnedAlt -> In AnnedAlt -> Maybe [(Var, Var)]
 matchInAlt ids (rn_l, (alt_con_l, alt_e_l)) (rn_r, (alt_con_r, alt_e_r)) = matchAltCon alt_con_l' alt_con_r' >>= \binders -> matchInTerm ids'' (rn_l', alt_e_l) (rn_r', alt_e_r) >>= \eqs -> matchRigidBinders binders eqs
   where (ids',  rn_l', alt_con_l') = renameAltCon ids  rn_l alt_con_l
         (ids'', rn_r', alt_con_r') = renameAltCon ids' rn_r alt_con_r
@@ -65,8 +65,8 @@ matchAltCon _ _ = Nothing
 matchVar :: Out Var -> Out Var -> (Var, Var)
 matchVar x_l' x_r' = (x_l', x_r')
 
-matchTaggedVar :: Out (Tagged Var) -> Out (Tagged Var) -> (Var, Var)
-matchTaggedVar x_l' x_r' = matchVar (tagee x_l') (tagee x_r')
+matchAnnedVar :: Out (Anned Var) -> Out (Anned Var) -> (Var, Var)
+matchAnnedVar x_l' x_r' = matchVar (annee x_l') (annee x_r')
 
 matchInVar :: In Var -> In Var -> (Var, Var)
 matchInVar (rn_l, x_l) (rn_r, x_r) = (safeRename "matchInVar: Left" rn_l x_l, safeRename "matchInVar: Right" rn_r x_r)
@@ -93,10 +93,10 @@ matchEC k_l k_r = fmap combine $ zipWithEqualM matchECFrame k_l k_r
   where combine = (concat *** concat) . unzip
 
 matchECFrame :: StackFrame -> StackFrame -> Maybe ([(Var, Var)], [(Var, Var)])
-matchECFrame (Apply x_l')                      (Apply x_r')                      = Just ([], [matchTaggedVar x_l' x_r'])
+matchECFrame (Apply x_l')                      (Apply x_r')                      = Just ([], [matchAnnedVar x_l' x_r'])
 matchECFrame (Scrutinise in_alts_l)            (Scrutinise in_alts_r)            = fmap ([],) $ matchInAlts matchIdSupply in_alts_l in_alts_r
-matchECFrame (PrimApply pop_l in_vs_l in_es_l) (PrimApply pop_r in_vs_r in_es_r) = fmap ([],) $ guard (pop_l == pop_r) >> liftM2 (++) (matchList (\v1 v2 -> matchInValue matchIdSupply (tagee v1) (tagee v2)) in_vs_l in_vs_r) (matchList (matchInTerm matchIdSupply) in_es_l in_es_r)
-matchECFrame (Update x_l')                     (Update x_r')                     = Just ([matchTaggedVar x_l' x_r'], [])
+matchECFrame (PrimApply pop_l in_vs_l in_es_l) (PrimApply pop_r in_vs_r in_es_r) = fmap ([],) $ guard (pop_l == pop_r) >> liftM2 (++) (matchList (matchAnned (matchInValue matchIdSupply)) in_vs_l in_vs_r) (matchList (matchInTerm matchIdSupply) in_es_l in_es_r)
+matchECFrame (Update x_l')                     (Update x_r')                     = Just ([matchAnnedVar x_l' x_r'], [])
 matchECFrame _ _ = Nothing
 
 -- Returns a renaming from the list only if the list maps a "left" variable to a unique "right" variable
@@ -149,7 +149,7 @@ matchPureHeap :: IdSupply -> [(Var, Var)] -> [(Var, Var)] -> PureHeap -> PureHea
 matchPureHeap ids bound_eqs free_eqs init_h_l init_h_r = go bound_eqs free_eqs init_h_l init_h_r
   where
     -- Utility function used to deal with work-duplication issues when matching
-    deleteExpensive x m | Just (_, e) <- M.lookup x m, not (taggedTermIsCheap e) = M.delete x m
+    deleteExpensive x m | Just (_, e) <- M.lookup x m, not (isCheap (annee e)) = M.delete x m
                         | otherwise = m
     
     -- NB: must respect work-sharing for non-values

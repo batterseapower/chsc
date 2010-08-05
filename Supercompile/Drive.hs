@@ -1,4 +1,4 @@
-{-# LANGUAGE ViewPatterns, TupleSections, PatternGuards, BangPatterns #-}
+{-# LANGUAGE ViewPatterns, TupleSections, PatternGuards, BangPatterns, Rank2Types #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 module Supercompile.Drive (supercompile) where
 
@@ -9,7 +9,6 @@ import Supercompile.Split
 import Core.FreeVars
 import Core.Renaming
 import Core.Syntax
-import Core.Tag
 
 import Evaluator.Evaluate
 import Evaluator.FreeVars
@@ -34,32 +33,41 @@ import Data.Tree
 
 supercompile :: Term -> Term
 supercompile e = traceRender ("all input FVs", input_fvs) $ runScpM input_fvs $ fmap thd3 $ sc [] (deeds, state)
-  where input_fvs = termFreeVars e
-        state = (Heap M.empty reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, tagged_e))
-        tagged_e = tagTerm e
+  where input_fvs = annedTermFreeVars anned_e
+        state = (Heap M.empty reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, anned_e))
+        anned_e = toAnnedTerm e
         
-        (t, rb) = extractDeeds tagged_e
         deeds = mkDeeds (bLOAT_FACTOR - 1) (t, pPrint . rb)
-        extractDeeds (Tagged tg e) = -- traceRender ("extractDeeds", rb (fmap (fmap (const 1)) ts)) $
-                                     (Node tg ts, \(Node unc ts') -> Counted unc (rb ts'))
-          where (ts, rb) = extractDeeds' e
-        extractDeeds' e = case e of
-          Var x              -> ([], \[] -> Var x)
-          Value (Lambda x e) -> ([t], \[t'] -> Value (Lambda x (rb t')))
-            where (t, rb) = extractDeeds e
-          Value (Data dc xs) -> ([], \[] -> Value (Data dc xs))
-          Value (Literal l)  -> ([], \[] -> Value (Literal l))
-          App e x            -> ([t1, t2], \[t1', t2'] -> App (rb1 t1') (rb2 t2'))
-            where (t1, rb1) = extractDeeds e
-                  (t2, rb2) = (Node (tag x) [], \(Node unc []) -> Counted unc (tagee x))
-          PrimOp pop es      -> (ts, \ts' -> PrimOp pop (zipWith ($) rbs ts'))
-            where (ts, rbs) = unzip (map extractDeeds es)
-          Case e (unzip -> (alt_cons, alt_es)) -> (t : ts, \(t':ts') -> Case (rb t') (alt_cons `zip` zipWith ($) rbs ts'))
-            where (t, rb)   = extractDeeds e
-                  (ts, rbs) = unzip (map extractDeeds alt_es)
-          LetRec (unzip -> (xs, es)) e         -> (t : ts, \(t':ts') -> LetRec (xs `zip` zipWith ($) rbs ts') (rb t'))
-            where (t, rb)   = extractDeeds e
-                  (ts, rbs) = unzip (map extractDeeds es)
+        
+        (t, rb) = extractDeeds (\f e -> let (ts, rb) = f (annee e)
+                                        in (Node (annedTag e) ts, \(Node unc ts') -> Counted unc (rb ts'))) anned_e
+        
+        extractDeeds :: (forall a b.    (a        -> ([Tree Tag], [Tree Int] -> b))
+                                     -> Anned a   -> (Tree Tag,   Tree Int   -> Counted b))
+                     -> AnnedTerm -> (Tree Tag, Tree Int -> CountedTerm)
+        extractDeeds rec = term
+          where 
+            var = rec var'
+            var' x = ([], \[] -> x)
+            
+            term = rec term'
+            term' e = case e of
+              Var x              -> ([], \[] -> Var x)
+              Value (Lambda x e) -> ([t], \[t'] -> Value (Lambda x (rb t')))
+                where (t, rb) = term e
+              Value (Data dc xs) -> ([], \[] -> Value (Data dc xs))
+              Value (Literal l)  -> ([], \[] -> Value (Literal l))
+              App e x            -> ([t1, t2], \[t1', t2'] -> App (rb1 t1') (rb2 t2'))
+                where (t1, rb1) = term e
+                      (t2, rb2) = var x
+              PrimOp pop es      -> (ts, \ts' -> PrimOp pop (zipWith ($) rbs ts'))
+                where (ts, rbs) = unzip (map term es)
+              Case e (unzip -> (alt_cons, alt_es)) -> (t : ts, \(t':ts') -> Case (rb t') (alt_cons `zip` zipWith ($) rbs ts'))
+                where (t, rb)   = term e
+                      (ts, rbs) = unzip (map term alt_es)
+              LetRec (unzip -> (xs, es)) e         -> (t : ts, \(t':ts') -> LetRec (xs `zip` zipWith ($) rbs ts') (rb t'))
+                where (t, rb)   = term e
+                      (ts, rbs) = unzip (map term es)
 
 
 --
@@ -72,19 +80,19 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ runScpM input_fvs $ 
 -- This family of functions is the whole reason that I have to thread Tag information throughout the rest of the code:
 
 stateTagBag :: State -> TagBag
-stateTagBag (Heap h _, k, (_, e)) = pureHeapTagBag h `plusTagBag` stackTagBag k `plusTagBag` taggedTermTagBag e
+stateTagBag (Heap h _, k, (_, e)) = pureHeapTagBag h `plusTagBag` stackTagBag k `plusTagBag` annedTermTagBag e
 
 pureHeapTagBag :: PureHeap -> TagBag
-pureHeapTagBag = plusTagBags . map (taggedTagBag 5 . snd) . M.elems
+pureHeapTagBag = plusTagBags . map (annedTagBag 5 . snd) . M.elems
 
 stackTagBag :: Stack -> TagBag
 stackTagBag = plusTagBags . map (tagTagBag 3) . concatMap stackFrameTags
 
-taggedTermTagBag :: TaggedTerm -> TagBag
-taggedTermTagBag = taggedTagBag 2
+annedTermTagBag :: AnnedTerm -> TagBag
+annedTermTagBag = annedTagBag 2
 
-taggedTagBag :: Int -> Tagged a -> TagBag
-taggedTagBag cls = tagTagBag cls . tag
+annedTagBag :: Int -> Anned a -> TagBag
+annedTagBag cls = tagTagBag cls . annedTag
 
 tagTagBag :: Int -> Tag -> TagBag
 tagTagBag cls = mkTagBag . return . injectTag cls
@@ -99,7 +107,7 @@ reduce = go emptyHistory S.empty
   where
     go hist lives (deeds, state)
       -- | traceRender ("reduce.go", deeds, residualiseState state) False = undefined
-      | not eVALUATE_PRIMOPS, (_, _, (_, Tagged _ (PrimOp _ _))) <- state = (deeds, state)
+      | not eVALUATE_PRIMOPS, (_, _, (_, annee -> PrimOp _ _)) <- state = (deeds, state)
       | otherwise = fromMaybe (deeds, state) $ either id id $ do
           hist' <- case terminate hist (stateTagBag state) (deeds, state) of
                       _ | intermediate state -> Right hist
@@ -108,7 +116,7 @@ reduce = go emptyHistory S.empty
           Right $ fmap (go hist' lives) $ step (go hist') lives (deeds, state)
     
     intermediate :: State -> Bool
-    intermediate (_, _, (_, Tagged _ (Var _))) = False
+    intermediate (_, _, (_, annee -> Var _)) = False
     intermediate _ = True
 
 

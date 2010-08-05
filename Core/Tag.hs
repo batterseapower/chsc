@@ -49,16 +49,18 @@ mkTag rec = term tagIdSupply
     alternative ids (con, e) = (con, term ids e)
 
 
-(detagTaggedTerm,     detagTaggedAlts,     detagTaggedValue)     = mkDetag (\f e -> I (f (tagee e)))
-(detagTaggedFVedTerm, detagTaggedFVedAlts, detagTaggedFVedValue) = mkDetag (\f e -> I (f (fvee (tagee (unComp e)))))
+(detagTaggedVar,     detagTaggedTerm,     detagTaggedAlts,     detagTaggedValue,     detagTaggedValue')     = mkDetag (\f e -> I (f (tagee e)))
+(detagTaggedFVedVar, detagTaggedFVedTerm, detagTaggedFVedAlts, detagTaggedFVedValue, detagTaggedFVedValue') = mkDetag (\f e -> I (f (fvee (tagee (unComp e)))))
 
 
 {-# INLINE mkDetag #-}
 mkDetag :: (forall a b. (a -> b) -> ann a -> ann' b)
-        -> (ann (TermF ann) -> ann' (TermF ann'),
-            [AltF ann]      -> [AltF ann'],
-            ValueF ann      -> ValueF ann')
-mkDetag rec = (term, alternatives, value)
+        -> (ann Var          -> ann' Var,
+            ann (TermF ann)  -> ann' (TermF ann'),
+            [AltF ann]       -> [AltF ann'],
+            ann (ValueF ann) -> ann' (ValueF ann'),
+            ValueF ann       -> ValueF ann')
+mkDetag rec = (var, term, alternatives, value, value')
   where
     var = rec var'
     var' x = x
@@ -66,14 +68,15 @@ mkDetag rec = (term, alternatives, value)
     term = rec term'
     term' e = case e of
         Var x         -> Var x
-        Value v       -> Value (value v)
+        Value v       -> Value (value' v)
         App e x       -> App (term e) (var x)
         PrimOp pop es -> PrimOp pop (map term es)
         Case e alts   -> Case (term e) (alternatives alts)
         LetRec xes e  -> LetRec (map (second term) xes) (term e)
 
-    value (Lambda x e) = Lambda x (term e)
-    value (Data dc xs) = Data dc xs
-    value (Literal l)  = Literal l
+    value = rec value'
+    value' (Lambda x e) = Lambda x (term e)
+    value' (Data dc xs) = Data dc xs
+    value' (Literal l)  = Literal l
 
     alternatives = map (second term)

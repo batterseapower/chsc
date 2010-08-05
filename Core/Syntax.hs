@@ -4,8 +4,6 @@ module Core.Syntax where
 import Name
 import Utilities
 
-import qualified Data.Set as S
-
 
 type Var = Name
 
@@ -144,9 +142,6 @@ isCheap _         = False
 
 termIsCheap :: Term -> Bool
 termIsCheap = isCheap . unI
-
-taggedTermIsCheap :: TaggedTerm -> Bool
-taggedTermIsCheap = isCheap . tagee
 
 
 class Symantics ann where

@@ -29,18 +29,19 @@ renameBounds f ids rn (unzip -> (xs, es)) = (ids', rn', zipWith f xs xs' `zip` m
   where (ids', rn', xs') = renameBinders ids rn xs
 
 
-(renameVar,           renameTerm,           renameAlts,           renameValue)           = mkRename (\f rn (I e) -> I (f rn e))
-(renameFVedVar,       renameFVedTerm,       renameFVedAlts,       renameFVedValue)       = mkRename (\f rn (FVed fvs e) -> FVed (renameFreeVars rn fvs) (f rn e))
-(renameTaggedVar,     renameTaggedTerm,     renameTaggedAlts,     renameTaggedValue)     = mkRename (\f rn (Tagged tg e) -> Tagged tg (f rn e))
-(renameTaggedFVedVar, renameTaggedFVedTerm, renameTaggedFVedAlts, renameTaggedFVedValue) = mkRename (\f rn (Comp (Tagged tg (FVed fvs e))) -> Comp (Tagged tg (FVed (renameFreeVars rn fvs) (f rn e))))
+(renameVar,           renameTerm,           renameAlts,           renameValue,           renameValue')           = mkRename (\f rn (I e) -> I (f rn e))
+(renameFVedVar,       renameFVedTerm,       renameFVedAlts,       renameFVedValue,       renameFVedValue')       = mkRename (\f rn (FVed fvs e) -> FVed (renameFreeVars rn fvs) (f rn e))
+(renameTaggedVar,     renameTaggedTerm,     renameTaggedAlts,     renameTaggedValue,     renameTaggedValue')     = mkRename (\f rn (Tagged tg e) -> Tagged tg (f rn e))
+(renameTaggedFVedVar, renameTaggedFVedTerm, renameTaggedFVedAlts, renameTaggedFVedValue, renameTaggedFVedValue') = mkRename (\f rn (Comp (Tagged tg (FVed fvs e))) -> Comp (Tagged tg (FVed (renameFreeVars rn fvs) (f rn e))))
 
 {-# INLINE mkRename #-}
 mkRename :: (forall a. (Renaming -> a -> a) -> Renaming -> ann a -> ann a)
          -> (            Renaming -> ann Var -> ann Var,
-             IdSupply -> Renaming -> ann (TermF ann) -> ann (TermF ann),
-             IdSupply -> Renaming -> [AltF ann]      -> [AltF ann],
-             IdSupply -> Renaming -> ValueF ann      -> ValueF ann)
-mkRename rec = (var, term, alternatives, value)
+             IdSupply -> Renaming -> ann (TermF ann)  -> ann (TermF ann),
+             IdSupply -> Renaming -> [AltF ann]       -> [AltF ann],
+             IdSupply -> Renaming -> ann (ValueF ann) -> ann (ValueF ann),
+             IdSupply -> Renaming -> ValueF ann       -> ValueF ann)
+mkRename rec = (var, term, alternatives, value, value')
   where
     var rn = rec var' rn
     var' = rename
@@ -48,14 +49,15 @@ mkRename rec = (var, term, alternatives, value)
     term ids rn = rec (term' ids) rn
     term' ids rn e = case e of
       Var x -> Var (safeRename "renameTerm" rn x)
-      Value v -> Value (value ids rn v)
+      Value v -> Value (value' ids rn v)
       App e1 x2 -> App (term ids rn e1) (var rn x2)
       PrimOp pop es -> PrimOp pop (map (term ids rn) es)
       Case e alts -> Case (term ids rn e) (alternatives ids rn alts)
       LetRec xes e -> LetRec (map (second (renameIn term ids')) xes') (term ids' rn' e)
         where (ids', rn', xes') = renameBounds (\_ x' -> x') ids rn xes
     
-    value ids rn v = case v of
+    value ids rn = rec (value' ids) rn
+    value' ids rn v = case v of
       Lambda x e -> Lambda x' (term ids' rn' e)
         where (ids', rn', x') = renameBinder ids rn x
       Data dc xs -> Data dc (map (rename rn) xs)
