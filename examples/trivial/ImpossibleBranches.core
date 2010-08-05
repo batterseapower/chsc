@@ -1,0 +1,5 @@
+root x = if x then (case x of False -> 1) else 2
+
+tests = [
+    (root False, 2)
+  ]
