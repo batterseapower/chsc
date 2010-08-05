@@ -43,6 +43,13 @@ import System.IO
 import System.IO.Unsafe (unsafePerformIO)
 
 
+instance Monad (Either a) where
+    return = Right
+    
+    Left l  >>= _    = Left l
+    Right x >>= fxmy = fxmy x
+
+
 class Show1 f where
     showsPrec1 :: Show a => Int -> f a -> ShowS
 

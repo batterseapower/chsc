@@ -8,23 +8,23 @@ import System.IO.Unsafe
 
 {-# NOINLINE aSSERTIONS #-}
 aSSERTIONS :: Bool
-aSSERTIONS = not $ "--no-assertions" `elem` (unsafePerformIO getArgs)
+aSSERTIONS = not $ "--no-assertions" `elem` unsafePerformIO getArgs
 
 {-# NOINLINE qUIET #-}
 qUIET :: Bool
-qUIET = "-v0" `elem` (unsafePerformIO getArgs)
+qUIET = "-v0" `elem` unsafePerformIO getArgs
 
 {-# NOINLINE tERMINATION_CHECK #-}
 tERMINATION_CHECK :: Bool
-tERMINATION_CHECK = not $ "--no-termination" `elem` (unsafePerformIO getArgs)
+tERMINATION_CHECK = not $ "--no-termination" `elem` unsafePerformIO getArgs
 
 {-# NOINLINE eVALUATE_PRIMOPS #-}
 eVALUATE_PRIMOPS :: Bool
-eVALUATE_PRIMOPS = not $ "--no-primops" `elem` (unsafePerformIO getArgs)
+eVALUATE_PRIMOPS = not $ "--no-primops" `elem` unsafePerformIO getArgs
 
 {-# NOINLINE gENERALISATION #-}
 gENERALISATION :: Bool
-gENERALISATION = not $ "--no-generalisation" `elem` (unsafePerformIO getArgs)
+gENERALISATION = not $ "--no-generalisation" `elem` unsafePerformIO getArgs
 
 {-# NOINLINE bLOAT_FACTOR #-}
 bLOAT_FACTOR :: Int
@@ -54,21 +54,25 @@ bLOAT_FACTOR = fromMaybe 10 $ listToMaybe [read arg | '-':'-':'b':'l':'o':'a':'t
 
 -- {-# NOINLINE sPECULATION #-}
 -- sPECULATION :: Bool
--- sPECULATION = not $ "--no-speculation" `elem` (unsafePerformIO getArgs)
+-- sPECULATION = not $ "--no-speculation" `elem` unsafePerformIO getArgs
 -- 
 -- {-# NOINLINE sPLITTER_CHEAPIFICATION #-}
 -- sPLITTER_CHEAPIFICATION :: Bool
--- sPLITTER_CHEAPIFICATION = "--cheapification" `elem` (unsafePerformIO getArgs)
+-- sPLITTER_CHEAPIFICATION = "--cheapification" `elem` unsafePerformIO getArgs
 --  -- TODO: test my hypothesis that given that we already do speculation, let-floating in the splitter won't make much difference
 
 {-# NOINLINE sPECULATION #-}
 sPECULATION :: Bool
-sPECULATION = "--speculation" `elem` (unsafePerformIO getArgs)
+sPECULATION = "--speculation" `elem` unsafePerformIO getArgs
 
 {-# NOINLINE sPLITTER_CHEAPIFICATION #-}
 sPLITTER_CHEAPIFICATION :: Bool
-sPLITTER_CHEAPIFICATION = not $ "--no-cheapification" `elem` (unsafePerformIO getArgs)
+sPLITTER_CHEAPIFICATION = not $ "--no-cheapification" `elem` unsafePerformIO getArgs
 
 {-# NOINLINE lOCAL_TIEBACKS #-}
 lOCAL_TIEBACKS :: Bool
-lOCAL_TIEBACKS = not $ "--no-local-tiebacks" `elem` (unsafePerformIO getArgs)
+lOCAL_TIEBACKS = not $ "--no-local-tiebacks" `elem` unsafePerformIO getArgs
+
+{-# NOINLINE rEDUCE_ROLLBACK #-}
+rEDUCE_ROLLBACK :: Bool
+rEDUCE_ROLLBACK = not $ "--no-reduce-rollback" `elem` unsafePerformIO getArgs

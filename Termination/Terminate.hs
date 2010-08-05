@@ -1,4 +1,11 @@
-module Termination.Terminate where
+{-# LANGUAGE PatternGuards #-}
+module Termination.Terminate (
+        -- * TagBag construction
+        TagBag, mkTagBag, plusTagBag, plusTagBags,
+
+        -- * The termination criterion
+        History, TermRes(..), emptyHistory, terminate
+    ) where
 
 import StaticFlags
 import Utilities
@@ -33,22 +40,19 @@ tb1 <| tb2 = -- traceRender ("<|", tb1, tb2, tb1 `setEqual` tb2, cardinality tb1
              tb1 `setEqual` tb2 && cardinality tb1 <= cardinality tb2
 
 
-type History = [TagBag]
+type History a = [(TagBag, a)]
 
-emptyHistory :: History
+emptyHistory :: History a
 emptyHistory = []
 
-data TermRes = Stop | Continue History
+data TermRes a = Stop a | Continue (History a)
 
-isStop :: TermRes -> Bool
-isStop Stop = True
-isStop _    = False
-
-terminate :: History -> TagBag -> TermRes
-terminate hist here
+terminate :: History a -> TagBag -> a -> TermRes a
+terminate hist here here_extra
   -- | traceRender (length hist, tagBag here) && False = undefined
-  | tERMINATION_CHECK && any (\prev -> if prev <| here then {- traceRender (hang (text "terminate") 2 (pPrint hist $$ pPrint here)) -} True else False) hist
-  = Stop
+  | tERMINATION_CHECK
+  , prev_extra:_ <- [prev_extra | (prev, prev_extra) <- hist, if prev <| here then {- traceRender (hang (text "terminate") 2 (pPrint hist $$ pPrint here)) -} True else False]
+  = Stop prev_extra
   | otherwise
-  = Continue (here : hist)
+  = Continue ((here, here_extra) : hist)
 

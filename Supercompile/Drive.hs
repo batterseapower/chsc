@@ -99,12 +99,12 @@ reduce = go emptyHistory S.empty
     go hist lives (deeds, state)
       -- | traceRender ("reduce.go", deeds, residualiseState state) False = undefined
       | not eVALUATE_PRIMOPS, (_, _, (_, Tagged _ (PrimOp _ _))) <- state = (deeds, state)
-      | otherwise = fromMaybe (deeds, state) $ do
-          hist' <- case terminate hist (stateTagBag state) of
-                      _ | intermediate state -> Just hist
-                      Continue hist'         -> Just hist'
-                      Stop                   -> Nothing
-          fmap (go hist' lives) $ step (go hist') lives (deeds, state)
+      | otherwise = fromMaybe (deeds, state) $ either id id $ do
+          hist' <- case terminate hist (stateTagBag state) (deeds, state) of
+                      _ | intermediate state -> Right hist
+                      Continue hist'         -> Right hist'
+                      Stop     old_res       -> trace "reduce-stop" $ Left (guard rEDUCE_ROLLBACK >> return old_res)
+          Right $ fmap (go hist' lives) $ step (go hist') lives (deeds, state)
     
     intermediate :: State -> Bool
     intermediate (_, _, (_, Tagged _ (Var _))) = False
@@ -239,11 +239,11 @@ runScpM input_fvs me = uncurry letRec $ snd (unScpM (bindFloats (\_ -> True) me)
     init_s = ScpState { names = map (\i -> name $ "h" ++ show (i :: Int)) [0..], fulfilments = [] }
 
 
-sc, sc' :: History -> (Deeds, State) -> ScpM (Deeds, FreeVars, Out Term)
+sc, sc' :: History () -> (Deeds, State) -> ScpM (Deeds, FreeVars, Out Term)
 sc  hist = memo (sc' hist)
-sc' hist (deeds, state) = case terminate hist (stateTagBag state) of
-    Stop           -> trace "stop" $ split (sc hist)          (deeds, state)
-    Continue hist' ->                split (sc hist') (reduce (deeds, state))
+sc' hist (deeds, state) = case terminate hist (stateTagBag state) () of
+    Stop     ()    -> trace "sc-stop" $ split (sc hist)          (deeds, state)
+    Continue hist' ->                   split (sc hist') (reduce (deeds, state))
 
 
 memo :: ((Deeds, State) -> ScpM (Deeds, FreeVars, Out Term))
