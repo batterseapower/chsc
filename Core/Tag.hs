@@ -26,18 +26,16 @@ mkTag rec = term tagIdSupply
       where (ids', i) = stepIdSupply ids
     term' ids e = case e of
         Var x         -> Var x
-        Value v       -> Value (value ids' v)
-        App e x       -> App (term ids1' e) (var ids2' x)
-          where (ids1', ids2') = splitIdSupply ids'
+        Value v       -> Value (value ids v)
+        App e x       -> App (term ids0' e) (var ids1' x)
+          where (ids0', ids1') = splitIdSupply ids
         PrimOp pop es -> PrimOp pop (zipWith term idss' es)
           where idss' = splitIdSupplyL ids
         Case e alts   -> Case (term ids0' e) (alternatives ids1' alts)
-          where (ids0', ids1') = splitIdSupply ids'
+          where (ids0', ids1') = splitIdSupply ids
         LetRec xes e  -> LetRec (zipWith (\ids'' (x, e) -> (x, term ids'' e)) idss' xes) (term ids1' e)
-          where (ids0', ids1') = splitIdSupply ids'
+          where (ids0', ids1') = splitIdSupply ids
                 idss' = splitIdSupplyL ids0'
-      where
-        (ids', i) = stepIdSupply ids
 
     value ids v = case v of
         Lambda x e -> Lambda x (term ids e)
@@ -49,8 +47,10 @@ mkTag rec = term tagIdSupply
     alternative ids (con, e) = (con, term ids e)
 
 
-(detagTaggedVar,     detagTaggedTerm,     detagTaggedAlts,     detagTaggedValue,     detagTaggedValue')     = mkDetag (\f e -> I (f (tagee e)))
-(detagTaggedFVedVar, detagTaggedFVedTerm, detagTaggedFVedAlts, detagTaggedFVedValue, detagTaggedFVedValue') = mkDetag (\f e -> I (f (fvee (tagee (unComp e)))))
+(taggedVarToVar,         taggedTermToTerm,         taggedAltsToAlts,         taggedValueToValue,         taggedValue'ToValue')         = mkDetag (\f e -> I (f (tagee e)))
+(fVedVarToVar,           fVedTermToTerm,           fVedAltsToAlts,           fVedValueToValue,           fVedValue'ToValue')           = mkDetag (\f e -> I (f (fvee e)))
+(taggedFVedVarToVar,     taggedFVedTermToTerm,     taggedFVedAltsToAlts,     taggedFVedValueToValue,     taggedFVedValue'ToValue')     = mkDetag (\f e -> I (f (fvee (tagee (unComp e)))))
+(taggedFVedVarToFVedVar, taggedFVedTermToFVedTerm, taggedFVedAltsToFVedAlts, taggedFVedValueToFVedValue, taggedFVedValue'ToFVedValue') = mkDetag (\f e -> FVed (freeVars (tagee (unComp e))) (f (fvee (tagee (unComp e)))))
 
 
 {-# INLINE mkDetag #-}

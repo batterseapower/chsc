@@ -42,11 +42,11 @@ renameAnnedValue = renameTaggedFVedValue
 renameAnnedValue' = renameTaggedFVedValue'
 renameAnnedAlts = renameTaggedFVedAlts
 
-detagAnnedVar = detagTaggedFVedVar
-detagAnnedTerm = detagTaggedFVedTerm :: AnnedTerm -> Term
-detagAnnedValue = detagTaggedFVedValue
-detagAnnedValue' = detagTaggedFVedValue'
-detagAnnedAlts = detagTaggedFVedAlts
+detagAnnedVar = taggedFVedVarToFVedVar
+detagAnnedTerm = taggedFVedTermToFVedTerm
+detagAnnedValue = taggedFVedValueToFVedValue
+detagAnnedValue' = taggedFVedValue'ToFVedValue'
+detagAnnedAlts = taggedFVedAltsToFVedAlts
 
 
 annedVar :: Tag -> Var -> Anned Var

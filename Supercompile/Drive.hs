@@ -9,6 +9,7 @@ import Supercompile.Split
 import Core.FreeVars
 import Core.Renaming
 import Core.Syntax
+import Core.Tag
 
 import Evaluator.Evaluate
 import Evaluator.FreeVars
@@ -32,7 +33,7 @@ import Data.Tree
 
 
 supercompile :: Term -> Term
-supercompile e = traceRender ("all input FVs", input_fvs) $ runScpM input_fvs $ fmap thd3 $ sc [] (deeds, state)
+supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ runScpM input_fvs $ fmap snd $ sc [] (deeds, state)
   where input_fvs = annedTermFreeVars anned_e
         state = (Heap M.empty reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, anned_e))
         anned_e = toAnnedTerm e
@@ -195,7 +196,7 @@ instance MonadStatics ScpM where
 -- The right thing to do is to make sure that fulfilments created in different "branches" of the process tree aren't eligible for early binding in
 -- that manner, but we still want to tie back to them if possible. The bindFloats function achieves this by carefully shuffling information between the
 -- fulfilments and promises parts of the monadic-carried state.
-bindFloats :: (Promise -> Bool) -> ScpM a -> ScpM ([(Out Var, Out Term)], a)
+bindFloats :: (Promise -> Bool) -> ScpM a -> ScpM (Out [(Var, FVedTerm)], a)
 bindFloats p mx = ScpM $ \e s -> case unScpM mx (e { promises = map fst (fulfilments s) ++ promises e }) (s { fulfilments = [] }) of (s'@(ScpState { fulfilments = (partition (p . fst) -> (fs_now, fs_later)) }), x) -> traceRender ("bindFloats", map (fun . fst) fs_now, map (fun . fst) fs_later) (s' { fulfilments = fs_later ++ fulfilments s }, (sortBy (comparing ((read :: String -> Int) . drop 1 . name_string . fst)) [(fun p, lambdas (abstracted p) e') | (p, e') <- fs_now], x))
 
 getStatics :: ScpM FreeVars
@@ -207,16 +208,16 @@ freshHName = ScpM $ \_ s -> (s { names = tail (names s) }, expectHead "freshHNam
 getPromises :: ScpM [Promise]
 getPromises = ScpM $ \e s -> (s, promises e ++ map fst (fulfilments s))
 
-promise :: Promise -> ScpM (a, FreeVars, Out Term) -> ScpM (a, FreeVars, Out Term)
+promise :: Promise -> ScpM (a, Out FVedTerm) -> ScpM (a, Out FVedTerm)
 promise p opt = ScpM $ \e s -> traceRender ("promise", fun p, abstracted p, lexical p) $ unScpM (mx p) e { promises = p : promises e, statics = S.insert (fun p) (statics e) } s
   where
     mx p = do
-      (a, _fvs', e') <- opt
+      (a, e') <- opt
       ScpM $ \_ s -> (s { fulfilments = (p, e') : fulfilments s }, ())
       
-      fmap (S.fromList . ((abstracted p ++ lexical p) ++) . map fun) getPromises >>= \fvs -> assertRender ("sc: FVs", fun p, _fvs' S.\\ fvs, fvs) (_fvs' `S.isSubsetOf` fvs) $ return ()
+      let fvs' = fvedTermFreeVars e' in fmap (S.fromList . ((abstracted p ++ lexical p) ++) . map fun) getPromises >>= \fvs -> assertRender ("sc: FVs", fun p, fvs' S.\\ fvs, fvs) (fvs' `S.isSubsetOf` fvs) $ return ()
       
-      return (a, S.insert (fun p) (S.fromList (abstracted p)), fun p `varApps` abstracted p)
+      return (a, fun p `varApps` abstracted p)
 
 
 data ScpEnv = ScpEnv {
@@ -226,7 +227,7 @@ data ScpEnv = ScpEnv {
 
 data ScpState = ScpState {
     names       :: [Var],
-    fulfilments :: [(Promise, Out Term)]
+    fulfilments :: [(Promise, Out FVedTerm)]
   }
 
 newtype ScpM a = ScpM { unScpM :: ScpEnv -> ScpState -> (ScpState, a) }
@@ -241,26 +242,26 @@ instance Monad ScpM where
 instance MonadFix ScpM where
     mfix fmx = ScpM $ \e s -> let (s', x) = unScpM (fmx x) e s in (s', x)
 
-runScpM :: FreeVars -> ScpM (Out Term) -> Out Term
+runScpM :: FreeVars -> ScpM (Out FVedTerm) -> Out FVedTerm
 runScpM input_fvs me = uncurry letRecSmart $ snd (unScpM (bindFloats (\_ -> True) me) init_e init_s)
   where
     init_e = ScpEnv { statics = input_fvs, promises = [] }
     init_s = ScpState { names = map (\i -> name $ 'h' : show (i :: Int)) [0..], fulfilments = [] }
 
 
-sc, sc' :: History () -> (Deeds, State) -> ScpM (Deeds, FreeVars, Out Term)
+sc, sc' :: History () -> (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
 sc  hist = memo (sc' hist)
 sc' hist (deeds, state) = case terminate hist (stateTagBag state) () of
     Stop     ()    -> trace "sc-stop" $ split (sc hist)          (deeds, state)
     Continue hist' ->                   split (sc hist') (reduce (deeds, state))
 
 
-memo :: ((Deeds, State) -> ScpM (Deeds, FreeVars, Out Term))
-     ->  (Deeds, State) -> ScpM (Deeds, FreeVars, Out Term)
+memo :: ((Deeds, State) -> ScpM (Deeds, Out FVedTerm))
+     ->  (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
 memo opt (deeds, state) = do
     statics <- getStatics
     ps <- getPromises
-    case [ (fun p, (releaseStateDeed deeds state, S.insert (fun p) $ S.fromList tb_dynamic_vs, fun p `varApps` tb_dynamic_vs))
+    case [ (fun p, (releaseStateDeed deeds state, fun p `varApps` tb_dynamic_vs))
          | p <- ps
          , Just rn_lr <- [match (meaning p) state]
          , let rn_fvs = map (safeRename ("tieback: FVs " ++ pPrintRender (fun p)) rn_lr) -- NB: If tb contains a dead PureHeap binding (hopefully impossible) then it may have a free variable that I can't rename, so "rename" will cause an error. Not observed in practice yet.

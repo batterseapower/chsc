@@ -30,7 +30,7 @@ import qualified Data.Set as S
 type Statics = FreeVars
 
 class Monad m => MonadStatics m where
-    withStatics :: FreeVars -> m a -> m ([(Out Var, Out Term)], a)
+    withStatics :: FreeVars -> m a -> m (Out [(Var, FVedTerm)], a)
 
 
 --
@@ -74,9 +74,9 @@ mkEnteredEnv = setToMap
 
 
 split :: MonadStatics m
-      => ((Deeds, State) -> m (Deeds, FreeVars, Out Term))
+      => ((Deeds, State) -> m (Deeds, Out FVedTerm))
       -> (Deeds, State)
-      -> m (Deeds, FreeVars, Out Term)
+      -> m (Deeds, Out FVedTerm)
 split opt (deeds, s) = uncurry3 (optimiseSplit opt) (splitt (simplify (deeds, s)))
 
 -- Non-expansive simplification that we can safely do just before splitting to make the splitter a bit simpler
@@ -183,16 +183,16 @@ simplify (deeds, s) = expectHead "simplify" [(deeds, res) | (deeds, s) <- (deeds
 -- Lacking extra language features, our only option is to under-specialise the floats by inlining less
 -- evaluation context.
 data Bracketed a = Bracketed {
-    rebuild :: [Out Term] -> Out Term,  -- Rebuild the full output term given outputs to plug into each hole
-    extraFvs :: FreeVars,               -- Maximum free variables added by the residual wrapped around the holes
-    transfer :: [FreeVars] -> FreeVars, -- Strips any variables bound by the residual out of the hole FVs
-    fillers :: [a]                      -- Hole-fillers themselves. Usually State
+    rebuild :: [Out FVedTerm] -> Out FVedTerm, -- Rebuild the full output term given outputs to plug into each hole
+    extraFvs :: FreeVars,                      -- Maximum free variables added by the residual wrapped around the holes
+    transfer :: [FreeVars] -> FreeVars,        -- Strips any variables bound by the residual out of the hole FVs
+    fillers :: [a]                             -- Hole-fillers themselves. Usually State
   } deriving (Functor, Foldable.Foldable, Traversable.Traversable)
 
 instance Accumulatable Bracketed where
     mapAccumTM f acc b = liftM (\(acc', fillers') -> (acc', b { fillers = fillers' })) $ mapAccumTM f acc (fillers b)
 
-noneBracketed :: Out Term -> FreeVars -> Bracketed a
+noneBracketed :: Out FVedTerm -> FreeVars -> Bracketed a
 noneBracketed a b = Bracketed {
     rebuild  = \[] -> a,
     extraFvs = b,
@@ -208,7 +208,7 @@ oneBracketed x = Bracketed {
     fillers  = [x]
   }
 
-zipBracketeds :: ([Out Term] -> Out Term)
+zipBracketeds :: ([Out FVedTerm] -> Out FVedTerm)
               -> ([FreeVars] -> FreeVars)
               -> ([FreeVars] -> FreeVars)
               -> [Bracketed a]
@@ -226,31 +226,29 @@ bracketedFreeVars fvs bracketed = extraFvs bracketed `S.union` transfer brackete
 
 
 optimiseMany :: Monad m
-             => ((Deeds, a) -> m (Deeds, FreeVars, Out Term))
+             => ((Deeds, a) -> m (Deeds, Out FVedTerm))
              -> (Deeds, [a])
-             -> m (Deeds, [FreeVars], [Out Term])
-optimiseMany opt (deeds, xs) = do
-    (deeds', unzip -> (fvs', es')) <- mapAccumLM (\deeds s -> opt (deeds, s) >>= \(deeds, fvs, e') -> return (deeds, (fvs, e'))) deeds xs
-    return (deeds', fvs', es')
+             -> m (Deeds, [Out FVedTerm])
+optimiseMany opt (deeds, xs) = mapAccumLM (\deeds s -> opt (deeds, s) >>= \(deeds, e') -> return (deeds, e')) deeds xs
 
 optimiseBracketed :: MonadStatics m
-                  => ((Deeds, State) -> m (Deeds, FreeVars, Out Term))
+                  => ((Deeds, State) -> m (Deeds, Out FVedTerm))
                   -> (Deeds, Bracketed State)
-                  -> m (Deeds, FreeVars, Out Term)
+                  -> m (Deeds, Out FVedTerm)
 optimiseBracketed opt (deeds, b) = do
-    (deeds', fvs', es') <- optimiseMany opt (deeds, fillers b)
-    return (deeds', extraFvs b `S.union` transfer b fvs', rebuild b es')
+    (deeds', es') <- optimiseMany opt (deeds, fillers b)
+    return (deeds', rebuild b es')
 
 optimiseSplit :: MonadStatics m
-              => ((Deeds, State) -> m (Deeds, FreeVars, Out Term))
+              => ((Deeds, State) -> m (Deeds, Out FVedTerm))
               -> Deeds
               -> M.Map (Out Var) (Bracketed State)
               -> Bracketed State
-              -> m (Deeds, FreeVars, Out Term)
+              -> m (Deeds, Out FVedTerm)
 optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
     -- 1) Recursively drive the focus itself
     let statics = M.keysSet bracketeds_heap
-    (hes, (deeds, fvs_focus, e_focus)) <- withStatics statics $ optimiseBracketed opt (deeds, bracketed_focus)
+    (hes, (deeds, e_focus)) <- withStatics statics $ optimiseBracketed opt (deeds, bracketed_focus)
     
     -- 2) We now need to think about how we are going to residualise the letrec. In fact, we need to loop adding
     -- stuff to the letrec because it might be the case that:
@@ -258,17 +256,17 @@ optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
     --  * So after we do withStatics above we need to drive some element of the bracketeds_heap
     --  * And after driving that we find in our new hes a new h function referring to a new free variable
     --    that refers to some binding that is as yet unbound...
-    (deeds, bracketeds_heap, xes, fvs) <- go hes statics deeds bracketeds_heap [] fvs_focus
+    (deeds, bracketeds_heap, xes, _fvs) <- go hes statics deeds bracketeds_heap [] (fvedTermFreeVars e_focus)
     
     -- 3) Combine the residualised let bindings with the let body
     return (foldl' (\deeds b -> foldl' releaseStateDeed deeds (fillers b)) deeds (M.elems bracketeds_heap),
-            deleteList (map fst xes) fvs, letRecSmart xes e_focus)
+            letRecSmart xes e_focus)
   where
     -- TODO: clean up this incomprehensible loop
     -- TODO: investigate the possibility of just fusing in the optimiseLetBinds loop with this one
     go hes statics deeds bracketeds_heap xes fvs = do
         let statics' = statics `S.union` S.fromList (map fst hes) -- NB: the statics already include all the binders from bracketeds_heap, so no need to add xes stuff
-        (hes', (deeds, bracketeds_heap, fvs, xes')) <- withStatics statics' $ optimiseLetBinds opt deeds bracketeds_heap (fvs `S.union` S.unions (map (termFreeVars . snd) hes)) -- TODO: no need to get FVs in this way (they are in Promise)
+        (hes', (deeds, bracketeds_heap, fvs, xes')) <- withStatics statics' $ optimiseLetBinds opt deeds bracketeds_heap (fvs `S.union` S.unions (map (fvedTermFreeVars . snd) hes)) -- TODO: no need to get FVs in this way (they are in Promise)
         (if null hes' then (\a b c d -> return (a,b,c,d)) else go hes' statics') deeds bracketeds_heap (xes ++ hes ++ xes') fvs
 
 
@@ -276,11 +274,11 @@ optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
 -- by residualising the free variables of the focus residualisation (or whatever is in the let body),
 -- and then transitively inlines any bindings whose corresponding binders become free.
 optimiseLetBinds :: MonadStatics m
-                 => ((Deeds, State) -> m (Deeds, FreeVars, Out Term))
+                 => ((Deeds, State) -> m (Deeds, Out FVedTerm))
                  -> Deeds
                  -> M.Map (Out Var) (Bracketed State)
                  -> FreeVars
-                 -> m (Deeds, M.Map (Out Var) (Bracketed State), FreeVars, Out [(Var, Term)])
+                 -> m (Deeds, M.Map (Out Var) (Bracketed State), FreeVars, Out [(Var, FVedTerm)])
 optimiseLetBinds opt deeds bracketeds_heap fvs' = traceRender ("optimiseLetBinds", M.keysSet bracketeds_heap, fvs') $
                                                   go deeds bracketeds_heap [] fvs'
   where
@@ -289,7 +287,8 @@ optimiseLetBinds opt deeds bracketeds_heap fvs' = traceRender ("optimiseLetBinds
                          return (deeds, bracketeds_heap_not_resid, resid_fvs, xes_resid)
       | otherwise = {- traceRender ("optimiseSplit", xs_resid') $ -} do
         -- Recursively drive the new residuals arising from the need to bind the resid_fvs
-        (deeds, S.unions -> extra_resid_fvs', es_resid') <- optimiseMany (optimiseBracketed opt) (deeds, bracks_resid)
+        (deeds, es_resid') <- optimiseMany (optimiseBracketed opt) (deeds, bracks_resid)
+        let extra_resid_fvs' = S.unions (map fvedTermFreeVars es_resid')
         -- Recurse, because we might now need to residualise and drive even more stuff (as we have added some more FVs and BVs)
         go deeds bracketeds_heap_not_resid'
                  (xes_resid ++ zip xs_resid' es_resid')
@@ -568,7 +567,7 @@ splitStack ids must_bind_updates deeds scruts (kf:k) bracketed_hole = case kf of
 splitValue :: IdSupply -> In AnnedValue -> Bracketed (Entered, IdSupply -> State)
 splitValue ids (rn, Lambda x e) = zipBracketeds (\[e'] -> lambda x' e') (\[fvs'] -> fvs') (\[fvs'] -> S.delete x' fvs') [oneBracketed (Many False, \ids -> (Heap M.empty ids, [], (rn', e)))]
   where (_ids', rn', x') = renameBinder ids rn x
-splitValue ids in_v                  = noneBracketed (value v') (valueFreeVars' v')
+splitValue ids in_v                  = noneBracketed (value v') (inFreeVars annedValueFreeVars' in_v)
   where v' = detagAnnedValue' $ renameIn renameAnnedValue' ids in_v
 
 splitQA :: IdSupply -> In (Anned QA) -> Bracketed (Entered, IdSupply -> State)
