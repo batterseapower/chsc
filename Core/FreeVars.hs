@@ -1,18 +1,14 @@
 {-# LANGUAGE Rank2Types #-}
-module Core.FreeVars where
+module Core.FreeVars (
+    FreeVars, BoundVars,
+    module Core.FreeVars
+  ) where
 
 import Core.Syntax
 
 import Utilities
 
 import qualified Data.Set as S
-
-
-type FreeVars = S.Set Var
-type BoundVars = S.Set Var
-
-deleteList :: Ord a => [a] -> S.Set a -> S.Set a
-deleteList = flip $ foldr S.delete
 
 
 (termFreeVars,       altsFreeVars,       valueFreeVars)       = mkFreeVars (\f (I e) -> f e)

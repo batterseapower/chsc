@@ -4,8 +4,35 @@ module Core.Syntax where
 import Name
 import Utilities
 
+import qualified Data.Set as S
+
 
 type Var = Name
+
+type FreeVars = S.Set Var
+type BoundVars = S.Set Var
+
+
+data FVed a = FVed { freeVars :: FreeVars, fvee :: a }
+
+instance Show1 FVed where
+    showsPrec1 prec (FVed fvs x) = showParen (prec >= appPrec) (showString "FVed" . showsPrec appPrec fvs . showsPrec appPrec x)
+
+instance Eq1 FVed where
+    eq1 (FVed fvs1 x1) (FVed fvs2 x2) = fvs1 == fvs2 && x1 == x2
+
+instance Ord1 FVed where
+    compare1 (FVed fvs1 x1) (FVed fvs2 x2) = (x1, fvs1) `compare` (x2, fvs2)
+
+instance NFData1 FVed where
+    rnf1 (FVed a b) = rnf a `seq` rnf b
+
+instance Pretty1 FVed where
+    pPrintPrec1 level prec (FVed _ x) = pPrintPrec level prec x
+
+instance Functor FVed where
+    fmap f (FVed fvs x) = FVed fvs (f x)
+
 
 type DataCon = String
 

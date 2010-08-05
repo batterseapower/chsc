@@ -157,6 +157,9 @@ instance (Pretty k, Pretty v) => Pretty (M.Map k v) where
 instance Pretty a => Pretty (Tree a) where
     pPrint = text . drawTree . fmap (show . pPrint)
 
+deleteList :: Ord a => [a] -> S.Set a -> S.Set a
+deleteList = flip $ foldr S.delete
+
 fmapSet :: (Ord a, Ord b) => (a -> b) -> S.Set a -> S.Set b
 fmapSet f = S.fromList . map f . S.toList
 
