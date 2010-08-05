@@ -22,7 +22,6 @@ mkTag rec = term tagIdSupply
     var ids = rec (idFromSupply ids) var'
     var' x = x
     
-    -- tagTerm :: IdSupply -> Term -> TaggedTerm
     term ids = rec i (term' ids')
       where (ids', i) = stepIdSupply ids
     term' ids e = case e of
@@ -40,16 +39,13 @@ mkTag rec = term tagIdSupply
       where
         (ids', i) = stepIdSupply ids
 
-    -- tagValue :: IdSupply -> Value -> TaggedValue
     value ids v = case v of
         Lambda x e -> Lambda x (term ids e)
         Data dc xs -> Data dc xs
         Literal l  -> Literal l
 
-    -- tagAlts :: IdSupply -> [Alt] -> [TaggedAlt]
     alternatives = zipWith alternative . splitIdSupplyL
     
-    -- tagAlt :: IdSupply -> Alt -> TaggedAlt
     alternative ids (con, e) = (con, term ids e)
 
 
