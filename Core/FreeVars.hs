@@ -59,7 +59,7 @@ altConFreeVars (LiteralAlt _)    = id
 altConFreeVars (DefaultAlt mb_x) = maybe id S.delete mb_x
 
 
-data FVed a = FVed { freeVars :: FreeVars, fvee :: a }
+data FVed a = FVed { freeVars :: !FreeVars, fvee :: !a }
 
 instance Show1 FVed where
     showsPrec1 prec (FVed fvs x) = showParen (prec >= appPrec) (showString "FVed" . showsPrec appPrec fvs . showsPrec appPrec x)

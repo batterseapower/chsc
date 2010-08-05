@@ -136,7 +136,7 @@ type Tag = Int
 injectTag :: Int -> Tag -> Tag
 injectTag cls tg = cls * tg
 
-data Tagged a = Tagged { tag :: Tag, tagee :: a }
+data Tagged a = Tagged { tag :: !Tag, tagee :: !a }
 
 instance Show1 Tagged where
     showsPrec1 prec (Tagged tg x) = showParen (prec >= appPrec) (showString "Tagged" . showsPrec appPrec tg . showsPrec appPrec x)
