@@ -233,7 +233,7 @@ instance MonadFix ScpM where
     mfix fmx = ScpM $ \e s -> let (s', x) = unScpM (fmx x) e s in (s', x)
 
 runScpM :: FreeVars -> ScpM (Out Term) -> Out Term
-runScpM input_fvs me = uncurry letRec $ snd (unScpM (bindFloats (\_ -> True) me) init_e init_s)
+runScpM input_fvs me = uncurry letRecSmart $ snd (unScpM (bindFloats (\_ -> True) me) init_e init_s)
   where
     init_e = ScpEnv { statics = input_fvs, promises = [] }
     init_s = ScpState { names = map (\i -> name $ 'h' : show (i :: Int)) [0..], fulfilments = [] }

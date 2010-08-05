@@ -1,4 +1,4 @@
-{-# LANGUAGE PatternGuards, ViewPatterns, TypeSynonymInstances, FlexibleInstances #-}
+{-# LANGUAGE PatternGuards, ViewPatterns, TypeSynonymInstances, FlexibleInstances, Rank2Types #-}
 module Core.Syntax where
 
 import Name
@@ -8,31 +8,6 @@ import qualified Data.Set as S
 
 
 type Var = Name
-
-type FreeVars = S.Set Var
-type BoundVars = S.Set Var
-
-
-data FVed a = FVed { freeVars :: FreeVars, fvee :: a }
-
-instance Show1 FVed where
-    showsPrec1 prec (FVed fvs x) = showParen (prec >= appPrec) (showString "FVed" . showsPrec appPrec fvs . showsPrec appPrec x)
-
-instance Eq1 FVed where
-    eq1 (FVed fvs1 x1) (FVed fvs2 x2) = fvs1 == fvs2 && x1 == x2
-
-instance Ord1 FVed where
-    compare1 (FVed fvs1 x1) (FVed fvs2 x2) = (x1, fvs1) `compare` (x2, fvs2)
-
-instance NFData1 FVed where
-    rnf1 (FVed a b) = rnf a `seq` rnf b
-
-instance Pretty1 FVed where
-    pPrintPrec1 level prec (FVed _ x) = pPrintPrec level prec x
-
-instance Functor FVed where
-    fmap f (FVed fvs x) = FVed fvs (f x)
-
 
 type DataCon = String
 
@@ -219,42 +194,60 @@ termIsCheap = isCheap . unI
 taggedTermIsCheap :: TaggedTerm -> Bool
 taggedTermIsCheap = isCheap . tagee
 
-letRec :: [(Var, Term)] -> Term -> Term
-letRec []  e = e
-letRec xes e = I $ LetRec xes e
 
-var :: Var -> Term
-var = I . Var
+class Symantics ann where
+    var    :: Var -> ann (TermF ann)
+    value  :: ValueF ann -> ann (TermF ann)
+    app    :: ann (TermF ann) -> Var -> ann (TermF ann)
+    primOp :: PrimOp -> [ann (TermF ann)] -> ann (TermF ann)
+    case_  :: ann (TermF ann) -> [AltF ann] -> ann (TermF ann)
+    letRec :: [(Var, ann (TermF ann))] -> ann (TermF ann) -> ann (TermF ann)
 
-value :: Value -> Term
-value = I . Value
+instance Symantics Identity where
+    var = I . Var
+    value = I . Value
+    app e x = I (App e (I x))
+    primOp pop es = I (PrimOp pop es)
+    case_ e = I . Case e
+    letRec xes e = I $ LetRec xes e
 
-literal :: Literal -> Term
+
+reify :: (forall ann. Symantics ann => ann (TermF ann)) -> Term
+reify = id
+
+reflect :: Term -> (forall ann. Symantics ann => ann (TermF ann))
+reflect (I e) = case e of
+    Var x              -> var x
+    Value (Lambda x e) -> value (Lambda x (reflect e))
+    Value (Data dc xs) -> value (Data dc xs)
+    Value (Literal l)  -> value (Literal l)
+    App e1 (I x2)      -> app (reflect e1) x2
+    PrimOp pop es      -> primOp pop (map reflect es)
+    Case e alts        -> case_ (reflect e) (map (second reflect) alts)
+    LetRec xes e       -> letRec (map (second reflect) xes) (reflect e)
+
+
+literal :: Symantics ann => Literal -> ann (TermF ann)
 literal = value . Literal
 
-lambda :: Var -> Term -> Term
+lambda :: Symantics ann => Var -> ann (TermF ann) -> ann (TermF ann)
 lambda x = value . Lambda x
 
-lambdas :: [Var] -> Term -> Term
+lambdas :: Symantics ann => [Var] -> ann (TermF ann) -> ann (TermF ann)
 lambdas = flip $ foldr lambda
 
-data_ :: DataCon -> [Var] -> Term
+data_ :: Symantics ann => DataCon -> [Var] -> ann (TermF ann)
 data_ dc = value . Data dc
 
-primOp :: PrimOp -> [Term] -> Term
-primOp pop es = I (PrimOp pop es)
-
-app :: Term -> Var -> Term
-app e x = I (App e (I x))
-
-apps :: Term -> [Var] -> Term
+apps :: Symantics ann => ann (TermF ann) -> [Var] -> ann (TermF ann)
 apps = foldl app
 
-varApps :: Var -> [Var] -> Term
+varApps :: Symantics ann => Var -> [Var] -> ann (TermF ann)
 varApps h xs = var h `apps` xs
 
-case_ :: Term -> [Alt] -> Term
-case_ e = I . Case e
+letRecSmart :: Symantics ann => [(Var, ann (TermF ann))] -> ann (TermF ann) -> ann (TermF ann)
+letRecSmart []  = id
+letRecSmart xes = letRec xes
 
 collectLambdas :: Term -> ([Var], Term)
 collectLambdas (I (Value (Lambda x e))) = first (x:) $ collectLambdas e

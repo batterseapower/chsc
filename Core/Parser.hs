@@ -269,4 +269,4 @@ patCore (LHE.PApp (LHE.Special LHE.UnitCon) []) = (name "unit", [], id)
 patCore p = panic "patCore" (text $ show p)
 
 bind :: [(Var, Term)] -> Term -> Term
-bind = letRec
+bind = letRecSmart

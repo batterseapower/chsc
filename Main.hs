@@ -32,8 +32,8 @@ main = do
 
 
 splitModule :: [(Var, Term)] -> (Term, Maybe Term)
-splitModule xes = (letRec (transitiveInline (S.singleton root)) (var root),
-                   fmap (\test -> letRec (filter ((/= root) . fst) $ transitiveInline (S.singleton test)) (var test)) mb_test)
+splitModule xes = (letRecSmart (transitiveInline (S.singleton root)) (var root),
+                   fmap (\test -> letRecSmart (filter ((/= root) . fst) $ transitiveInline (S.singleton test)) (var test)) mb_test)
   where
     findBinding what = fmap fst $ find ((== what) . name_string . fst) xes
     

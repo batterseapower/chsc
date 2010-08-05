@@ -15,7 +15,7 @@ residualiseState :: State -> Out Term
 residualiseState (heap, k, in_e) = residualiseHeap heap (\ids -> residualiseStack ids k (detagTerm (renameIn renameTaggedTerm ids in_e)))
 
 residualiseHeap :: Heap -> (IdSupply -> ([(Out Var, Out Term)], Out Term)) -> Out Term
-residualiseHeap (Heap h ids) (($ ids) -> (floats, e)) = letRec (residualisePureHeap ids h ++ floats) e
+residualiseHeap (Heap h ids) (($ ids) -> (floats, e)) = letRecSmart (residualisePureHeap ids h ++ floats) e
 
 residualisePureHeap :: IdSupply -> PureHeap -> [(Out Var, Out Term)]
 residualisePureHeap ids h = [(x', detagTerm $ renameIn renameTaggedTerm ids in_e) | (x', in_e) <- M.toList h]

@@ -262,7 +262,7 @@ optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
     
     -- 3) Combine the residualised let bindings with the let body
     return (foldl' (\deeds b -> foldl' releaseStateDeed deeds (fillers b)) deeds (M.elems bracketeds_heap),
-            deleteList (map fst xes) fvs, letRec xes e_focus)
+            deleteList (map fst xes) fvs, letRecSmart xes e_focus)
   where
     -- TODO: clean up this incomprehensible loop
     -- TODO: investigate the possibility of just fusing in the optimiseLetBinds loop with this one
