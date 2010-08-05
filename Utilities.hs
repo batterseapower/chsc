@@ -90,7 +90,6 @@ instance NFData Id where
 
 
 data Counted a = Counted { count :: Int, countee :: a }
-               deriving (Eq)
 
 instance Show1 Counted where
     showsPrec1 prec (Counted c x) = showParen (prec >= appPrec) (showString "Counted" . showsPrec appPrec c . showsPrec appPrec x)
@@ -117,7 +116,6 @@ injectTag :: Int -> Tag -> Tag
 injectTag cls tg = cls * tg
 
 data Tagged a = Tagged { tag :: Tag, tagee :: a }
-              deriving (Eq, Show)
 
 instance Show1 Tagged where
     showsPrec1 prec (Tagged tg x) = showParen (prec >= appPrec) (showString "Tagged" . showsPrec appPrec tg . showsPrec appPrec x)
