@@ -1,4 +1,4 @@
-{-# LANGUAGE ViewPatterns, TupleSections, PatternGuards #-}
+{-# LANGUAGE TupleSections, PatternGuards #-}
 module Evaluator.Evaluate (step) where
 
 import Evaluator.FreeVars
@@ -90,7 +90,7 @@ step reduce live (deeds, (h, k, (rn, Tagged tg e))) = case e of
         --
         -- TODO: make finding FVs much cheaper (i.e. memoise it in the syntax functor construction)
         -- TODO: could GC cycles as well (i.e. don't consider stuff from the Heap that was only referred to by the thing being removed as "GC roots")
-        linear = x' `S.notMember` (pureHeapFreeVars h (stackFreeVars k (inFreeVars taggedValueFreeVars (rn, v)))) &&
+        linear = x' `S.notMember` pureHeapFreeVars h (stackFreeVars k (inFreeVars taggedValueFreeVars (rn, v))) &&
                  x' `S.notMember` live
 
     allocate :: Deeds -> Heap -> Stack -> In ([(Var, TaggedTerm)], TaggedTerm) -> (Deeds, State)

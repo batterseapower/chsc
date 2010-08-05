@@ -26,7 +26,7 @@ mkFreeVars :: (forall a. (a -> FreeVars) -> ann a -> FreeVars)
 mkFreeVars rec = (term, alternatives, value)
   where
     var = rec var'
-    var' x = S.singleton x
+    var' = S.singleton
     
     term = rec term'
     term' (Var x)        = S.singleton x

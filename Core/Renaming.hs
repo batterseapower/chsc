@@ -41,7 +41,7 @@ mkRename :: (forall a. (a -> a) -> ann a -> ann a)
 mkRename rec = (var, term, alternatives, value)
   where
     var rn = rec (var' rn)
-    var' rn x = rename rn x
+    var' = rename
     
     term ids rn = rec (term' ids rn)
     term' ids rn e = case e of

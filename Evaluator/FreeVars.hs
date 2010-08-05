@@ -19,7 +19,7 @@ import qualified Data.Set as S
 
 
 renamingFreeVars :: Renaming -> FreeVars -> FreeVars
-renamingFreeVars rn fvs = S.map (rename rn) fvs
+renamingFreeVars rn = S.map (rename rn)
 
 inFreeVars :: (a -> FreeVars) -> In a -> FreeVars
 inFreeVars thing_fvs (rn, thing) = renamingFreeVars rn (thing_fvs thing)
@@ -32,7 +32,7 @@ pureHeapOpenFreeVars :: PureHeap -> (BoundVars, FreeVars) -> (BoundVars, FreeVar
 pureHeapOpenFreeVars = flip $ M.foldWithKey (\x' in_e (bvs, fvs) -> (S.insert x' bvs, fvs `S.union` inFreeVars taggedTermFreeVars in_e))
 
 stackFreeVars :: Stack -> FreeVars -> (BoundVars, FreeVars)
-stackFreeVars k fvs = (S.unions *** (S.union fvs . S.unions)) . unzip . map (stackFrameFreeVars) $ k
+stackFreeVars k fvs = (S.unions *** (S.union fvs . S.unions)) . unzip . map stackFrameFreeVars $ k
 
 stackFrameFreeVars :: StackFrame -> (BoundVars, FreeVars)
 stackFrameFreeVars kf = case kf of

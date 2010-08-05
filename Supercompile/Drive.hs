@@ -168,7 +168,7 @@ data Promise = P {
 --  memoising the FVs on the term structure itself.
 
 instance MonadStatics ScpM where
-    withStatics orig_xs mx = bindFloats (\p -> any (`S.member` xs) (lexical p)) $ ScpM $ \e s -> (\(!res) -> traceRender ("withStatics", xs) res) $ unScpM mx (e { statics = statics e `S.union` xs }) s
+    withStatics orig_xs mx = bindFloats (any (`S.member` xs) . lexical) $ ScpM $ \e s -> (\(!res) -> traceRender ("withStatics", xs) res) $ unScpM mx (e { statics = statics e `S.union` xs }) s
       where xs = if lOCAL_TIEBACKS then orig_xs else S.empty -- NB: it's important we still use bindFloats in (not lOCAL_TIEBACKS) because h functions are static
 
 -- NB: be careful of this subtle problem:
@@ -187,7 +187,7 @@ instance MonadStatics ScpM where
 -- that manner, but we still want to tie back to them if possible. The bindFloats function achieves this by carefully shuffling information between the
 -- fulfilments and promises parts of the monadic-carried state.
 bindFloats :: (Promise -> Bool) -> ScpM a -> ScpM ([(Out Var, Out Term)], a)
-bindFloats p mx = ScpM $ \e s -> case unScpM mx (e { promises = map fst (fulfilments s) ++ promises e }) (s { fulfilments = [] }) of (s'@(ScpState { fulfilments = (partition (p . fst) -> (fs_now, fs_later)) }), x) -> traceRender ("bindFloats", map (fun . fst) fs_now, map (fun . fst) fs_later) $ (s' { fulfilments = fs_later ++ fulfilments s }, (sortBy (comparing ((read :: String -> Int) . drop 1 . name_string . fst)) [(fun p, lambdas (abstracted p) e') | (p, e') <- fs_now], x))
+bindFloats p mx = ScpM $ \e s -> case unScpM mx (e { promises = map fst (fulfilments s) ++ promises e }) (s { fulfilments = [] }) of (s'@(ScpState { fulfilments = (partition (p . fst) -> (fs_now, fs_later)) }), x) -> traceRender ("bindFloats", map (fun . fst) fs_now, map (fun . fst) fs_later) (s' { fulfilments = fs_later ++ fulfilments s }, (sortBy (comparing ((read :: String -> Int) . drop 1 . name_string . fst)) [(fun p, lambdas (abstracted p) e') | (p, e') <- fs_now], x))
 
 getStatics :: ScpM FreeVars
 getStatics = ScpM $ \e s -> (s, statics e)
@@ -236,7 +236,7 @@ runScpM :: FreeVars -> ScpM (Out Term) -> Out Term
 runScpM input_fvs me = uncurry letRec $ snd (unScpM (bindFloats (\_ -> True) me) init_e init_s)
   where
     init_e = ScpEnv { statics = input_fvs, promises = [] }
-    init_s = ScpState { names = map (\i -> name $ "h" ++ show (i :: Int)) [0..], fulfilments = [] }
+    init_s = ScpState { names = map (\i -> name $ 'h' : show (i :: Int)) [0..], fulfilments = [] }
 
 
 sc, sc' :: History () -> (Deeds, State) -> ScpM (Deeds, FreeVars, Out Term)
@@ -258,7 +258,7 @@ memo opt (deeds, state) = do
                tb_dynamic_vs = rn_fvs (abstracted p)
                tb_static_vs  = rn_fvs (lexical p)
           -- Check that all of the things that were dynamic last time are dynamic this time
-         , all (\x' -> x' `S.notMember` statics) tb_dynamic_vs
+         , all (`S.notMember` statics) tb_dynamic_vs
           -- Check that all of the things that were static last time are static this time *and refer to exactly the same thing*
          , and $ zipWith (\x x' -> x' == x && x' `S.member` statics) (lexical p) tb_static_vs
          , traceRender ("memo'", statics, stateFreeVars state, rn_lr, (fun p, lexical p, abstracted p)) True
@@ -272,7 +272,7 @@ memo opt (deeds, state) = do
     
         -- NB: promises are lexically scoped because they may refer to FVs
         x <- freshHName
-        promise (P { fun = x, abstracted = dynamic_vs_list, lexical = static_vs_list, meaning = state }) $ do
+        promise P { fun = x, abstracted = dynamic_vs_list, lexical = static_vs_list, meaning = state } $ do
             traceRenderM (">sc", x, residualiseState state, deeds)
             res <- opt (deeds, state)
             traceRenderM ("<sc", x, residualiseState state, res)

@@ -1,4 +1,4 @@
-{-# LANGUAGE ViewPatterns, TupleSections, PatternGuards, DeriveFunctor, DeriveFoldable, DeriveTraversable, MultiParamTypeClasses, FlexibleInstances #-}
+{-# LANGUAGE ViewPatterns, TupleSections, DeriveFunctor, DeriveFoldable, DeriveTraversable, MultiParamTypeClasses, FlexibleInstances #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 module Supercompile.Split (Statics, MonadStatics(..), split) where
 
@@ -58,7 +58,7 @@ enteredInResidual (Many resid) = resid
 plusEntered :: Entered -> Entered -> Entered
 plusEntered (Once mb_id1) (Once mb_id2)
   | mb_id1 == mb_id2 = Once mb_id1
-  | otherwise        = {- traceRender ("Once promotion", mb_id1, mb_id2) -} (Many (isNothing mb_id1 || isNothing mb_id2))
+  | otherwise        = {- traceRender ("Once promotion", mb_id1, mb_id2) $ -} Many (isNothing mb_id1 || isNothing mb_id2)
 plusEntered e1 e2 = Many (enteredInResidual e1 || enteredInResidual e2)
 
 
@@ -184,7 +184,7 @@ simplify (deeds, s) = expectHead "simplify" [(deeds, res) | (deeds, s) <- (deeds
 -- evaluation context.
 data Bracketed a = Bracketed {
     rebuild :: [Out Term] -> Out Term,  -- Rebuild the full output term given outputs to plug into each hole
-    extra_fvs :: FreeVars,              -- Maximum free variables added by the residual wrapped around the holes
+    extraFvs :: FreeVars,               -- Maximum free variables added by the residual wrapped around the holes
     transfer :: [FreeVars] -> FreeVars, -- Strips any variables bound by the residual out of the hole FVs
     fillers :: [a]                      -- Hole-fillers themselves. Usually State
   } deriving (Functor, Foldable.Foldable, Traversable.Traversable)
@@ -194,18 +194,18 @@ instance Accumulatable Bracketed where
 
 noneBracketed :: Out Term -> FreeVars -> Bracketed a
 noneBracketed a b = Bracketed {
-    rebuild   = \[] -> a,
-    extra_fvs = b,
-    transfer  = \[] -> S.empty,
-    fillers   = []
+    rebuild  = \[] -> a,
+    extraFvs = b,
+    transfer = \[] -> S.empty,
+    fillers  = []
   }
 
 oneBracketed :: a -> Bracketed a
 oneBracketed x = Bracketed {
-    rebuild   = \[e] -> e,
-    extra_fvs = S.empty,
-    transfer  = \[fvs] -> fvs,
-    fillers   = [x]
+    rebuild  = \[e] -> e,
+    extraFvs = S.empty,
+    transfer = \[fvs] -> fvs,
+    fillers  = [x]
   }
 
 zipBracketeds :: ([Out Term] -> Out Term)
@@ -214,15 +214,15 @@ zipBracketeds :: ([Out Term] -> Out Term)
               -> [Bracketed a]
               -> Bracketed a
 zipBracketeds a b c bracketeds = Bracketed {
-      rebuild   = \(splitManyBy xss -> ess') -> a (zipWith rebuild bracketeds ess'),
-      extra_fvs = b (map extra_fvs bracketeds),
-      transfer  = \(splitManyBy xss -> fvss) -> c (zipWith transfer bracketeds fvss),
-      fillers   = concat xss
+      rebuild  = \(splitManyBy xss -> ess') -> a (zipWith rebuild bracketeds ess'),
+      extraFvs = b (map extraFvs bracketeds),
+      transfer = \(splitManyBy xss -> fvss) -> c (zipWith transfer bracketeds fvss),
+      fillers  = concat xss
     }
   where xss = map fillers bracketeds
 
 bracketedFreeVars :: (a -> FreeVars) -> Bracketed a -> FreeVars
-bracketedFreeVars fvs bracketed = extra_fvs bracketed `S.union` transfer bracketed (map fvs (fillers bracketed))
+bracketedFreeVars fvs bracketed = extraFvs bracketed `S.union` transfer bracketed (map fvs (fillers bracketed))
 
 
 optimiseMany :: Monad m
@@ -239,7 +239,7 @@ optimiseBracketed :: MonadStatics m
                   -> m (Deeds, FreeVars, Out Term)
 optimiseBracketed opt (deeds, b) = do
     (deeds', fvs', es') <- optimiseMany opt (deeds, fillers b)
-    return (deeds', extra_fvs b `S.union` transfer b fvs', rebuild b es')
+    return (deeds', extraFvs b `S.union` transfer b fvs', rebuild b es')
 
 optimiseSplit :: MonadStatics m
               => ((Deeds, State) -> m (Deeds, FreeVars, Out Term))
@@ -304,7 +304,7 @@ splitt :: (Deeds, (Heap, Stack, Tagged QA))   -- ^ The thing to split, and the D
        -> (Deeds,                             -- ^ The Deeds still available after splitting
            M.Map (Out Var) (Bracketed State), -- ^ The residual "let" bindings
            Bracketed State)                   -- ^ The residual "let" body
-splitt (old_deeds, ((cheapifyHeap . (old_deeds,)) -> (deeds, Heap h (splitIdSupply -> (ids_brack, splitIdSupply -> (ids1, ids2)))), k, qa))
+splitt (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply -> (ids_brack, splitIdSupply -> (ids1, ids2)))), k, qa))
     = -- traceRender ("splitt", residualiseHeap (Heap h ids_brack) (\ids -> residualiseStack ids k (case tagee qa of Question x' -> var x'; Answer in_v -> value $ detagValue $ renameIn renameTaggedValue ids in_v))) $
       snd $ split_step resid_xs -- TODO: eliminate redundant recomputation here?
   where
@@ -361,7 +361,7 @@ splitt (old_deeds, ((cheapifyHeap . (old_deeds,)) -> (deeds, Heap h (splitIdSupp
           where ((deeds', fvs_paths', entered'), b') = mapAccumT (\(deeds, fvs_paths, entered) s -> case f deeds s of (deeds, fvs_paths', entered', s) -> ((deeds, M.unionWith (++) fvs_paths fvs_paths', entered `join` entered'), s)) (deeds, M.empty, bottom) b
 
         inlineBracketHeap :: Deeds -> Bracketed (Entered, State) -> (Deeds, FreeVarPaths, EnteredEnv, Bracketed State)
-        inlineBracketHeap = inlineHeapT (flip transitiveInline h_inlineable)
+        inlineBracketHeap = inlineHeapT (`transitiveInline` h_inlineable)
         
         -- 3c) Actually do the inlining of as much of the heap as possible into the proposed floats
         -- We also take this opportunity to strip out the Entered information from each context.

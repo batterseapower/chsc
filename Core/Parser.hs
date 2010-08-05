@@ -36,32 +36,32 @@ parse path = do
 
 data ParseState = ParseState {
     ids :: IdSupply,
-    dc_wrappers :: M.Map DataCon Var,
-    int_wrappers :: M.Map Integer Var,
-    char_wrappers :: M.Map Char Var,
-    prim_wrappers :: M.Map PrimOp Var
+    dcWrappers :: M.Map DataCon Var,
+    intWrappers :: M.Map Integer Var,
+    charWrappers :: M.Map Char Var,
+    primWrappers :: M.Map PrimOp Var
   }
 
 initParseState :: ParseState
 initParseState = ParseState {
     ids = parseIdSupply,
-    dc_wrappers = M.empty,
-    int_wrappers = M.empty,
-    char_wrappers = M.empty,
-    prim_wrappers = M.empty
+    dcWrappers = M.empty,
+    intWrappers = M.empty,
+    charWrappers = M.empty,
+    primWrappers = M.empty
   }
 
 buildWrappers :: ParseState -> [(Var, Term)]
 buildWrappers ps
   = [ (f, lambdas xs $ data_ dc xs)
-    | (dc, f) <- M.toList (dc_wrappers ps)
-    , let arity = dataConArity dc; xs = map (\i -> name $ "x" ++ show i) [1..arity] ] ++
+    | (dc, f) <- M.toList (dcWrappers ps)
+    , let arity = dataConArity dc; xs = map (\i -> name $ 'x' : show i) [1..arity] ] ++
     [ (f, int i)
-    | (i, f) <- M.toList (int_wrappers ps) ] ++
+    | (i, f) <- M.toList (intWrappers ps) ] ++
     [ (f, char c)
-    | (c, f) <- M.toList (char_wrappers ps) ] ++
+    | (c, f) <- M.toList (charWrappers ps) ] ++
     [ (f, lam (name "x1") $ lam (name "x2") $ primOp pop [var (name "x1"), var (name "x2")])
-    | (pop, f) <- M.toList (prim_wrappers ps) ] ++
+    | (pop, f) <- M.toList (primWrappers ps) ] ++
     [ (name "error", lam (name "msg") $ case_ (var (name "prelude_error") `app` name "msg") []) ]
   where
     dataConArity :: String -> Int
@@ -116,16 +116,16 @@ list :: [Term] -> ParseM Term
 list es = nameThem es $ \es_xs -> replicateM (length es) (freshName "list") >>= \cons_xs -> return $ uncurry bind $ foldr (\(cons_x, e_x) (floats, tl) -> ((cons_x, tl) : floats, cons e_x cons_x)) ([], nil) (cons_xs `zip` es_xs)
 
 dataConWrapper :: DataCon -> ParseM Var
-dataConWrapper = grabWrapper dc_wrappers (\s x -> s { dc_wrappers = x })
+dataConWrapper = grabWrapper dcWrappers (\s x -> s { dcWrappers = x })
 
 intWrapper :: Integer -> ParseM Var
-intWrapper = grabWrapper int_wrappers (\s x -> s { int_wrappers = x })
+intWrapper = grabWrapper intWrappers (\s x -> s { intWrappers = x })
 
 charWrapper :: Char -> ParseM Var
-charWrapper = grabWrapper char_wrappers (\s x -> s { char_wrappers = x })
+charWrapper = grabWrapper charWrappers (\s x -> s { charWrappers = x })
 
 primWrapper :: PrimOp -> ParseM Var
-primWrapper = grabWrapper prim_wrappers (\s x -> s { prim_wrappers = x })
+primWrapper = grabWrapper primWrappers (\s x -> s { primWrappers = x })
 
 grabWrapper :: Ord a
             => (ParseState -> M.Map a Var) -> (ParseState -> M.Map a Var -> ParseState)
@@ -269,4 +269,4 @@ patCore (LHE.PApp (LHE.Special LHE.UnitCon) []) = (name "unit", [], id)
 patCore p = panic "patCore" (text $ show p)
 
 bind :: [(Var, Term)] -> Term -> Term
-bind xes e = letRec xes e
+bind = letRec

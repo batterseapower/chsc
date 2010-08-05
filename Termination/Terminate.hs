@@ -20,7 +20,7 @@ instance Pretty TagBag where
     pPrint (TagBag m) = braces $ hsep $ punctuate (text ",") [pPrint n | (n, count) <- IM.toList m, _ <- replicate count n]
 
 mkTagBag :: [Tag] -> TagBag
-mkTagBag = TagBag . IM.unionsWith (+) . map (flip IM.singleton 1)
+mkTagBag = TagBag . IM.unionsWith (+) . map (`IM.singleton` 1)
 
 plusTagBag :: TagBag -> TagBag -> TagBag
 plusTagBag (TagBag tb1) (TagBag tb2) = TagBag (IM.unionWith (+) tb1 tb2)
