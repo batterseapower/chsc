@@ -1,5 +1,5 @@
 {-# LANGUAGE TupleSections, PatternGuards, ExistentialQuantification, DeriveFunctor,
-             FlexibleInstances, IncoherentInstances, OverlappingInstances #-}
+             FlexibleInstances, IncoherentInstances, OverlappingInstances, TypeOperators #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Utilities (
     module IdSupply,
@@ -108,6 +108,27 @@ instance Pretty1 Counted where
 
 instance Functor Counted where
     fmap f (Counted c x) = Counted c (f x)
+
+
+newtype (f :.: g) a = Comp { unComp :: f (g a) }
+
+instance (Show1 f, Show1 g) => Show1 (f :.: g) where
+    showsPrec1 prec (Comp x) = showParen (prec >= appPrec) (showString "Comp" . showsPrec appPrec x)
+
+instance (Eq1 f, Eq1 g) => Eq1 (f :.: g) where
+    eq1 (Comp x1) (Comp x2) = x1 == x2
+
+instance (Ord1 f, Ord1 g) => Ord1 (f :.: g) where
+    compare1 (Comp x1) (Comp x2) = x1 `compare` x2
+
+instance (NFData1 f, NFData1 g) => NFData1 (f :.: g) where
+    rnf1 (Comp x) = rnf x
+
+instance (Pretty1 f, Pretty1 g) => Pretty1 (f :.: g) where
+    pPrintPrec1 level prec (Comp x) = pPrintPrec level prec x
+
+instance (Functor f, Functor g) => Functor (f :.: g) where
+    fmap f (Comp x) = Comp (fmap (fmap f) x)
 
 
 type Tag = Int
