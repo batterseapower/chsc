@@ -8,7 +8,7 @@ import Core.FreeVars
 import Core.Renaming
 import Core.Syntax
 
-import Evaluator.Evaluate (step)
+import Evaluator.Evaluate
 import Evaluator.FreeVars
 import Evaluator.Syntax
 
@@ -84,7 +84,7 @@ data QA = Question Var
         | Answer   (ValueF Anned)
 
 simplify :: (Deeds, State) -> (Deeds, (Heap, Stack, In (Anned QA)))
-simplify (deeds, s) = expectHead "simplify" [(deeds, res) | (deeds, s) <- (deeds, s) : unfoldr (\(deeds, s) -> fmap (\x -> (x, x)) (step (const id) S.empty (deeds, s))) (deeds, s), Just res <- [stop s]]
+simplify (deeds, s) = expectHead "simplify" [(deeds, res) | (deeds, s) <- (deeds, s) : unfoldr (\(deeds, s) -> fmap (\(_, a, b) -> ((a, b), (a, b))) (step (const id) S.empty (emptyLosers, deeds, s))) (deeds, s), Just res <- [stop s]]
   where
     stop (h, k, (rn, Comp (Tagged tg (FVed fvs (Var x)))))   = Just (h, k, (rn, Comp (Tagged tg (FVed fvs (Question x)))))
     stop (h, k, (rn, Comp (Tagged tg (FVed fvs (Value v))))) = Just (h, k, (rn, Comp (Tagged tg (FVed fvs (Answer v)))))

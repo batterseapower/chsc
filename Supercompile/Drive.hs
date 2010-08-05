@@ -104,17 +104,19 @@ tagTagBag cls = mkTagBag . return . injectTag cls
 --
 
 reduce :: (Deeds, State) -> (Deeds, State)
-reduce = go emptyHistory S.empty
+reduce (deeds, state) = (deeds', state')
   where
-    go hist lives (deeds, state)
+    (_, deeds', state') = go emptyHistory S.empty (emptyLosers, deeds, state)
+      
+    go hist lives (losers, deeds, state)
       -- | traceRender ("reduce.go", deeds, residualiseState state) False = undefined
-      | not eVALUATE_PRIMOPS, (_, _, (_, annee -> PrimOp _ _)) <- state = (deeds, state)
-      | otherwise = fromMaybe (deeds, state) $ either id id $ do
+      | not eVALUATE_PRIMOPS, (_, _, (_, annee -> PrimOp _ _)) <- state = (losers, deeds, state)
+      | otherwise = fromMaybe (losers, deeds, state) $ either id id $ do
           hist' <- case terminate hist (stateTagBag state) (deeds, state) of
-                      _ | intermediate state -> Right hist
-                      Continue hist'         -> Right hist'
-                      Stop     old_res       -> trace "reduce-stop" $ Left (guard rEDUCE_ROLLBACK >> return old_res)
-          Right $ fmap (go hist' lives) $ step (go hist') lives (deeds, state)
+                      _ | intermediate state  -> Right hist
+                      Continue hist'          -> Right hist'
+                      Stop     (deeds, state) -> trace "reduce-stop" $ Left (guard rEDUCE_ROLLBACK >> return (losers, deeds, state))
+          Right $ fmap (go hist' lives) $ step (go hist') lives (losers, deeds, state)
     
     intermediate :: State -> Bool
     intermediate (_, _, (_, annee -> Var _)) = False

@@ -1,5 +1,5 @@
 {-# LANGUAGE TupleSections, PatternGuards, ViewPatterns #-}
-module Evaluator.Evaluate (step) where
+module Evaluator.Evaluate (Losers, emptyLosers, step) where
 
 import Evaluator.FreeVars
 import Evaluator.Syntax
@@ -15,17 +15,24 @@ import Renaming
 import StaticFlags
 import Utilities
 
+import qualified Data.IntSet as IS
 import qualified Data.Map as M
 import qualified Data.Set as S
 
 
-step :: (FreeVars -> (Deeds, State) -> (Deeds, State)) -> FreeVars -> (Deeds, State) -> Maybe (Deeds, State)
-step reduce live (deeds, (h, k, (rn, Comp (Tagged tg (FVed _ e))))) = case e of
-    Var x             -> force  deeds h k tg (rename rn x)
-    Value v           -> unwind deeds h k tg (rn, v)
-    App e1 x2         -> Just (deeds', (h, Apply (renameAnnedVar rn x2)    : k, (rn, e1)))
-    PrimOp pop (e:es) -> Just (deeds', (h, PrimApply pop [] (map (rn,) es) : k, (rn, e)))
-    Case e alts       -> Just (deeds', (h, Scrutinise (rn, alts)           : k, (rn, e)))
+type Losers = IS.IntSet
+
+emptyLosers :: Losers
+emptyLosers = IS.empty
+
+
+step :: (FreeVars -> (Losers, Deeds, State) -> (Losers, Deeds, State)) -> FreeVars -> (Losers, Deeds, State) -> Maybe (Losers, Deeds, State)
+step reduce live (losers, deeds, (h, k, (rn, Comp (Tagged tg (FVed _ e))))) = case e of
+    Var x             -> fmap (\(a, b) -> (losers, a, b)) $ force  deeds h k tg (rename rn x)
+    Value v           -> fmap (\(a, b) -> (losers, a, b)) $ unwind deeds h k tg (rn, v)
+    App e1 x2         -> Just (losers, deeds', (h, Apply (renameAnnedVar rn x2)    : k, (rn, e1)))
+    PrimOp pop (e:es) -> Just (losers, deeds', (h, PrimApply pop [] (map (rn,) es) : k, (rn, e)))
+    Case e alts       -> Just (losers, deeds', (h, Scrutinise (rn, alts)           : k, (rn, e)))
     LetRec xes e      -> Just (allocate deeds' h k (rn, (xes, e)))
   where
     deeds' = releaseDeedDescend_ deeds tg
@@ -93,21 +100,25 @@ step reduce live (deeds, (h, k, (rn, Comp (Tagged tg (FVed _ e))))) = case e of
         linear = x' `S.notMember` pureHeapFreeVars h (stackFreeVars k (inFreeVars annedValueFreeVars' (rn, v))) &&
                  x' `S.notMember` live
 
-    allocate :: Deeds -> Heap -> Stack -> In ([(Var, AnnedTerm)], AnnedTerm) -> (Deeds, State)
-    allocate deeds (Heap h ids) k (rn, (xes, e)) = (deeds', (heap', k, (rn', e)))
+    allocate :: Deeds -> Heap -> Stack -> In ([(Var, AnnedTerm)], AnnedTerm) -> (Losers, Deeds, State)
+    allocate deeds (Heap h ids) k (rn, (xes, e)) = (losers', deeds', (heap', k, (rn', e)))
       where
         (ids', rn', xes') = renameBounds (\_ x' -> x') ids rn xes
-        (deeds', heap')
-          | not sPECULATION = (deeds, Heap (h `M.union` M.fromList xes') ids')
-          | otherwise = foldl' (\(deeds, Heap h ids) ((x', in_e), live') -> case reduce live' (deeds, (Heap h ids, [], in_e)) of
-                                                                              -- NB: commenting in this line is useful if you want to test whether speculation is causing
-                                                                              -- a benchmark to be slow due to the cost of the speculation OR due to the extra info. propagation
-                                                                              --(rnf -> ()) | False -> undefined
-                                                                              (deeds', (Heap h' ids', [], in_e'@(_, annee -> Value _))) -> (deeds', Heap (M.insert x' in_e' h') ids') -- Speculation: if we can evaluate to a value "quickly" then use that value,
-                                                                              _                                                         -> (deeds,  Heap (M.insert x' in_e  h)  ids)) -- otherwise throw away the half-evaluated mess that we reach
-                               (deeds, Heap h ids') (xes' `zip` lives')
+        (losers', deeds', heap')
+          | not sPECULATION = (losers, deeds, Heap (h `M.union` M.fromList xes') ids')
+          | otherwise = foldl' speculate_one (losers, deeds, Heap h ids') (xes' `zip` lives')
             where
               -- Construct the live set for use when speculating each heap binding. This prevent us from accidentally GCing something that is live
               -- in the "continuation" when speculating a heap binding. We ensure that only those heap bindings that occur *strictly later* than
               -- the binding being speculated contribute to the live set -- this means that GC can still collect stuff that speculation truly makes dead.
               (_, lives') = mapAccumR (\live (_x', in_e) -> (live `S.union` inFreeVars annedTermFreeVars in_e, live)) (live `S.union` snd (stackFreeVars k (inFreeVars annedTermFreeVars (rn', e)))) xes'
+              
+              speculate_one (losers, deeds, Heap h ids) ((x', in_e), live')
+                = case reduce live' (losers, deeds, (Heap h ids, [], in_e)) of
+                    -- NB: commenting in this line is useful if you want to test whether speculation is causing
+                    -- a benchmark to be slow due to the cost of the speculation OR due to the extra info. propagation
+                    --(rnf -> ()) | False -> undefined
+                    _ | not sPECULATE_ON_LOSERS, tg `IS.member` losers                 -> (losers,              deeds,  Heap (M.insert x' in_e  h)  ids)  -- Heuristic: don't speculate if it has failed before
+                    (losers', deeds', (Heap h' ids', [], in_e'@(_, annee -> Value _))) -> (losers',             deeds', Heap (M.insert x' in_e' h') ids') -- Speculation: if we can evaluate to a value "quickly" then use that value,
+                    _                                                                  -> (IS.insert tg losers, deeds,  Heap (M.insert x' in_e  h)  ids)  -- otherwise throw away the half-evaluated mess that we reach
+                where tg = annedTag (snd in_e)

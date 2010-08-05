@@ -50,24 +50,28 @@ bLOAT_FACTOR = fromMaybe 10 $ listToMaybe [read arg | '-':'-':'b':'l':'o':'a':'t
  -- Unfortunately, my implementation doesn't tie back as eagerly as you might like, so we actually peel the loop once and
  -- hence need a bloat factor of 10 here FIXME: figure out how to reduce this number.
 
--- FIXME: I'm going to default speculation to off for now, because it makes DigitsOfE2 non-terminate
-
--- {-# NOINLINE sPECULATION #-}
--- sPECULATION :: Bool
--- sPECULATION = not $ "--no-speculation" `elem` unsafePerformIO getArgs
--- 
--- {-# NOINLINE sPLITTER_CHEAPIFICATION #-}
--- sPLITTER_CHEAPIFICATION :: Bool
--- sPLITTER_CHEAPIFICATION = "--cheapification" `elem` unsafePerformIO getArgs
---  -- TODO: test my hypothesis that given that we already do speculation, let-floating in the splitter won't make much difference
+{-# NOINLINE sPLITTER_CHEAPIFICATION #-}
+sPLITTER_CHEAPIFICATION :: Bool
+sPLITTER_CHEAPIFICATION = "--cheapification" `elem` unsafePerformIO getArgs
+ -- TODO: test my hypothesis that given that we already do speculation, let-floating in the splitter won't make much difference
 
 {-# NOINLINE sPECULATION #-}
 sPECULATION :: Bool
-sPECULATION = "--speculation" `elem` unsafePerformIO getArgs
+sPECULATION = not $ "--no-speculation" `elem` unsafePerformIO getArgs
 
-{-# NOINLINE sPLITTER_CHEAPIFICATION #-}
-sPLITTER_CHEAPIFICATION :: Bool
-sPLITTER_CHEAPIFICATION = not $ "--no-cheapification" `elem` unsafePerformIO getArgs
+-- NB: may want to these definitions if you want to default speculation to off
+    
+-- {-# NOINLINE sPLITTER_CHEAPIFICATION #-}
+-- sPLITTER_CHEAPIFICATION :: Bool
+-- sPLITTER_CHEAPIFICATION = not $ "--no-cheapification" `elem` unsafePerformIO getArgs
+-- 
+-- {-# NOINLINE sPECULATION #-}
+-- sPECULATION :: Bool
+-- sPECULATION = "--speculation" `elem` unsafePerformIO getArgs
+
+{-# NOINLINE sPECULATE_ON_LOSERS #-}
+sPECULATE_ON_LOSERS :: Bool
+sPECULATE_ON_LOSERS = "--speculate-on-losers" `elem` unsafePerformIO getArgs
 
 {-# NOINLINE lOCAL_TIEBACKS #-}
 lOCAL_TIEBACKS :: Bool
