@@ -43,7 +43,7 @@ step reduce live (losers, deeds, (h, k, (rn, Comp (Tagged tg (FVed _ e))))) = ca
     unwind :: Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> Maybe (Deeds, State)
     unwind deeds h k tg_v in_v = uncons k >>= \(kf, k) -> case kf of
         Apply x2'                 -> return $ apply      deeds h k tg_v in_v x2'
-        Scrutinise in_alts        -> return $ scrutinise deeds h k tg_v in_v in_alts
+        Scrutinise in_alts        ->          scrutinise deeds h k tg_v in_v in_alts
         PrimApply pop in_vs in_es -> return $ primop     deeds h k tg_v pop in_vs in_v in_es
         Update x'                 ->          update     deeds h k tg_v x' in_v
 
@@ -52,19 +52,19 @@ step reduce live (losers, deeds, (h, k, (rn, Comp (Tagged tg (FVed _ e))))) = ca
       where deeds' = releaseDeedDescend_ (releaseDeedDeep deeds tg_x) tg_v
     apply _     _ _ _    (_,  v)               _                 = panic "apply" (pPrint v)
 
-    scrutinise :: Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> In [AnnedAlt] -> (Deeds, State)
+    scrutinise :: Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> In [AnnedAlt] -> Maybe (Deeds, State)
     scrutinise deeds h            k tg_v (_,    Literal l)  (rn_alts, alts)
       | (alt_e, rest):_ <- [((rn_alts, alt_e), rest) | ((LiteralAlt alt_l, alt_e), rest) <- bagContexts alts, alt_l == l] ++ [((rn_alts, alt_e), rest) | ((DefaultAlt Nothing, alt_e), rest) <- bagContexts alts]
-      = (releaseAltDeeds rest (releaseDeedDeep deeds tg_v), (h, k, alt_e))
+      = Just (releaseAltDeeds rest (releaseDeedDeep deeds tg_v), (h, k, alt_e))
     scrutinise deeds h            k tg_v (rn_v, Data dc xs) (rn_alts, alts)
       | (alt_e, rest):_ <- [((insertRenamings (alt_xs `zip` map (rename rn_v) xs) rn_alts, alt_e), rest) | ((DataAlt alt_dc alt_xs, alt_e), rest) <- bagContexts alts, alt_dc == dc] ++ [((rn_alts, alt_e), rest) | ((DefaultAlt Nothing, alt_e), rest) <- bagContexts alts]
-      = (releaseAltDeeds rest (releaseDeedDeep deeds tg_v), (h, k, alt_e))
+      = Just (releaseAltDeeds rest (releaseDeedDeep deeds tg_v), (h, k, alt_e))
     scrutinise deeds (Heap h ids) k tg_v (rn_v, v)          (rn_alts, alts)
       | ((alt_x, alt_e), rest):_ <- [((alt_x, alt_e), rest) | ((DefaultAlt (Just alt_x), alt_e), rest) <- bagContexts alts]
       , (ids', rn_alts', alt_x') <- renameBinder ids rn_alts alt_x
-      = (releaseAltDeeds rest deeds, (Heap (M.insert alt_x' (rn_v, annedTerm tg_v $ Value v) h) ids', k, (rn_alts', alt_e)))
+      = Just (releaseAltDeeds rest deeds, (Heap (M.insert alt_x' (rn_v, annedTerm tg_v $ Value v) h) ids', k, (rn_alts', alt_e)))
       | otherwise
-      = panic "scrutinise" (pPrint v)
+      = Nothing -- This can legitimately occur, e.g. when supercompiling (if x then (case x of False -> 1) else 2)
 
     releaseAltDeeds :: [(a, AnnedTerm)] -> Deeds -> Deeds
     releaseAltDeeds alts deeds = foldl' (\deeds (_, in_e) -> releaseDeedDeep deeds (annedTag in_e)) deeds alts
