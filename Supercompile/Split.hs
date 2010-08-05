@@ -247,33 +247,57 @@ optimiseSplit :: MonadStatics m
               -> M.Map (Out Var) (Bracketed State)
               -> Bracketed State
               -> m (Deeds, FreeVars, Out Term)
-optimiseSplit opt deeds floats_h floats_compulsory = do
-    (hes, (deeds, fvs', xes', e_compulsory')) <- withStatics (M.keysSet floats_h) $ do
-        -- 1) Recursively drive the compulsory floats
-        (deeds, fvs_compulsory', e_compulsory') <- optimiseBracketed opt (deeds, floats_compulsory)
+optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
+    -- 1) Recursively drive the focus itself
+    let statics = M.keysSet bracketeds_heap
+    (hes, (deeds, fvs_focus, e_focus)) <- withStatics statics $ optimiseBracketed opt (deeds, bracketed_focus)
     
-        -- 2) We now need to think about how we are going to residualise the letrec. We only want to drive (and residualise) as
-        --    much as we actually refer to. This loop does this: it starts by residualising the free variables of the compulsory
-        --    residualisation, and then transitively inlines any bindings whose corresponding binders become free.
-        let residualise deeds xes_resid resid_bvs resid_fvs
-              | M.null h_resid = -- traceRenderM ("residualise", resid_fvs, resid_bvs, (M.map (residualiseBracketed (residualiseState . first3 (flip Heap prettyIdSupply))) floats_h)) $
-                                 return (foldl' (\deeds b -> foldl' releaseStateDeed deeds (fillers b)) deeds (M.elems floats_not_resid), resid_fvs S.\\ resid_bvs, xes_resid)
-              | otherwise = {- traceRender ("optimiseSplit", xs_resid') $ -} do
-                -- Recursively drive the new residuals arising from the need to bind the resid_fvs
-                (deeds, S.unions -> extra_resid_fvs', es_resid') <- optimiseMany (optimiseBracketed opt) (deeds, bracks_resid)
-                -- Recurse, because we might now need to residualise and drive even more stuff (as we have added some more FVs and BVs)
-                residualise deeds (xes_resid ++ zip xs_resid' es_resid')
-                                  (resid_bvs `S.union` M.keysSet h_resid)
-                                  (resid_fvs `S.union` extra_resid_fvs')
-              where
-                -- When assembling the final list of things to drive, ensure that we exclude already-driven things
-                floats_not_resid = floats_h `exclude` resid_bvs
-                h_resid = M.filterWithKey (\x _br -> x `S.member` resid_fvs) floats_not_resid
-                (xs_resid', bracks_resid) = unzip $ M.toList h_resid
+    -- 2) We now need to think about how we are going to residualise the letrec. In fact, we need to loop adding
+    -- stuff to the letrec because it might be the case that:
+    --  * One of the hes from above refers to some heap binding that is not referred to by the let body
+    --  * So after we do withStatics above we need to drive some element of the bracketeds_heap
+    --  * And after driving that we find in our new hes a new h function referring to a new free variable
+    --    that refers to some binding that is as yet unbound...
+    (deeds, bracketeds_heap, xes, fvs) <- go hes statics deeds bracketeds_heap [] fvs_focus
+    
+    -- 3) Combine the residualised let bindings with the let body
+    return (foldl' (\deeds b -> foldl' releaseStateDeed deeds (fillers b)) deeds (M.elems bracketeds_heap),
+            deleteList (map fst xes) fvs, letRec xes e_focus)
+  where
+    -- TODO: clean up this incomprehensible loop
+    -- TODO: investigate the possibility of just fusing in the optimiseLetBinds loop with this one
+    go hes statics deeds bracketeds_heap xes fvs = do
+        let statics' = statics `S.union` S.fromList (map fst hes) -- NB: the statics already include all the binders from bracketeds_heap, so no need to add xes stuff
+        (hes', (deeds, bracketeds_heap, fvs, xes')) <- withStatics statics' $ optimiseLetBinds opt deeds bracketeds_heap (fvs `S.union` S.unions (map (termFreeVars . snd) hes)) -- TODO: no need to get FVs in this way (they are in Promise)
+        (if null hes' then (\a b c d -> return (a,b,c,d)) else go hes' statics') deeds bracketeds_heap (xes ++ hes ++ xes') fvs
 
-        (deeds, fvs', xes') <- residualise deeds [] S.empty fvs_compulsory'
-        return (deeds, fvs', xes', e_compulsory')
-    return (deeds, fvs', letRec (hes ++ xes') e_compulsory')
+
+-- We only want to drive (and residualise) as much as we actually refer to. This loop does this: it starts
+-- by residualising the free variables of the focus residualisation (or whatever is in the let body),
+-- and then transitively inlines any bindings whose corresponding binders become free.
+optimiseLetBinds :: MonadStatics m
+                 => ((Deeds, State) -> m (Deeds, FreeVars, Out Term))
+                 -> Deeds
+                 -> M.Map (Out Var) (Bracketed State)
+                 -> FreeVars
+                 -> m (Deeds, M.Map (Out Var) (Bracketed State), FreeVars, Out [(Var, Term)])
+optimiseLetBinds opt deeds bracketeds_heap fvs' = traceRender ("optimiseLetBinds", M.keysSet bracketeds_heap, fvs') $
+                                                  go deeds bracketeds_heap [] fvs'
+  where
+    go deeds bracketeds_heap_not_resid xes_resid resid_fvs
+      | M.null h_resid = -- traceRenderM ("go", resid_fvs, resid_bvs, (M.map (residualiseBracketed (residualiseState . first3 (flip Heap prettyIdSupply))) bracketeds_heap)) $
+                         return (deeds, bracketeds_heap_not_resid, resid_fvs, xes_resid)
+      | otherwise = {- traceRender ("optimiseSplit", xs_resid') $ -} do
+        -- Recursively drive the new residuals arising from the need to bind the resid_fvs
+        (deeds, S.unions -> extra_resid_fvs', es_resid') <- optimiseMany (optimiseBracketed opt) (deeds, bracks_resid)
+        -- Recurse, because we might now need to residualise and drive even more stuff (as we have added some more FVs and BVs)
+        go deeds bracketeds_heap_not_resid'
+                 (xes_resid ++ zip xs_resid' es_resid')
+                 (resid_fvs `S.union` extra_resid_fvs')
+      where
+        -- When assembling the final list of things to drive, ensure that we exclude already-driven things
+        (h_resid, bracketeds_heap_not_resid') = M.partitionWithKey (\x _br -> x `S.member` resid_fvs) bracketeds_heap_not_resid
+        (xs_resid', bracks_resid) = unzip $ M.toList h_resid
 
 
 splitt :: (Deeds, (Heap, Stack, Tagged QA))   -- ^ The thing to split, and the Deeds we have available to do it

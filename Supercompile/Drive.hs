@@ -166,13 +166,10 @@ data Promise = P {
 --  from the set, but *included* lexical FVs of any h functions called). This simplifies the description of the
 --  supercompiler but also means that in the future I might just be able to return a TermWithFVs or something --
 --  memoising the FVs on the term structure itself.
---
--- FIXME: implement one of these solutions
 
 instance MonadStatics ScpM where
-    withStatics xs mx
-      | lOCAL_TIEBACKS = bindFloats (\p -> any (`S.member` xs) (lexical p)) $ ScpM $ \e s -> (\(!res) -> traceRender ("withStatics", xs) res) $ unScpM mx (e { statics = statics e `S.union` xs }) s
-      | otherwise      = fmap ([],) mx
+    withStatics orig_xs mx = bindFloats (\p -> any (`S.member` xs) (lexical p)) $ ScpM $ \e s -> (\(!res) -> traceRender ("withStatics", xs) res) $ unScpM mx (e { statics = statics e `S.union` xs }) s
+      where xs = if lOCAL_TIEBACKS then orig_xs else S.empty -- NB: it's important we still use bindFloats in (not lOCAL_TIEBACKS) because h functions are static
 
 -- NB: be careful of this subtle problem:
 --
@@ -188,7 +185,7 @@ instance MonadStatics ScpM where
 --
 -- The right thing to do is to make sure that fulfilments created in different "branches" of the process tree aren't eligible for early binding in
 -- that manner, but we still want to tie back to them if possible. The bindFloats function achieves this by carefully shuffling information between the
--- fulfulmints and promises parts of the monadic-carried state.
+-- fulfilments and promises parts of the monadic-carried state.
 bindFloats :: (Promise -> Bool) -> ScpM a -> ScpM ([(Out Var, Out Term)], a)
 bindFloats p mx = ScpM $ \e s -> case unScpM mx (e { promises = map fst (fulfilments s) ++ promises e }) (s { fulfilments = [] }) of (s'@(ScpState { fulfilments = (partition (p . fst) -> (fs_now, fs_later)) }), x) -> traceRender ("bindFloats", map (fun . fst) fs_now, map (fun . fst) fs_later) $ (s' { fulfilments = fs_later ++ fulfilments s }, (sortBy (comparing ((read :: String -> Int) . drop 1 . name_string . fst)) [(fun p, lambdas (abstracted p) e') | (p, e') <- fs_now], x))
 
@@ -201,13 +198,16 @@ freshHName = ScpM $ \_ s -> (s { names = tail (names s) }, expectHead "freshHNam
 getPromises :: ScpM [Promise]
 getPromises = ScpM $ \e s -> (s, promises e ++ map fst (fulfilments s))
 
-promise :: Promise -> ScpM (a, b, Out Term) -> ScpM (a, b, Out Term)
-promise p opt = ScpM $ \e s -> traceRender ("promise", fun p, abstracted p, lexical p) $ unScpM (mx p) e { promises = p : promises e } s
+promise :: Promise -> ScpM (a, FreeVars, Out Term) -> ScpM (a, FreeVars, Out Term)
+promise p opt = ScpM $ \e s -> traceRender ("promise", fun p, abstracted p, lexical p) $ unScpM (mx p) e { promises = p : promises e, statics = S.insert (fun p) (statics e) } s
   where
     mx p = do
-      (a, b, e') <- opt
+      (a, _fvs', e') <- opt
       ScpM $ \_ s -> (s { fulfilments = (p, e') : fulfilments s }, ())
-      return (a, b, fun p `varApps` abstracted p)
+      
+      fmap (S.fromList . ((abstracted p ++ lexical p) ++) . map fun) getPromises >>= \fvs -> assertRender ("sc: FVs", fun p, _fvs' S.\\ fvs, fvs) (_fvs' `S.isSubsetOf` fvs) $ return ()
+      
+      return (a, S.insert (fun p) (S.fromList (abstracted p)), fun p `varApps` abstracted p)
 
 
 data ScpEnv = ScpEnv {
@@ -251,7 +251,7 @@ memo :: ((Deeds, State) -> ScpM (Deeds, FreeVars, Out Term))
 memo opt (deeds, state) = do
     statics <- getStatics
     ps <- getPromises
-    case [ (fun p, (releaseStateDeed deeds state, S.fromList (tb_dynamic_vs ++ tb_static_vs), fun p `varApps` tb_dynamic_vs))
+    case [ (fun p, (releaseStateDeed deeds state, S.insert (fun p) $ S.fromList tb_dynamic_vs, fun p `varApps` tb_dynamic_vs))
          | p <- ps
          , Just rn_lr <- [match (meaning p) state]
          , let rn_fvs = map (safeRename ("tieback: FVs " ++ pPrintRender (fun p)) rn_lr) -- NB: If tb contains a dead PureHeap binding (hopefully impossible) then it may have a free variable that I can't rename, so "rename" will cause an error. Not observed in practice yet.
@@ -272,15 +272,11 @@ memo opt (deeds, state) = do
     
         -- NB: promises are lexically scoped because they may refer to FVs
         x <- freshHName
-        (deeds, _vs', e') <- promise (P { fun = x, abstracted = dynamic_vs_list, lexical = static_vs_list, meaning = state }) $ do
+        promise (P { fun = x, abstracted = dynamic_vs_list, lexical = static_vs_list, meaning = state }) $ do
             traceRenderM (">sc", x, residualiseState state, deeds)
             res <- opt (deeds, state)
             traceRenderM ("<sc", x, residualiseState state, res)
             return res
-        
-        assertRender ("sc: FVs", x, _vs' S.\\ vs, vs) (_vs' `S.isSubsetOf` vs) $ return ()
-        
-        return (deeds, vs, e')
 
 traceRenderM :: (Pretty a, Monad m) => a -> m ()
 --traceRenderM x mx = fmap length history >>= \indent -> traceRender (nest indent (pPrint x)) mx
