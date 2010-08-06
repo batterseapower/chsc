@@ -1,0 +1,7 @@
+loop n = if n < 1000 then loop (n + 1) else True
+
+root = loop 0
+
+tests = [
+    (root, True)
+  ]
