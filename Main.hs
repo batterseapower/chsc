@@ -75,6 +75,7 @@ testOne file = do
                                       , if gENERALISATION   then "gen"      else "no-gen"
                                       , if sPECULATION      then "spec"     else "no-spec"
                                       , if rEDUCE_ROLLBACK  then "reducerb" else "no-reducerb"
+                                      , if sC_ROLLBACK      then "scrb"     else "no-scrb"
                                       ]
         createDirectoryIfMissing True (takeDirectory $ output_dir </> file)
         writeFile (output_dir </> replaceExtension file ".hs") after_code

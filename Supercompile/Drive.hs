@@ -24,8 +24,6 @@ import Renaming
 import StaticFlags
 import Utilities
 
-import Control.Monad.Fix
-
 import qualified Data.Map as M
 import Data.Ord
 import qualified Data.Set as S
@@ -180,7 +178,7 @@ data Promise = P {
 --  memoising the FVs on the term structure itself.
 
 instance MonadStatics ScpM where
-    withStatics orig_xs mx = bindFloats (any (`S.member` xs) . lexical) $ ScpM $ \e s -> (\(!res) -> traceRender ("withStatics", xs) res) $ unScpM mx (e { statics = statics e `S.union` xs }) s
+    withStatics orig_xs mx = bindFloats (any (`S.member` xs) . lexical) $ ScpM $ \e s k -> unScpM mx (e { statics = statics e `S.union` xs }) s (\(!res) s -> traceRender ("withStatics", xs) $ k res s)
       where xs = if lOCAL_TIEBACKS then orig_xs else S.empty -- NB: it's important we still use bindFloats in (not lOCAL_TIEBACKS) because h functions are static
 
 -- NB: be careful of this subtle problem:
@@ -199,23 +197,23 @@ instance MonadStatics ScpM where
 -- that manner, but we still want to tie back to them if possible. The bindFloats function achieves this by carefully shuffling information between the
 -- fulfilments and promises parts of the monadic-carried state.
 bindFloats :: (Promise -> Bool) -> ScpM a -> ScpM (Out [(Var, FVedTerm)], a)
-bindFloats p mx = ScpM $ \e s -> case unScpM mx (e { promises = map fst (fulfilments s) ++ promises e }) (s { fulfilments = [] }) of (s'@(ScpState { fulfilments = (partition (p . fst) -> (fs_now, fs_later)) }), x) -> traceRender ("bindFloats", map (fun . fst) fs_now, map (fun . fst) fs_later) (s' { fulfilments = fs_later ++ fulfilments s }, (sortBy (comparing ((read :: String -> Int) . drop 1 . name_string . fst)) [(fun p, lambdas (abstracted p) e') | (p, e') <- fs_now], x))
+bindFloats p mx = ScpM $ \e s k -> unScpM mx (e { promises = map fst (fulfilments s) ++ promises e }) (s { fulfilments = [] }) (\x _e (s'@(ScpState { fulfilments = (partition (p . fst) -> (fs_now, fs_later)) })) -> traceRender ("bindFloats", map (fun . fst) fs_now, map (fun . fst) fs_later) $ k (sortBy (comparing ((read :: String -> Int) . drop 1 . name_string . fst)) [(fun p, lambdas (abstracted p) e') | (p, e') <- fs_now], x) e (s' { fulfilments = fs_later ++ fulfilments s }))
 
 getStatics :: ScpM FreeVars
-getStatics = ScpM $ \e s -> (s, statics e)
+getStatics = ScpM $ \e s k -> k (statics e) e s
 
 freshHName :: ScpM Var
-freshHName = ScpM $ \_ s -> (s { names = tail (names s) }, expectHead "freshHName" (names s))
+freshHName = ScpM $ \e s k -> k (expectHead "freshHName" (names s)) e (s { names = tail (names s) })
 
 getPromises :: ScpM [Promise]
-getPromises = ScpM $ \e s -> (s, promises e ++ map fst (fulfilments s))
+getPromises = ScpM $ \e s k -> k (promises e ++ map fst (fulfilments s)) e s
 
 promise :: Promise -> ScpM (a, Out FVedTerm) -> ScpM (a, Out FVedTerm)
-promise p opt = ScpM $ \e s -> traceRender ("promise", fun p, abstracted p, lexical p) $ unScpM (mx p) e { promises = p : promises e, statics = S.insert (fun p) (statics e) } s
+promise p opt = ScpM $ \e s k -> traceRender ("promise", fun p, abstracted p, lexical p) $ unScpM (mx p) (e { promises = p : promises e, statics = S.insert (fun p) (statics e) }) s k
   where
     mx p = do
       (a, e') <- opt
-      ScpM $ \_ s -> (s { fulfilments = (p, e') : fulfilments s }, ())
+      ScpM $ \e s k -> k () e (s { fulfilments = (p, e') : fulfilments s })
       
       let fvs' = fvedTermFreeVars e' in fmap (S.fromList . ((abstracted p ++ lexical p) ++) . map fun) getPromises >>= \fvs -> assertRender ("sc: FVs", fun p, fvs' S.\\ fvs, fvs) (fvs' `S.isSubsetOf` fvs) $ return ()
       
@@ -232,31 +230,38 @@ data ScpState = ScpState {
     fulfilments :: [(Promise, Out FVedTerm)]
   }
 
-newtype ScpM a = ScpM { unScpM :: ScpEnv -> ScpState -> (ScpState, a) }
+newtype ScpM a = ScpM { unScpM :: ScpEnv -> ScpState -> (a -> ScpEnv -> ScpState -> Out FVedTerm) -> Out FVedTerm }
 
 instance Functor ScpM where
     fmap = liftM
 
 instance Monad ScpM where
-    return x = ScpM $ \_ s -> (s, x)
-    (!mx) >>= fxmy = ScpM $ \e s -> case unScpM mx e s of (s, x) -> unScpM (fxmy x) e s
-
-instance MonadFix ScpM where
-    mfix fmx = ScpM $ \e s -> let (s', x) = unScpM (fmx x) e s in (s', x)
+    return x = ScpM $ \e s k -> k x e s
+    (!mx) >>= fxmy = ScpM $ \e s k -> unScpM mx e s (\x _e s -> unScpM (fxmy x) e s k)
 
 runScpM :: FreeVars -> ScpM (Out FVedTerm) -> Out FVedTerm
-runScpM input_fvs me = uncurry letRecSmart $ snd (unScpM (bindFloats (\_ -> True) me) init_e init_s)
+runScpM input_fvs me = unScpM (bindFloats (\_ -> True) me) init_e init_s (\(xes', e') _ _ -> letRecSmart xes' e')
   where
     init_e = ScpEnv { statics = input_fvs, promises = [] }
     init_s = ScpState { names = map (\i -> name $ 'h' : show (i :: Int)) [0..], fulfilments = [] }
 
+catchScpM :: ((c -> ScpM b) -> ScpM a) -- ^ Action to try: supplies a function than can be called to "raise an exception". Raising an exception restores the original ScpEnv and ScpState
+          -> (c -> ScpM a)             -- ^ Handler deferred to if an exception is raised
+          -> ScpM a                    -- ^ Result from either the main action or the handler
+catchScpM f_try f_abort = ScpM $ \e s k -> unScpM (f_try (\c -> ScpM $ \_ _ _ -> unScpM (f_abort c) e s k)) e s k
 
-sc, sc' :: History () -> (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
+
+newtype Rollback = RB { rollbackWith :: History Rollback -> ScpM (Deeds, Out FVedTerm) }
+
+sc, sc' :: History Rollback -> (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
 sc  hist = memo (sc' hist)
-sc' hist (deeds, state) = case terminate hist (stateTagBag state) () of
-    Stop     ()    -> trace "sc-stop" $ split (sc hist)          (deeds, state)
-    Continue hist' ->                   split (sc hist') (reduce (deeds, state))
-
+sc' hist (deeds, state) = (check . RB) `catchScpM` (const (stop hist)) -- FIXME: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
+  where
+    check rb = case terminate hist (stateTagBag state) rb of
+                 Continue hist' -> continue hist'
+                 Stop rb        -> if sC_ROLLBACK then rb `rollbackWith` hist else stop hist
+    stop     hist = trace "sc-stop" $ split (sc hist)         (deeds, state)
+    continue hist =                   split (sc hist) (reduce (deeds, state))
 
 memo :: ((Deeds, State) -> ScpM (Deeds, Out FVedTerm))
      ->  (Deeds, State) -> ScpM (Deeds, Out FVedTerm)

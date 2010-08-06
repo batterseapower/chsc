@@ -80,3 +80,7 @@ lOCAL_TIEBACKS = not $ "--no-local-tiebacks" `elem` unsafePerformIO getArgs
 {-# NOINLINE rEDUCE_ROLLBACK #-}
 rEDUCE_ROLLBACK :: Bool
 rEDUCE_ROLLBACK = not $ "--no-reduce-rollback" `elem` unsafePerformIO getArgs
+
+{-# NOINLINE sC_ROLLBACK #-}
+sC_ROLLBACK :: Bool
+sC_ROLLBACK = not $ "--no-sc-rollback" `elem` unsafePerformIO getArgs
