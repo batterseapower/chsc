@@ -4,7 +4,8 @@ module Termination.Terminate (
         TagBag, mkTagBag, plusTagBag, plusTagBags,
 
         -- * The termination criterion
-        History, TermRes(..), emptyHistory, terminate,
+        History, emptyHistory, TermRes(..), isContinue,
+        terminate,
         
         -- * History combination for rollback
         forgetFutureHistory
@@ -52,6 +53,10 @@ emptyHistory :: History a
 emptyHistory = History []
 
 data TermRes a = Stop a | Continue (a -> History a)
+
+isContinue :: TermRes a -> Bool
+isContinue (Continue _) = True
+isContinue _ = False
 
 terminate :: History a -> TagBag -> TermRes a
 terminate hist here

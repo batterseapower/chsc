@@ -74,10 +74,11 @@ mkEnteredEnv = setToMap
 
 
 split :: MonadStatics m
-      => ((Deeds, State) -> m (Deeds, Out FVedTerm))
+      => (State -> Bool)
+      -> ((Deeds, State) -> m (Deeds, Out FVedTerm))
       -> (Deeds, State)
       -> m (Deeds, Out FVedTerm)
-split opt (deeds, s) = uncurry3 (optimiseSplit opt) (splitt (simplify (deeds, s)))
+split admissable opt (deeds, s) = uncurry3 (optimiseSplit opt) (splitt admissable (simplify (deeds, s)))
 
 -- Non-expansive simplification that we can safely do just before splitting to make the splitter a bit simpler
 data QA = Question Var
@@ -299,11 +300,12 @@ optimiseLetBinds opt deeds bracketeds_heap fvs' = traceRender ("optimiseLetBinds
         (xs_resid', bracks_resid) = unzip $ M.toList h_resid
 
 
-splitt :: (Deeds, (Heap, Stack, In (Anned QA))) -- ^ The thing to split, and the Deeds we have available to do it
+splitt :: (State -> Bool)
+       -> (Deeds, (Heap, Stack, In (Anned QA))) -- ^ The thing to split, and the Deeds we have available to do it
        -> (Deeds,                               -- ^ The Deeds still available after splitting
            M.Map (Out Var) (Bracketed State),   -- ^ The residual "let" bindings
            Bracketed State)                     -- ^ The residual "let" body
-splitt (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply -> (ids_brack, splitIdSupply -> (ids1, ids2)))), k, in_qa))
+splitt admissable (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply -> (ids_brack, splitIdSupply -> (ids1, ids2)))), k, in_qa))
     = -- traceRender ("splitt", residualiseHeap (Heap h ids_brack) (\ids -> residualiseStack ids k (case tagee qa of Question x' -> var x'; Answer in_v -> value $ detagTaggedValue $ renameIn renameTaggedValue ids in_v))) $
       snd $ split_step resid_xs -- TODO: eliminate redundant recomputation here?
   where
