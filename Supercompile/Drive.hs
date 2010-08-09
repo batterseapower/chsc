@@ -31,7 +31,7 @@ import Data.Tree
 
 
 supercompile :: Term -> Term
-supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ runScpM input_fvs $ fmap snd $ sc [] (deeds, state)
+supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ runScpM input_fvs $ fmap snd $ sc emptyHistory (deeds, state)
   where input_fvs = annedTermFreeVars anned_e
         state = (Heap M.empty reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, anned_e))
         anned_e = toAnnedTerm e
@@ -251,15 +251,15 @@ catchScpM :: ((c -> ScpM b) -> ScpM a) -- ^ Action to try: supplies a function t
 catchScpM f_try f_abort = ScpM $ \e s k -> unScpM (f_try (\c -> ScpM $ \_ _ _ -> unScpM (f_abort c) e s k)) e s k
 
 
-newtype Rollback = RB { rollbackWith :: History Rollback -> ScpM (Deeds, Out FVedTerm) }
+newtype Rollback = RB { rollbackWith :: History (Maybe Rollback) -> ScpM (Deeds, Out FVedTerm) }
 
-sc, sc' :: History Rollback -> (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
+sc, sc' :: History (Maybe Rollback) -> (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
 sc  hist = memo (sc' hist)
-sc' hist (deeds, state) = (check . RB) `catchScpM` (const (stop hist)) -- FIXME: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
+sc' hist (deeds, state) = (check . Just . RB) `catchScpM` \hist' -> stop (hist `forgetFutureHistory` hist') -- NB: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
   where
-    check rb = case terminate hist (stateTagBag state) rb of
+    check mb_rb = case terminate hist (stateTagBag state) mb_rb of
                  Continue hist' -> continue hist'
-                 Stop rb        -> if sC_ROLLBACK then rb `rollbackWith` hist else stop hist
+                 Stop mb_rb     -> maybe (stop hist) (`rollbackWith` hist) $ guard sC_ROLLBACK >> mb_rb
     stop     hist = trace "sc-stop" $ split (sc hist)         (deeds, state)
     continue hist =                   split (sc hist) (reduce (deeds, state))
 

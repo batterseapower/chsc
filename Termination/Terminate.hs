@@ -4,7 +4,10 @@ module Termination.Terminate (
         TagBag, mkTagBag, plusTagBag, plusTagBags,
 
         -- * The termination criterion
-        History, TermRes(..), emptyHistory, terminate
+        History, TermRes(..), emptyHistory, terminate,
+        
+        -- * History combination for rollback
+        forgetFutureHistory
     ) where
 
 import StaticFlags
@@ -40,10 +43,13 @@ tb1 <| tb2 = -- traceRender ("<|", tb1, tb2, tb1 `setEqual` tb2, cardinality tb1
              tb1 `setEqual` tb2 && cardinality tb1 <= cardinality tb2
 
 
-type History a = [(TagBag, a)]
+newtype History a = History { unHistory :: [(TagBag, a)] }
+
+instance Functor History where
+    fmap f hist = History $ map (second f) (unHistory hist)
 
 emptyHistory :: History a
-emptyHistory = []
+emptyHistory = History []
 
 data TermRes a = Stop a | Continue (History a)
 
@@ -51,8 +57,11 @@ terminate :: History a -> TagBag -> a -> TermRes a
 terminate hist here here_extra
   -- | traceRender (length hist, tagBag here) && False = undefined
   | tERMINATION_CHECK
-  , prev_extra:_ <- [prev_extra | (prev, prev_extra) <- hist, if prev <| here then {- traceRender (hang (text "terminate") 2 (pPrint hist $$ pPrint here)) -} True else False]
+  , prev_extra:_ <- [prev_extra | (prev, prev_extra) <- unHistory hist, if prev <| here then {- traceRender (hang (text "terminate") 2 (pPrint hist $$ pPrint here)) -} True else False]
   = Stop prev_extra
   | otherwise
-  = Continue ((here, here_extra) : hist)
+  = Continue (History $ (here, here_extra) : unHistory hist)
 
+-- FIXME: make less ugly
+forgetFutureHistory :: History (Maybe a) -> History (Maybe a) -> History (Maybe a)
+forgetFutureHistory (History short) (History long) = History $ short ++ fmap (second (const Nothing)) (short `dropBy` long)

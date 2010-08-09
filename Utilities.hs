@@ -384,6 +384,9 @@ splitManyBy :: [[b]] -> [a] -> [[a]]
 splitManyBy []       xs = [xs]
 splitManyBy (ys:yss) xs = case splitBy ys xs of (xs1, xs2) -> xs1 : splitManyBy yss xs2
 
+dropBy :: [b] -> [a] -> [a]
+dropBy bs = snd . splitBy bs
+
 
 takeFirst :: (a -> Bool) -> [a] -> (Maybe a, [a])
 takeFirst p = takeFirstJust (\x -> guard (p x) >> return x)
