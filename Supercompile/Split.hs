@@ -84,15 +84,26 @@ split admissable opt (deeds, s) = optimiseSplit opt deeds' bracketeds_heap brack
     go (deeds, s)
        -- If we can't go any further without doing a beta-reduction / unwinding the stack,
        -- then split whatever State we have right now
-      | (Heap h (splitIdSupply -> (ids1, ids2)), k, (rn, Comp (Tagged tg (FVed fvs e)))) <- s
+      | (Heap h (splitIdSupply -> (ids1, ids2)), k, (rn, annee -> e)) <- s
       , Just qa <- toQA e
-      = splitt admissable (deeds, (Heap h ids1, k, (case qa of Question x -> [rename rn x]; Answer _ -> [],
-                                                    splitQA ids2 (rn, Comp (Tagged tg (FVed fvs qa))))))
+      = splitt S.empty (deeds, (Heap h ids1, k, (case qa of Question x -> [rename rn x]; Answer _ -> [],
+                                                 splitQA ids2 (rn, qa))))
+       -- If we reach here, we must have terminated due to the termination criteria (as opposed to terminating
+       -- because of a lack of information about a free variable / the continuation). We want to fool the
+       -- termination condition into letting us continue but at the same time discard the absolute minimum
+       -- amount of information. Let's see if we are in a position to do that:
+      | Just (Heap h ids, k, mk_focus) <- seekAdmissable admissable s
+      = splitt (M.keysSet h) (deeds, (Heap h ids, k, ([], oneBracketed mk_focus)))
        -- If we can't do anything else, just pull the expression apart so we get closer to a value or variable
       | Just (_, deeds', s') <- step (const id) S.empty (emptyLosers, deeds, s)
       = go (deeds', s')
       | otherwise
       = error "split.go"
+
+seekAdmissable :: (State -> Bool)
+               -> State
+               -> Maybe (Heap, Stack, (Entered, IdSupply -> State))
+seekAdmissable _ _ = Nothing -- FIXME
 
 -- Non-expansive simplification that we can safely do just before splitting to make the splitter a bit simpler
 data QA = Question Var
@@ -312,12 +323,12 @@ optimiseLetBinds opt deeds bracketeds_heap fvs' = traceRender ("optimiseLetBinds
         (xs_resid', bracks_resid) = unzip $ M.toList h_resid
 
 
-splitt :: (State -> Bool)
+splitt :: FreeVars
        -> (Deeds, (Heap, Stack, ([Out Var], Bracketed (Entered, IdSupply -> State)))) -- ^ The thing to split, and the Deeds we have available to do it
        -> (Deeds,                               -- ^ The Deeds still available after splitting
            M.Map (Out Var) (Bracketed State),   -- ^ The residual "let" bindings
            Bracketed State)                     -- ^ The residual "let" body
-splitt admissable (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply -> (ids_brack, ids))), k, (scruts_qa, bracketed_qa)))
+splitt gen_xs (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply -> (ids_brack, ids))), k, (scruts_qa, bracketed_qa)))
     = -- traceRender ("splitt", residualiseHeap (Heap h ids_brack) (\ids -> residualiseStack ids k (case tagee qa of Question x' -> var x'; Answer in_v -> value $ detagTaggedValue $ renameIn renameTaggedValue ids in_v))) $
       snd $ split_step resid_xs -- TODO: eliminate redundant recomputation here?
   where
@@ -362,7 +373,7 @@ splitt admissable (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (sp
         -- 3b) Work out which part of the heap is admissable for inlining
         -- We are allowed to inline anything which is duplicatable or is not residualised right here and now
         h_cheap = M.filter (\(_, e) -> isCheap (annee e)) h
-        h_inlineable = h_not_residualised `M.union` h_cheap
+        h_inlineable = (h_not_residualised `M.union` h_cheap) `exclude` gen_xs
         
         -- Generalising the final proposed floats may cause some bindings that we *thought* were going to be inlined to instead be
         -- residualised. We need to account for this in the Entered information (for work-duplication purposes), and in that we will
@@ -584,7 +595,7 @@ splitValue ids (rn, Lambda x e) = zipBracketeds (\[e'] -> lambda x' e') (\[fvs']
 splitValue ids in_v                  = noneBracketed (value v') (inFreeVars annedValueFreeVars' in_v)
   where v' = detagAnnedValue' $ renameIn renameAnnedValue' ids in_v
 
-splitQA :: IdSupply -> In (Anned QA) -> Bracketed (Entered, IdSupply -> State)
-splitQA _   (rn, annee -> Question x) = noneBracketed (var x') (S.singleton x')
+splitQA :: IdSupply -> In QA -> Bracketed (Entered, IdSupply -> State)
+splitQA _   (rn, Question x) = noneBracketed (var x') (S.singleton x')
   where x' = rename rn x
-splitQA ids (rn, annee -> Answer v) = splitValue ids (rn, v)
+splitQA ids (rn, Answer v) = splitValue ids (rn, v)
