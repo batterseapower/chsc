@@ -48,7 +48,8 @@ bLOAT_FACTOR = fromMaybe 10 $ listToMaybe [read arg | '-':'-':'b':'l':'o':'a':'t
  --
  -- 
  -- Unfortunately, my implementation doesn't tie back as eagerly as you might like, so we actually peel the loop once and
- -- hence need a bloat factor of 10 here FIXME: figure out how to reduce this number.
+ -- hence need a bloat factor of 8 here (5 + 3 other case statements derived from (++))
+ -- FIXME: figure out how to reduce this number.
 
 {-# NOINLINE sPLITTER_CHEAPIFICATION #-}
 sPLITTER_CHEAPIFICATION :: Bool
