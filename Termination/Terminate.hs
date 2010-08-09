@@ -51,16 +51,16 @@ instance Functor History where
 emptyHistory :: History a
 emptyHistory = History []
 
-data TermRes a = Stop a | Continue (History a)
+data TermRes a = Stop a | Continue (a -> History a)
 
-terminate :: History a -> TagBag -> a -> TermRes a
-terminate hist here here_extra
+terminate :: History a -> TagBag -> TermRes a
+terminate hist here
   -- | traceRender (length hist, tagBag here) && False = undefined
   | tERMINATION_CHECK
   , prev_extra:_ <- [prev_extra | (prev, prev_extra) <- unHistory hist, if prev <| here then {- traceRender (hang (text "terminate") 2 (pPrint hist $$ pPrint here)) -} True else False]
   = Stop prev_extra
   | otherwise
-  = Continue (History $ (here, here_extra) : unHistory hist)
+  = Continue (\here_extra -> History $ (here, here_extra) : unHistory hist)
 
 -- FIXME: make less ugly
 forgetFutureHistory :: History (Maybe a) -> History (Maybe a) -> History (Maybe a)

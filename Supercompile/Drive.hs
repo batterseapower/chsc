@@ -110,9 +110,9 @@ reduce (deeds, state) = (deeds', state')
       -- | traceRender ("reduce.go", deeds, residualiseState state) False = undefined
       | not eVALUATE_PRIMOPS, (_, _, (_, annee -> PrimOp _ _)) <- state = (losers, deeds, state)
       | otherwise = fromMaybe (losers, deeds, state) $ either id id $ do
-          hist' <- case terminate hist (stateTagBag state) (deeds, state) of
+          hist' <- case terminate hist (stateTagBag state) of
                       _ | intermediate state  -> Right hist
-                      Continue hist'          -> Right hist'
+                      Continue mk_hist        -> Right (mk_hist (deeds, state))
                       Stop     (deeds, state) -> trace "reduce-stop" $ Left (guard rEDUCE_ROLLBACK >> return (losers, deeds, state))
           Right $ fmap (go hist' lives) $ step (go hist') lives (losers, deeds, state)
     
@@ -257,9 +257,9 @@ sc, sc' :: History (Maybe Rollback) -> (Deeds, State) -> ScpM (Deeds, Out FVedTe
 sc  hist = memo (sc' hist)
 sc' hist (deeds, state) = (check . Just . RB) `catchScpM` \hist' -> stop (hist `forgetFutureHistory` hist') -- NB: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
   where
-    check mb_rb = case terminate hist (stateTagBag state) mb_rb of
-                 Continue hist' -> continue hist'
-                 Stop mb_rb     -> maybe (stop hist) (`rollbackWith` hist) $ guard sC_ROLLBACK >> mb_rb
+    check mb_rb = case terminate hist (stateTagBag state) of
+                 Continue mk_hist -> continue (mk_hist mb_rb)
+                 Stop mb_rb       -> maybe (stop hist) (`rollbackWith` hist) $ guard sC_ROLLBACK >> mb_rb
     stop     hist = trace "sc-stop" $ split (sc hist)         (deeds, state)
     continue hist =                   split (sc hist) (reduce (deeds, state))
 
