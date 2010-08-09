@@ -1,4 +1,4 @@
-{-# LANGUAGE ViewPatterns, TupleSections, DeriveFunctor, DeriveFoldable, DeriveTraversable, MultiParamTypeClasses, FlexibleInstances #-}
+{-# LANGUAGE PatternGuards, ViewPatterns, TupleSections, DeriveFunctor, DeriveFoldable, DeriveTraversable, MultiParamTypeClasses, FlexibleInstances #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 module Supercompile.Split (Statics, MonadStatics(..), split) where
 
@@ -78,18 +78,30 @@ split :: MonadStatics m
       -> ((Deeds, State) -> m (Deeds, Out FVedTerm))
       -> (Deeds, State)
       -> m (Deeds, Out FVedTerm)
-split admissable opt (deeds, s) = uncurry3 (optimiseSplit opt) (splitt admissable (simplify (deeds, s)))
+split admissable opt (deeds, s) = optimiseSplit opt deeds' bracketeds_heap bracketeds_focus
+  where
+    (deeds', bracketeds_heap, bracketeds_focus) = go (deeds, s)
+    go (deeds, s)
+       -- If we can't go any further without doing a beta-reduction / unwinding the stack,
+       -- then split whatever State we have right now
+      | (Heap h (splitIdSupply -> (ids1, ids2)), k, (rn, Comp (Tagged tg (FVed fvs e)))) <- s
+      , Just qa <- toQA e
+      = splitt admissable (deeds, (Heap h ids1, k, (case qa of Question x -> [rename rn x]; Answer _ -> [],
+                                                    splitQA ids2 (rn, Comp (Tagged tg (FVed fvs qa))))))
+       -- If we can't do anything else, just pull the expression apart so we get closer to a value or variable
+      | Just (_, deeds', s') <- step (const id) S.empty (emptyLosers, deeds, s)
+      = go (deeds', s')
+      | otherwise
+      = error "split.go"
 
 -- Non-expansive simplification that we can safely do just before splitting to make the splitter a bit simpler
 data QA = Question Var
         | Answer   (ValueF Anned)
 
-simplify :: (Deeds, State) -> (Deeds, (Heap, Stack, In (Anned QA)))
-simplify (deeds, s) = expectHead "simplify" [(deeds, res) | (deeds, s) <- (deeds, s) : unfoldr (\(deeds, s) -> fmap (\(_, a, b) -> ((a, b), (a, b))) (step (const id) S.empty (emptyLosers, deeds, s))) (deeds, s), Just res <- [stop s]]
-  where
-    stop (h, k, (rn, Comp (Tagged tg (FVed fvs (Var x)))))   = Just (h, k, (rn, Comp (Tagged tg (FVed fvs (Question x)))))
-    stop (h, k, (rn, Comp (Tagged tg (FVed fvs (Value v))))) = Just (h, k, (rn, Comp (Tagged tg (FVed fvs (Answer v)))))
-    stop _ = Nothing
+toQA :: TermF Anned -> Maybe QA
+toQA (Var x)   = Just (Question x)
+toQA (Value v) = Just (Answer v)
+toQA _         = Nothing
 
 -- Discard dead bindings:
 --  let x = ...
@@ -301,11 +313,11 @@ optimiseLetBinds opt deeds bracketeds_heap fvs' = traceRender ("optimiseLetBinds
 
 
 splitt :: (State -> Bool)
-       -> (Deeds, (Heap, Stack, In (Anned QA))) -- ^ The thing to split, and the Deeds we have available to do it
+       -> (Deeds, (Heap, Stack, ([Out Var], Bracketed (Entered, IdSupply -> State)))) -- ^ The thing to split, and the Deeds we have available to do it
        -> (Deeds,                               -- ^ The Deeds still available after splitting
            M.Map (Out Var) (Bracketed State),   -- ^ The residual "let" bindings
            Bracketed State)                     -- ^ The residual "let" body
-splitt admissable (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply -> (ids_brack, splitIdSupply -> (ids1, ids2)))), k, in_qa))
+splitt admissable (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply -> (ids_brack, ids))), k, (scruts_qa, bracketed_qa)))
     = -- traceRender ("splitt", residualiseHeap (Heap h ids_brack) (\ids -> residualiseStack ids k (case tagee qa of Question x' -> var x'; Answer in_v -> value $ detagTaggedValue $ renameIn renameTaggedValue ids in_v))) $
       snd $ split_step resid_xs -- TODO: eliminate redundant recomputation here?
   where
@@ -329,7 +341,7 @@ splitt admissable (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (sp
         fill_ids = fmap (\(ent, f) -> (ent, f ids_brack))
         (deeds0_unreleased, bracketeds_updated, bracketed_focus)
           = (\(a, b, c) -> (a, M.map fill_ids b, fill_ids c)) $
-            splitStack ids2 resid_xs deeds (case annee (snd in_qa) of Question x -> [rename (fst in_qa) x]; Answer _ -> []) k (splitQA ids1 in_qa)
+            splitStack ids resid_xs deeds scruts_qa k bracketed_qa
         
         -- 2) Build a splitting for those elements of the heap we propose to residualise in resid_xs
         (h_residualised, h_not_residualised) = M.partitionWithKey (\x' _ -> x' `S.member` resid_xs) h
