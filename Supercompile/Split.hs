@@ -357,7 +357,7 @@ splitt (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply
         fill_ids = fmap (\(ent, f) -> (ent, f ids_brack))
         (deeds0_unreleased, bracketeds_updated, bracketed_focus)
           = (\(a, b, c) -> (a, M.map fill_ids b, fill_ids c)) $
-            splitStack ids resid_xs deeds scruts k bracketed_qa
+            pushStack ids resid_xs deeds scruts k bracketed_qa
         
         -- 2) Build a splitting for those elements of the heap we propose to residualise in resid_xs
         (h_residualised, h_not_residualised) = M.partitionWithKey (\x' _ -> x' `S.member` resid_xs) h
@@ -531,7 +531,7 @@ cheapifyHeap (deeds, Heap h (splitIdSupply -> (ids, ids'))) = (deeds', Heap (M.f
             associate (deeds, ids, floats, in_e) = ((deeds, ids), (floats, in_e))
 
 
-splitStack :: IdSupply
+pushStack :: IdSupply
            -> S.Set Var -- ^ Those variables that must be bound now, and cannot have their update frames pushed down
            -> Deeds
            -> [Out Var]
@@ -540,9 +540,9 @@ splitStack :: IdSupply
            -> (Deeds,
                M.Map (Out Var) (Bracketed (Entered, IdSupply -> State)),
                Bracketed (Entered, IdSupply -> State))
-splitStack ids must_bind_updates deeds scruts k mk_bracketed_hole = case k of
+pushStack ids must_bind_updates deeds scruts k mk_bracketed_hole = case k of
     []     -> (deeds, M.empty, mk_bracketed_hole Tail)
-    (kf:k) -> second3 (`M.union` bracketed_heap') $ splitStack ids2 must_bind_updates deeds' scruts' k (\_kf -> bracketed_hole')
+    (kf:k) -> second3 (`M.union` bracketed_heap') $ pushStack ids2 must_bind_updates deeds' scruts' k (\_kf -> bracketed_hole')
       where
         (ids1, ids2) = splitIdSupply ids
         -- Split the continuation eligible for inlining into two parts: that part which can be pushed into
@@ -551,9 +551,9 @@ splitStack ids must_bind_updates deeds scruts k mk_bracketed_hole = case k of
         bracketed_hole = mk_bracketed_hole NonTail
         guardOK | Update (annee -> x') <- kf = guard (x' `S.notMember` must_bind_updates)
                 | otherwise                  = return ()
-        (deeds', scruts', bracketed_heap', bracketed_hole')
-          = (guardOK >> fmap (\(deeds', bracketed_hole') -> (deeds', [], M.empty, bracketed_hole')) (pushStackFrame kf deeds bracketed_hole)) `orElse`
-            splitStackFrame ids1 kf deeds scruts bracketed_hole
+        (deeds', (scruts', bracketed_heap', bracketed_hole'))
+          = (guardOK >> fmap (\(deeds', bracketed_hole') -> (deeds', ([], M.empty, bracketed_hole'))) (pushStackFrame kf deeds bracketed_hole)) `orElse`
+            (deeds, splitStackFrame ids1 kf scruts bracketed_hole)
 
 
 pushStackFrame :: StackFrame
@@ -573,17 +573,15 @@ pushStackFrame kf deeds bracketed_hole = do
 
 splitStackFrame :: IdSupply
                 -> StackFrame
-                -> Deeds
                 -> [Out Var]
                 -> Bracketed (Entered, IdSupply -> State)
-                -> (Deeds,
-                    [Out Var],
+                -> ([Out Var],
                     M.Map (Out Var) (Bracketed (Entered, IdSupply -> State)),
                     Bracketed (Entered, IdSupply -> State))
-splitStackFrame ids kf deeds scruts bracketed_hole
+splitStackFrame ids kf scruts bracketed_hole
    -- If we do not have access to the tail positions of the hole, all we can do is rebuild a bit of residual syntax around the hole
-  | Update (annee -> x') <- kf = splitUpdate deeds scruts x' bracketed_hole
-  | otherwise = (deeds, [], M.empty, case kf of
+  | Update (annee -> x') <- kf = splitUpdate scruts x' bracketed_hole
+  | otherwise = ([], M.empty, case kf of
     Apply (annee -> x2') -> zipBracketeds (\[e] -> e `app` x2') (\[fvs] -> S.insert x2' fvs) (\[fvs] -> fvs) (\_ -> Nothing) [bracketed_hole]
     -- NB: case scrutinisation is special! Instead of kontinuing directly with k, we are going to inline
     -- *as much of entire remaining evaluation context as we can* into each case branch. Scary, eh?
@@ -619,9 +617,9 @@ splitStackFrame ids kf deeds scruts bracketed_hole
     altConToValue (LiteralAlt l)  = Just $ Literal l
     altConToValue (DefaultAlt _)  = Nothing
 
-splitUpdate :: Deeds -> [Out Var] -> Out Var -> Bracketed (Entered, IdSupply -> State)
-            -> (Deeds, [Out Var], M.Map (Out Var) (Bracketed (Entered, IdSupply -> State)), Bracketed (Entered, IdSupply -> State))
-splitUpdate deeds scruts x' bracketed_hole = (deeds, x' : scruts, M.singleton x' bracketed_hole, noneBracketed (var x') (S.singleton x'))
+splitUpdate :: [Out Var] -> Out Var -> Bracketed (Entered, IdSupply -> State)
+            -> ([Out Var], M.Map (Out Var) (Bracketed (Entered, IdSupply -> State)), Bracketed (Entered, IdSupply -> State))
+splitUpdate scruts x' bracketed_hole = (x' : scruts, M.singleton x' bracketed_hole, noneBracketed (var x') (S.singleton x'))
 
 splitValue :: IdSupply -> In AnnedValue -> Bracketed (Entered, IdSupply -> State)
 splitValue ids (rn, Lambda x e) = zipBracketeds (\[e'] -> lambda x' e') (\[fvs'] -> fvs') (\[fvs'] -> S.delete x' fvs') (\_ -> Nothing) [oneBracketed (Many, \ids -> (Heap M.empty ids, [], (rn', e)))]
