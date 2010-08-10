@@ -532,14 +532,14 @@ cheapifyHeap (deeds, Heap h (splitIdSupply -> (ids, ids'))) = (deeds', Heap (M.f
 
 
 pushStack :: IdSupply
-           -> S.Set Var -- ^ Those variables that must be bound now, and cannot have their update frames pushed down
-           -> Deeds
-           -> [Out Var]
-           -> Stack
-           -> (Tailness -> Bracketed (Entered, IdSupply -> State))
-           -> (Deeds,
-               M.Map (Out Var) (Bracketed (Entered, IdSupply -> State)),
-               Bracketed (Entered, IdSupply -> State))
+          -> S.Set Var -- ^ Those variables that must be bound now, and cannot have their update frames pushed down
+          -> Deeds
+          -> [Out Var]
+          -> Stack
+          -> (Tailness -> Bracketed (Entered, IdSupply -> State))
+          -> (Deeds,
+              M.Map (Out Var) (Bracketed (Entered, IdSupply -> State)),
+              Bracketed (Entered, IdSupply -> State))
 pushStack ids must_bind_updates deeds scruts k mk_bracketed_hole = case k of
     []     -> (deeds, M.empty, mk_bracketed_hole Tail)
     (kf:k) -> second3 (`M.union` bracketed_heap') $ pushStack ids2 must_bind_updates deeds' scruts' k (\_kf -> bracketed_hole')
@@ -555,7 +555,6 @@ pushStack ids must_bind_updates deeds scruts k mk_bracketed_hole = case k of
           = (guardOK >> fmap (\(deeds', bracketed_hole') -> (deeds', ([], M.empty, bracketed_hole'))) (pushStackFrame kf deeds bracketed_hole)) `orElse`
             (deeds, splitStackFrame ids1 kf scruts bracketed_hole)
 
-
 pushStackFrame :: StackFrame
                -> Deeds
                -> Bracketed (Entered, IdSupply -> State)
@@ -567,7 +566,7 @@ pushStackFrame kf deeds bracketed_hole = do
   where
     -- Inline parts of the evaluation context into each branch only if we can get that many deeds for duplication
     push fillers = case foldM (\deeds tag -> claimDeeds deeds tag (branch_factor - 1)) deeds (stackFrameTags kf) of -- NB: subtract one because one occurrence is already "paid for". It is OK if the result is negative (i.e. branch_factor 0)!
-            Nothing    -> traceRender ("splitStack: deed claim failure", branch_factor) (Nothing, fillers)
+            Nothing    -> traceRender ("pushStackFrames: deed claim failure", branch_factor) (Nothing, fillers)
             Just deeds -> (Just deeds, map (\(ent, f) -> (ent, second3 (++ [kf]) . f)) fillers)
       where branch_factor = length fillers
 
