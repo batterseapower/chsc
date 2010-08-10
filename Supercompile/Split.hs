@@ -14,7 +14,6 @@ import Evaluator.Syntax
 
 import Size.Deeds
 
-import Algebra.PartialOrd
 import Algebra.Lattice
 import Name
 import Renaming
@@ -74,7 +73,7 @@ split :: MonadStatics m
       => ((Deeds, State) -> m (Deeds, Out FVedTerm))
       -> (Deeds, State)
       -> m (Deeds, Out FVedTerm)
-split opt (deeds, s) = uncurry3 (optimiseSplit opt) (splitt (deeds', (Heap h ids1, k, (case snd in_qa of Question x -> [rename (fst in_qa) x]; Answer _ -> [], splitQA ids2 in_qa))))
+split opt (deeds, s) = uncurry3 (optimiseSplit opt) (splitt bottom (deeds', (Heap h ids1, [0..] `zip` k, (case snd in_qa of Question x -> [rename (fst in_qa) x]; Answer _ -> [], splitQA ids2 in_qa))))
   where (deeds', (Heap h (splitIdSupply -> (ids1, ids2)), k, in_qa)) = simplify (deeds, s)
 
 -- Non-expansive simplification that we can safely do just before splitting to make the splitter a bit simpler
@@ -316,28 +315,27 @@ optimiseLetBinds opt deeds bracketeds_heap fvs' = traceRender ("optimiseLetBinds
         (h_resid, bracketeds_heap_not_resid') = M.partitionWithKey (\x _br -> x `S.member` resid_fvs) bracketeds_heap_not_resid
         (xs_resid', bracks_resid) = unzip $ M.toList h_resid
 
+type NamedStack = [(Int, StackFrame)]
 
-splitt :: (Deeds, (Heap, Stack, ([Out Var], Bracketed (Entered, IdSupply -> State))))         -- ^ The thing to split, and the Deeds we have available to do it
+splitt :: (IS.IntSet, S.Set (Out Var))
+       -> (Deeds, (Heap, NamedStack, ([Out Var], Bracketed (Entered, IdSupply -> State))))         -- ^ The thing to split, and the Deeds we have available to do it
        -> (Deeds,                               -- ^ The Deeds still available after splitting
            M.Map (Out Var) (Bracketed State),   -- ^ The residual "let" bindings
            Bracketed State)                     -- ^ The residual "let" body
-splitt (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply -> (ids_brack, ids))), k, (scruts, bracketed_qa)))
+splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply -> (ids_brack, ids))), named_k, (scruts, bracketed_qa)))
     = -- traceRender ("splitt", residualiseHeap (Heap h ids_brack) (\ids -> residualiseStack ids k (case tagee qa of Question x' -> var x'; Answer in_v -> value $ detagTaggedValue $ renameIn renameTaggedValue ids in_v))) $
       snd $ split_step split_fp -- TODO: eliminate redundant recomputation here?
   where
     -- Note that as an optimisation, optimiseSplit will only actually creates those residual bindings if the
     -- corresponding variables are free *after driving*. Of course, we have no way of knowing which bindings
     -- will get this treatment here, so just treat resid_xs as being exactly the set of residualised stuff.
-    split_fp = lfp (fst . split_step)
+    split_fp = lfpFrom split_from (fst . split_step)
     
     -- Simultaneously computes the next fixed-point step and some artifacts computed along the way,
     -- which happen to correspond to exactly what I need to return from splitt.
     split_step (resid_kfs, resid_xs) = -- traceRender ("split_step", resid_xs, fvs', resid_xs') $
                                        ((resid_kfs', resid_xs'), (deeds2, bracketeds_heap', bracketed_focus'))
       where
-        -- 0) Name the components of the stack (each stack frame is given its own Int)
-        named_k = [0..] `zip` k
-        
         -- 1) Build a candidate splitting for the Stack and QA components
         -- When creating the candidate stack split, we ensure that we create a residual binding
         -- for any variable in the resid_xs set, as we're not going to inline it to continue.
