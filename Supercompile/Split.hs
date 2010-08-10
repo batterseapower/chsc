@@ -37,8 +37,8 @@ class Monad m => MonadStatics m where
 -- == Gathering entry information for the splitter ==
 --
 
-data Entered = Once (Maybe Id) -- ^ The Id is a context identifier: if a binding is Entered twice from the same context it's really a single Entrance. Nothing signifies the residual context (i.e. there is no associated float)
-             | Many            -- ^ The Bool records whether any of those Many occurrences are in the residual
+data Entered = Once Id -- ^ The Id is a context identifier: if a binding is Entered twice from the same context it's really a single Entrance
+             | Many    -- ^ The Bool records whether any of those Many occurrences are in the residual
              deriving (Eq, Show)
 
 instance Pretty Entered where
@@ -52,10 +52,10 @@ isOnce (Once _) = True
 isOnce _ = False
 
 plusEntered :: Entered -> Entered -> Entered
-plusEntered (Once mb_id1) (Once mb_id2)
-  | mb_id1 == mb_id2 = Once mb_id1
-  | otherwise        = {- traceRender ("Once promotion", mb_id1, mb_id2) $ -} Many
-plusEntered e1 e2 = Many
+plusEntered (Once id1) (Once id2)
+  | id1 == id2 = Once id1
+  | otherwise  = Many
+plusEntered _ _ = Many
 
 
 type EnteredEnv = M.Map (Out Var) Entered
@@ -327,7 +327,7 @@ splitt (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply
         
         -- 2) Build a splitting for those elements of the heap we propose to residualise in resid_xs
         (h_residualised, h_not_residualised) = M.partitionWithKey (\x' _ -> x' `S.member` resid_xs) h
-        bracketeds_nonupdated = M.mapWithKey (\x' in_e -> oneBracketed (Once (Just (fromJust (name_id x'))), (Heap M.empty ids_brack, [], in_e))) h_residualised
+        bracketeds_nonupdated = M.mapWithKey (\x' in_e -> oneBracketed (Once (fromJust (name_id x')), (Heap M.empty ids_brack, [], in_e))) h_residualised
         bracketeds_heap = bracketeds_updated `M.union` bracketeds_nonupdated
         
         -- 3) Inline as much of the Heap as possible into the candidate splitting
@@ -517,8 +517,6 @@ splitStack ids must_bind_updates deeds scruts (kf:k) bracketed_hole = case kf of
             (ids', state_ids) = splitIdSupply ids
             ctxt_id = idFromSupply state_ids
             
-            -- (Once (Just ctxt_id))
-        
             -- 1) Split the continuation eligible for inlining into two parts: that part which can be pushed into
             -- the case branch, and that part which could have been except that we need to refer to a variable it binds
             -- in the residualised part of the term we create
@@ -536,7 +534,7 @@ splitStack ids must_bind_updates deeds scruts (kf:k) bracketed_hole = case kf of
             alt_in_es = alt_rns `zip` alt_es
             alt_hs = zipWith3 (\alt_rn alt_con alt_tg -> M.fromList $ do { Just scrut_v <- [altConToValue alt_con]; scrut <- scruts; return (scrut, (alt_rn, annedTerm alt_tg (Value scrut_v))) }) alt_rns alt_cons (map annedTag alt_es)
             alt_bvss = map (\alt_con' -> fst $ altConOpenFreeVars alt_con' (S.empty, S.empty)) alt_cons'
-            (deeds', k_not_inlined, bracketed_alts) = third3 (map oneBracketed) $ go deeds k_inlineable_candidates (zipWith (\alt_h alt_in_e -> (Once (Just ctxt_id), \ids -> (Heap alt_h ids, [], alt_in_e))) alt_hs alt_in_es)
+            (deeds', k_not_inlined, bracketed_alts) = third3 (map oneBracketed) $ go deeds k_inlineable_candidates (zipWith (\alt_h alt_in_e -> (Once ctxt_id, \ids -> (Heap alt_h ids, [], alt_in_e))) alt_hs alt_in_es)
               where
                 branch_factor = length alt_cons
                 
@@ -552,7 +550,7 @@ splitStack ids must_bind_updates deeds scruts (kf:k) bracketed_hole = case kf of
             
             -- 1) Split every value and expression remaining apart
             bracketed_vs = map (splitValue ids' . fmap annee) in_vs
-            bracketed_es  = zipWith (\ctxt_id in_e -> oneBracketed (Once (Just ctxt_id), \ids -> (Heap M.empty ids, [], in_e))) ctxt_ids in_es
+            bracketed_es  = zipWith (\ctxt_id in_e -> oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], in_e))) ctxt_ids in_es
     Update (annee -> x') -> second3 (M.insert x' bracketed_hole) $ splitStack ids must_bind_updates deeds (x' : scruts) k (noneBracketed (var x') (S.singleton x'))
   where
     altConToValue :: AltCon -> Maybe (ValueF ann)
