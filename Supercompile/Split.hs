@@ -74,7 +74,7 @@ split :: MonadStatics m
       => ((Deeds, State) -> m (Deeds, Out FVedTerm))
       -> (Deeds, State)
       -> m (Deeds, Out FVedTerm)
-split opt (deeds, s) = uncurry3 (optimiseSplit opt) (splitt (deeds', (Heap h ids1, k, (case snd in_qa of Question x -> [rename (fst in_qa) x]; Answer _ -> [], \_tl -> splitQA ids2 in_qa))))
+split opt (deeds, s) = uncurry3 (optimiseSplit opt) (splitt (deeds', (Heap h ids1, k, (case snd in_qa of Question x -> [rename (fst in_qa) x]; Answer _ -> [], splitQA ids2 in_qa))))
   where (deeds', (Heap h (splitIdSupply -> (ids1, ids2)), k, in_qa)) = simplify (deeds, s)
 
 -- Non-expansive simplification that we can safely do just before splitting to make the splitter a bit simpler
@@ -180,9 +180,6 @@ simplify (deeds, s) = expectHead "simplify" [(deeds, res) | (deeds, s) <- (deeds
 --
 -- Lacking extra language features, our only option is to under-specialise the floats by inlining less
 -- evaluation context.
-data Tailness = Tail | NonTail
-              deriving (Eq)
-
 data Bracketed a = Bracketed {
     rebuild :: [Out FVedTerm] -> Out FVedTerm, -- Rebuild the full output term given outputs to plug into each hole
     extraFvs :: FreeVars,                      -- Maximum free variables added by the residual wrapped around the holes
@@ -320,7 +317,7 @@ optimiseLetBinds opt deeds bracketeds_heap fvs' = traceRender ("optimiseLetBinds
         (xs_resid', bracks_resid) = unzip $ M.toList h_resid
 
 
-splitt :: (Deeds, (Heap, Stack, ([Out Var], Tailness -> Bracketed (Entered, IdSupply -> State))))         -- ^ The thing to split, and the Deeds we have available to do it
+splitt :: (Deeds, (Heap, Stack, ([Out Var], Bracketed (Entered, IdSupply -> State))))         -- ^ The thing to split, and the Deeds we have available to do it
        -> (Deeds,                               -- ^ The Deeds still available after splitting
            M.Map (Out Var) (Bracketed State),   -- ^ The residual "let" bindings
            Bracketed State)                     -- ^ The residual "let" body
@@ -529,18 +526,17 @@ pushStack :: IdSupply
           -> Deeds
           -> [Out Var]
           -> [(Bool, StackFrame)]
-          -> (Tailness -> Bracketed (Entered, IdSupply -> State))
+          -> Bracketed (Entered, IdSupply -> State)
           -> (Deeds,
               M.Map (Out Var) (Bracketed (Entered, IdSupply -> State)),
               Bracketed (Entered, IdSupply -> State))
-pushStack _   deeds _      []                 mk_bracketed_hole = (deeds, M.empty, mk_bracketed_hole Tail)  -- FIXME: don't think anyone is actually using Tailness
-pushStack ids deeds scruts ((may_push, kf):k) mk_bracketed_hole = second3 (`M.union` bracketed_heap') $ pushStack ids2 deeds' scruts' k (\_kf -> bracketed_hole')
+pushStack _   deeds _      []                 bracketed_hole = (deeds, M.empty, bracketed_hole)
+pushStack ids deeds scruts ((may_push, kf):k) bracketed_hole = second3 (`M.union` bracketed_heap') $ pushStack ids2 deeds' scruts' k bracketed_hole'
   where
     (ids1, ids2) = splitIdSupply ids
-    -- Split the continuation eligible for inlining into two parts: that part which can be pushed into
-    -- the case branch, and that part which could have been except that we need to refer to a variable it binds
-    -- in the residualised part of the term we create
-    bracketed_hole = mk_bracketed_hole NonTail
+
+    -- If we have access to hole tail positions, we should try to inline this stack frame into that tail position.
+    -- If we do not have access to the tail positions of the hole, all we can do is rebuild a bit of residual syntax around the hole.
     (deeds', (scruts', bracketed_heap', bracketed_hole'))
       = (guard may_push >> fmap (\(deeds', bracketed_hole') -> (deeds', ([], M.empty, bracketed_hole'))) (pushStackFrame kf deeds bracketed_hole)) `orElse`
         (deeds, splitStackFrame ids1 kf scruts bracketed_hole)
@@ -550,7 +546,6 @@ pushStackFrame :: StackFrame
                -> Bracketed (Entered, IdSupply -> State)
                -> Maybe (Deeds, Bracketed (Entered, IdSupply -> State))
 pushStackFrame kf deeds bracketed_hole = do
-    -- If we have access to hole tail positions, we should try to inline this stack frame into that tail position
     (Just deeds', bracketed_hole') <- modifyTails push bracketed_hole
     return (deeds', bracketed_hole')
   where
@@ -568,12 +563,9 @@ splitStackFrame :: IdSupply
                     M.Map (Out Var) (Bracketed (Entered, IdSupply -> State)),
                     Bracketed (Entered, IdSupply -> State))
 splitStackFrame ids kf scruts bracketed_hole
-   -- If we do not have access to the tail positions of the hole, all we can do is rebuild a bit of residual syntax around the hole
   | Update (annee -> x') <- kf = splitUpdate scruts x' bracketed_hole
   | otherwise = ([], M.empty, case kf of
     Apply (annee -> x2') -> zipBracketeds (\[e] -> e `app` x2') (\[fvs] -> S.insert x2' fvs) (\[fvs] -> fvs) (\_ -> Nothing) [bracketed_hole]
-    -- NB: case scrutinisation is special! Instead of kontinuing directly with k, we are going to inline
-    -- *as much of entire remaining evaluation context as we can* into each case branch. Scary, eh?
     Scrutinise (rn, unzip -> (alt_cons, alt_es)) -> -- (if null k_remaining then id else traceRender ("splitStack: FORCED SPLIT", M.keysSet entered_hole, [x' | Tagged _ (Update x') <- k_remaining])) $
                                                     -- (if not (null k_not_inlined) then traceRender ("splitStack: generalise", k_not_inlined) else id) $
                                                     zipBracketeds (\(e_hole:es_alts) -> case_ e_hole (alt_cons' `zip` es_alts)) (\(fvs_hole:fvs_alts) -> fvs_hole `S.union` S.unions (zipWith (S.\\) fvs_alts alt_bvss)) (\(vs_hole:vs_alts) -> vs_hole `S.union` S.unions (zipWith (S.\\) vs_alts alt_bvss)) (\(_tails_hole:tailss_alts) -> liftM concat (sequence tailss_alts)) (bracketed_hole : bracketed_alts)
