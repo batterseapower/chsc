@@ -318,23 +318,33 @@ optimiseLetBinds opt deeds bracketeds_heap fvs' = traceRender ("optimiseLetBinds
         (xs_resid', bracks_resid) = unzip $ M.toList h_resid
 
 
+newtype StackSplitPoint = StackSplitPoint Int -- NB: must be positive (otherwise bottom is not the identity of join)
+                        deriving (Eq)
+
+instance JoinSemiLattice StackSplitPoint where
+    StackSplitPoint i1 `join` StackSplitPoint i2 = StackSplitPoint (i1 `max` i2)
+
+instance BoundedJoinSemiLattice StackSplitPoint where
+    bottom = StackSplitPoint 0
+
+
 splitt :: (Deeds, (Heap, Stack, ([Out Var], Tailness -> Bracketed (Entered, IdSupply -> State))))         -- ^ The thing to split, and the Deeds we have available to do it
        -> (Deeds,                               -- ^ The Deeds still available after splitting
            M.Map (Out Var) (Bracketed State),   -- ^ The residual "let" bindings
            Bracketed State)                     -- ^ The residual "let" body
 splitt (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply -> (ids_brack, ids))), k, (scruts, bracketed_qa)))
     = -- traceRender ("splitt", residualiseHeap (Heap h ids_brack) (\ids -> residualiseStack ids k (case tagee qa of Question x' -> var x'; Answer in_v -> value $ detagTaggedValue $ renameIn renameTaggedValue ids in_v))) $
-      snd $ split_step resid_xs -- TODO: eliminate redundant recomputation here?
+      snd $ split_step split_fp -- TODO: eliminate redundant recomputation here?
   where
     -- Note that as an optimisation, optimiseSplit will only actually creates those residual bindings if the
     -- corresponding variables are free *after driving*. Of course, we have no way of knowing which bindings
     -- will get this treatment here, so just treat resid_xs as being exactly the set of residualised stuff.
-    resid_xs = lfp (fst . split_step)
+    split_fp = lfp (fst . split_step)
     
     -- Simultaneously computes the next fixed-point step and some artifacts computed along the way,
     -- which happen to correspond to exactly what I need to return from splitt.
-    split_step resid_xs = -- traceRender ("split_step", resid_xs, fvs', resid_xs') $
-                          (resid_xs', (deeds2, bracketeds_heap', bracketed_focus'))
+    split_step (resid_kfs, resid_xs) = -- traceRender ("split_step", resid_xs, fvs', resid_xs') $
+                                       ((resid_kfs', resid_xs'), (deeds2, bracketeds_heap', bracketed_focus'))
       where
         -- 1) Build a candidate splitting for the Stack and QA components
         -- When creating the candidate stack split, we ensure that we create a residual binding
@@ -409,6 +419,7 @@ splitt (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply
         (newly_resid, _not_newly_resid) = -- traceRender ("entered_resid", fvs_paths') $
                                           lfpFrom (S.empty, M.keysSet h_cheap `S.union` resid_xs) entered_resid_step
         resid_xs' = fvs' `S.union` newly_resid
+        resid_kfs' = StackSplitPoint 0
 
 -- Note [Better fixed points of Entered information]
 --
