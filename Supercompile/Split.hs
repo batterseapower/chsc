@@ -615,10 +615,10 @@ splitUpdate deeds scruts x' bracketed_hole = (deeds, x' : scruts, M.singleton x'
 splitValue :: IdSupply -> In AnnedValue -> Bracketed (Entered, IdSupply -> State)
 splitValue ids (rn, Lambda x e) = zipBracketeds (\[e'] -> lambda x' e') (\[fvs'] -> fvs') (\[fvs'] -> S.delete x' fvs') (\_ -> Nothing) [oneBracketed (Many, \ids -> (Heap M.empty ids, [], (rn', e)))]
   where (_ids', rn', x') = renameBinder ids rn x
-splitValue ids in_v                  = noneBracketed (value v') (inFreeVars annedValueFreeVars' in_v)
+splitValue ids in_v             = noneBracketed (value v') (inFreeVars annedValueFreeVars' in_v)
   where v' = detagAnnedValue' $ renameIn renameAnnedValue' ids in_v
 
 splitQA :: IdSupply -> In QA -> Bracketed (Entered, IdSupply -> State)
 splitQA _   (rn, Question x) = noneBracketed (var x') (S.singleton x')
   where x' = rename rn x
-splitQA ids (rn, Answer v) = splitValue ids (rn, v)
+splitQA ids (rn, Answer v)   = splitValue ids (rn, v)
