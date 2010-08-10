@@ -1,4 +1,4 @@
-{-# LANGUAGE ViewPatterns, TupleSections, DeriveFunctor, DeriveFoldable, DeriveTraversable, MultiParamTypeClasses, FlexibleInstances #-}
+{-# LANGUAGE PatternGuards, ViewPatterns, TupleSections, DeriveFunctor, DeriveFoldable, DeriveTraversable, MultiParamTypeClasses, FlexibleInstances #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 module Supercompile.Split (Statics, MonadStatics(..), split) where
 
@@ -229,10 +229,11 @@ zipBracketeds a b c d bracketeds = Bracketed {
 bracketedFreeVars :: (a -> FreeVars) -> Bracketed a -> FreeVars
 bracketedFreeVars fvs bracketed = extraFvs bracketed `S.union` transfer bracketed (map fvs (fillers bracketed))
 
-modifyTails :: ([a] -> [a]) -> Bracketed a -> Maybe (Bracketed a)
+modifyTails :: ([a] -> (b, [a])) -> Bracketed a -> Maybe (b, Bracketed a)
 modifyTails f bracketed = do
     is <- tails bracketed
-    return $ bracketed { fillers = fillIndexes (is `zip` f (takeIndexes is (fillers bracketed))) (fillers bracketed) }
+    let (b, fillers') = f (takeIndexes is (fillers bracketed))
+    return (b, bracketed { fillers = fillIndexes (is `zip` fillers') (fillers bracketed) })
 
 
 takeIndexes :: [Int] -> [a] -> [a]
@@ -539,26 +540,49 @@ splitStack :: IdSupply
            -> (Deeds,
                M.Map (Out Var) (Bracketed (Entered, IdSupply -> State)),
                Bracketed (Entered, IdSupply -> State))
-splitStack _   _                 deeds _      []     mk_bracketed_hole = (deeds, M.empty, mk_bracketed_hole Tail)
-splitStack ids must_bind_updates deeds scruts (kf:k) mk_bracketed_hole = case kf of
-    Apply (annee -> x2') -> splitStack ids must_bind_updates deeds [] k (\_ -> zipBracketeds (\[e] -> e `app` x2') (\[fvs] -> S.insert x2' fvs) (\[fvs] -> fvs) (\_ -> Nothing) [mk_bracketed_hole NonTail])
+splitStack ids must_bind_updates deeds scruts k mk_bracketed_hole = case k of
+    []     -> (deeds, M.empty, mk_bracketed_hole Tail)
+    (kf:k) -> second3 (`M.union` bracketed_heap') $ splitStack ids2 must_bind_updates deeds' scruts' k (\_kf -> bracketed_hole')
+      where
+        (ids1, ids2) = splitIdSupply ids
+        -- Split the continuation eligible for inlining into two parts: that part which can be pushed into
+        -- the case branch, and that part which could have been except that we need to refer to a variable it binds
+        -- in the residualised part of the term we create
+        (deeds', scruts', bracketed_heap', bracketed_hole')
+          | Update (annee -> x') <- kf, x' `S.member` must_bind_updates = splitUpdate deeds scruts x' (mk_bracketed_hole NonTail)
+          | otherwise                                                   = splitStackFrame ids1 kf deeds scruts (mk_bracketed_hole NonTail)
+
+splitStackFrame :: IdSupply
+                -> StackFrame
+                -> Deeds
+                -> [Out Var]
+                -> Bracketed (Entered, IdSupply -> State)
+                -> (Deeds,
+                    [Out Var],
+                    M.Map (Out Var) (Bracketed (Entered, IdSupply -> State)),
+                    Bracketed (Entered, IdSupply -> State))
+splitStackFrame ids kf deeds scruts bracketed_hole
+   -- If we have access to hole tail positions, we should try to inline this stack frame into that tail position
+  | let  -- Inline parts of the evaluation context into each branch only if we can get that many deeds for duplication
+         inline fillers = case foldM (\deeds tag -> claimDeeds deeds tag (branch_factor - 1)) deeds (stackFrameTags kf) of -- NB: subtract one because one occurrence is already "paid for". It is OK if the result is negative (i.e. branch_factor 0)!
+                 Nothing    -> traceRender ("splitStack: deed claim failure", branch_factor) (Nothing, fillers)
+                 Just deeds -> (Just deeds, map (\(ent, f) -> (ent, second3 (++ [kf]) . f)) fillers)
+           where branch_factor = length fillers
+  , Just (Just deeds', bracketed_hole') <- modifyTails inline bracketed_hole
+  = (deeds', [], M.empty, bracketed_hole')
+   -- If we do not have access to the tail positions of the hole, all we can do is rebuild a bit of residual syntax around the hole
+  | otherwise = case kf of
+    Apply (annee -> x2') -> (deeds, [], M.empty, zipBracketeds (\[e] -> e `app` x2') (\[fvs] -> S.insert x2' fvs) (\[fvs] -> fvs) (\_ -> Nothing) [bracketed_hole])
     -- NB: case scrutinisation is special! Instead of kontinuing directly with k, we are going to inline
     -- *as much of entire remaining evaluation context as we can* into each case branch. Scary, eh?
     Scrutinise (rn, unzip -> (alt_cons, alt_es)) -> -- (if null k_remaining then id else traceRender ("splitStack: FORCED SPLIT", M.keysSet entered_hole, [x' | Tagged _ (Update x') <- k_remaining])) $
-                                                    (if not (null k_not_inlined) then traceRender ("splitStack: generalise", k_not_inlined) else id) $
-                                                    splitStack ids' must_bind_updates deeds' [] (k_not_inlined ++ k_remaining) (\tl -> zipBracketeds (\(e_hole:es_alts) -> case_ e_hole (alt_cons' `zip` es_alts)) (\(fvs_hole:fvs_alts) -> fvs_hole `S.union` S.unions (zipWith (S.\\) fvs_alts alt_bvss)) (\(vs_hole:vs_alts) -> vs_hole `S.union` S.unions (zipWith (S.\\) vs_alts alt_bvss)) (\(_tails_hole:tailss_alts) -> guard (tl == Tail) >> liftM concat (sequence tailss_alts)) (mk_bracketed_hole NonTail : bracketed_alts))
+                                                    -- (if not (null k_not_inlined) then traceRender ("splitStack: generalise", k_not_inlined) else id) $
+                                                    (deeds, [], M.empty, zipBracketeds (\(e_hole:es_alts) -> case_ e_hole (alt_cons' `zip` es_alts)) (\(fvs_hole:fvs_alts) -> fvs_hole `S.union` S.unions (zipWith (S.\\) fvs_alts alt_bvss)) (\(vs_hole:vs_alts) -> vs_hole `S.union` S.unions (zipWith (S.\\) vs_alts alt_bvss)) (\(_tails_hole:tailss_alts) -> liftM concat (sequence tailss_alts)) (bracketed_hole : bracketed_alts))
       where -- 0) Manufacture context identifier
             (ids', state_ids) = splitIdSupply ids
             ctxt_id = idFromSupply state_ids
             
-            -- 1) Split the continuation eligible for inlining into two parts: that part which can be pushed into
-            -- the case branch, and that part which could have been except that we need to refer to a variable it binds
-            -- in the residualised part of the term we create
-            (k_inlineable_candidates, k_remaining) = span (`does_not_bind_any_of` must_bind_updates) k
-            does_not_bind_any_of (Update x') fvs = annee x' `S.notMember` fvs
-            does_not_bind_any_of _ _ = True
-        
-            -- 2) Construct the floats for each case alternative by pushing in that continuation
+            -- 1) Construct the floats for each case alternative
             (_alt_ids', alt_rns, alt_cons') = unzip3 $ map (renameAltCon ids' rn) alt_cons
             -- Bind something to the case scrutinee (if possible). This means that:
             --  let y = (\z -> case z of C -> ...) unk
@@ -568,16 +592,8 @@ splitStack ids must_bind_updates deeds scruts (kf:k) mk_bracketed_hole = case kf
             alt_in_es = alt_rns `zip` alt_es
             alt_hs = zipWith3 (\alt_rn alt_con alt_tg -> M.fromList $ do { Just scrut_v <- [altConToValue alt_con]; scrut <- scruts; return (scrut, (alt_rn, annedTerm alt_tg (Value scrut_v))) }) alt_rns alt_cons (map annedTag alt_es)
             alt_bvss = map (\alt_con' -> fst $ altConOpenFreeVars alt_con' (S.empty, S.empty)) alt_cons'
-            (deeds', k_not_inlined, bracketed_alts) = third3 (map oneBracketed) $ go deeds k_inlineable_candidates (zipWith (\alt_h alt_in_e -> (Once ctxt_id, \ids -> (Heap alt_h ids, [], alt_in_e))) alt_hs alt_in_es)
-              where
-                branch_factor = length alt_cons
-                
-                -- Inline parts of the evaluation context into each branch only if we can get that many deeds for duplication
-                go deeds []     states = (deeds, [], states)
-                go deeds (kf:k) states = case foldM (\deeds tag -> claimDeeds deeds tag (branch_factor - 1)) deeds (stackFrameTags kf) of -- NB: subtract one because one occurrence is already "paid for". It is OK if the result is negative (i.e. branch_factor 0)!
-                    Nothing    -> traceRender ("splitStack: deed claim failure", length k) (deeds, kf:k, states)
-                    Just deeds -> go deeds k (map (\(ent, f) -> (ent, second3 (++ [kf]) . f)) states)
-    PrimApply pop in_vs in_es -> splitStack ids' must_bind_updates deeds [] k (\_tl -> zipBracketeds (primOp pop) S.unions S.unions (\_ -> Nothing) (bracketed_vs ++ mk_bracketed_hole NonTail : bracketed_es))
+            bracketed_alts = zipWith (\alt_h alt_in_e -> oneBracketed (Once ctxt_id, \ids -> (Heap alt_h ids, [], alt_in_e))) alt_hs alt_in_es
+    PrimApply pop in_vs in_es -> (deeds, [], M.empty, zipBracketeds (primOp pop) S.unions S.unions (\_ -> Nothing) (bracketed_vs ++ bracketed_hole : bracketed_es))
       where -- 0) Manufacture context identifier
             (ids', state_idss) = accumL splitIdSupply ids (length in_es)
             ctxt_ids = map idFromSupply state_idss
@@ -585,12 +601,16 @@ splitStack ids must_bind_updates deeds scruts (kf:k) mk_bracketed_hole = case kf
             -- 1) Split every value and expression remaining apart
             bracketed_vs = map (splitValue ids' . fmap annee) in_vs
             bracketed_es  = zipWith (\ctxt_id in_e -> oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], in_e))) ctxt_ids in_es
-    Update (annee -> x') -> second3 (M.insert x' (mk_bracketed_hole NonTail)) $ splitStack ids must_bind_updates deeds (x' : scruts) k (\_tl -> noneBracketed (var x') (S.singleton x'))
+    Update (annee -> x') -> splitUpdate deeds scruts x' bracketed_hole
   where
     altConToValue :: AltCon -> Maybe (ValueF ann)
     altConToValue (DataAlt dc xs) = Just $ Data dc xs
     altConToValue (LiteralAlt l)  = Just $ Literal l
     altConToValue (DefaultAlt _)  = Nothing
+
+splitUpdate :: Deeds -> [Out Var] -> Out Var -> Bracketed (Entered, IdSupply -> State)
+            -> (Deeds, [Out Var], M.Map (Out Var) (Bracketed (Entered, IdSupply -> State)), Bracketed (Entered, IdSupply -> State))
+splitUpdate deeds scruts x' bracketed_hole = (deeds, x' : scruts, M.singleton x' bracketed_hole, noneBracketed (var x') (S.singleton x'))
 
 splitValue :: IdSupply -> In AnnedValue -> Bracketed (Entered, IdSupply -> State)
 splitValue ids (rn, Lambda x e) = zipBracketeds (\[e'] -> lambda x' e') (\[fvs'] -> fvs') (\[fvs'] -> S.delete x' fvs') (\_ -> Nothing) [oneBracketed (Many, \ids -> (Heap M.empty ids, [], (rn', e)))]
