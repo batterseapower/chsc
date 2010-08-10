@@ -73,7 +73,8 @@ split :: MonadStatics m
       => ((Deeds, State) -> m (Deeds, Out FVedTerm))
       -> (Deeds, State)
       -> m (Deeds, Out FVedTerm)
-split opt (deeds, s) = uncurry3 (optimiseSplit opt) (splitt (simplify (deeds, s)))
+split opt (deeds, s) = uncurry3 (optimiseSplit opt) (splitt (deeds', (Heap h ids1, k, (case snd in_qa of Question x -> [rename (fst in_qa) x]; Answer _ -> [], \_tl -> splitQA ids2 in_qa))))
+  where (deeds', (Heap h (splitIdSupply -> (ids1, ids2)), k, in_qa)) = simplify (deeds, s)
 
 -- Non-expansive simplification that we can safely do just before splitting to make the splitter a bit simpler
 data QA = Question Var
@@ -317,11 +318,11 @@ optimiseLetBinds opt deeds bracketeds_heap fvs' = traceRender ("optimiseLetBinds
         (xs_resid', bracks_resid) = unzip $ M.toList h_resid
 
 
-splitt :: (Deeds, (Heap, Stack, In QA))         -- ^ The thing to split, and the Deeds we have available to do it
+splitt :: (Deeds, (Heap, Stack, ([Out Var], Tailness -> Bracketed (Entered, IdSupply -> State))))         -- ^ The thing to split, and the Deeds we have available to do it
        -> (Deeds,                               -- ^ The Deeds still available after splitting
            M.Map (Out Var) (Bracketed State),   -- ^ The residual "let" bindings
            Bracketed State)                     -- ^ The residual "let" body
-splitt (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply -> (ids_brack, splitIdSupply -> (ids1, ids2)))), k, in_qa))
+splitt (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply -> (ids_brack, ids))), k, (scruts, bracketed_qa)))
     = -- traceRender ("splitt", residualiseHeap (Heap h ids_brack) (\ids -> residualiseStack ids k (case tagee qa of Question x' -> var x'; Answer in_v -> value $ detagTaggedValue $ renameIn renameTaggedValue ids in_v))) $
       snd $ split_step resid_xs -- TODO: eliminate redundant recomputation here?
   where
@@ -345,7 +346,7 @@ splitt (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply
         fill_ids = fmap (\(ent, f) -> (ent, f ids_brack))
         (deeds0_unreleased, bracketeds_updated, bracketed_focus)
           = (\(a, b, c) -> (a, M.map fill_ids b, fill_ids c)) $
-            splitStack ids2 resid_xs deeds (case snd in_qa of Question x -> [rename (fst in_qa) x]; Answer _ -> []) k (\_tl -> splitQA ids1 in_qa)
+            splitStack ids resid_xs deeds scruts k bracketed_qa
         
         -- 2) Build a splitting for those elements of the heap we propose to residualise in resid_xs
         (h_residualised, h_not_residualised) = M.partitionWithKey (\x' _ -> x' `S.member` resid_xs) h
