@@ -40,23 +40,26 @@ foo7 x = a + b
     a = foo8 x'
     b = foo8 x'
 --
-foo8 x = a + b
-  where
-    x' = x + 1
-    a = foo9 x'
-    b = foo9 x'
---
-foo9 x = a + b
-  where
-    x' = x + 1
-    a = foo10 x'
-    b = foo10 x'
---
-foo10 x = x
+foo8 x = x -- 896
+  -- I got bored of waiting for the longer version to supercompile, hence this truncated version
+
+-- foo8 x = a + b
+--   where
+--     x' = x + 1
+--     a = foo9 x'
+--     b = foo9 x'
+-- --
+-- foo9 x = a + b
+--   where
+--     x' = x + 1
+--     a = foo10 x'
+--     b = foo10 x'
+-- --
+-- foo10 x = x -- 4608
 
 
 root = foo1
 
 tests = [
-    (root 0, 4608)
+    (root 0, 896)
   ]
