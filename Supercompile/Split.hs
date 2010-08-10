@@ -103,7 +103,17 @@ split admissable opt (deeds, s) = optimiseSplit opt deeds' bracketeds_heap brack
 seekAdmissable :: (State -> Bool)
                -> State
                -> Maybe (Heap, Stack, (Entered, IdSupply -> State))
-seekAdmissable _ _ = Nothing -- FIXME
+seekAdmissable admissable (Heap h ids, k, e) = seekStack k [] `mplus` seekHeap S.empty
+  where
+    seekStack k k_tail = do
+        (k, kf) <- unsnoc k
+        if admissable (Heap h ids, k, e)
+         then return (Heap h ids, kf : k_tail, \ids -> (Heap M.empty ids, k, e))
+         else seekStack k (kf : k_tail)
+
+    seekHeap gen_xs = if admissable (Heap (h `exclude` gen_xs) ids) k e
+                      then return (gen_xs, (Heap h ids, [], \ids -> (Heap M.empty ids, k, e)))
+                      else seekHeap (S.insert ??? gen_xs)
 
 -- Non-expansive simplification that we can safely do just before splitting to make the splitter a bit simpler
 data QA = Question Var

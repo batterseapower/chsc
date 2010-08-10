@@ -416,6 +416,13 @@ uncons :: [a] -> Maybe (a, [a])
 uncons []     = Nothing
 uncons (x:xs) = Just (x, xs)
 
+unsnoc :: [a] -> Maybe ([a], a)
+unsnoc [] = Nothing
+unsnoc (x:xs) = Just (go [] x xs)
+  where
+    go ys x []     = (reverse ys, x)
+    go ys x (z:zs) = go (x:ys) z zs
+
 fixpoint :: Eq a => (a -> a) -> a -> a
 fixpoint f x
    | x' == x   = x
