@@ -25,6 +25,7 @@ import qualified Data.Foldable as Foldable
 import qualified Data.Traversable as Traversable
 import qualified Data.Map as M
 import qualified Data.Set as S
+import qualified Data.IntSet as IS
 
 
 type Statics = FreeVars
@@ -319,16 +320,6 @@ optimiseLetBinds opt deeds bracketeds_heap fvs' = traceRender ("optimiseLetBinds
         (xs_resid', bracks_resid) = unzip $ M.toList h_resid
 
 
-newtype StackSplitPoint = StackSplitPoint Int -- NB: must be positive (otherwise bottom is not the identity of join)
-                        deriving (Eq)
-
-instance JoinSemiLattice StackSplitPoint where
-    StackSplitPoint i1 `join` StackSplitPoint i2 = StackSplitPoint (i1 `max` i2)
-
-instance BoundedJoinSemiLattice StackSplitPoint where
-    bottom = StackSplitPoint 0
-
-
 splitt :: (Deeds, (Heap, Stack, ([Out Var], Tailness -> Bracketed (Entered, IdSupply -> State))))         -- ^ The thing to split, and the Deeds we have available to do it
        -> (Deeds,                               -- ^ The Deeds still available after splitting
            M.Map (Out Var) (Bracketed State),   -- ^ The residual "let" bindings
@@ -347,6 +338,9 @@ splitt (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply
     split_step (resid_kfs, resid_xs) = -- traceRender ("split_step", resid_xs, fvs', resid_xs') $
                                        ((resid_kfs', resid_xs'), (deeds2, bracketeds_heap', bracketed_focus'))
       where
+        -- 0) Name the components of the stack (each stack frame is given its own Int)
+        named_k = [0..] `zip` k
+        
         -- 1) Build a candidate splitting for the Stack and QA components
         -- When creating the candidate stack split, we ensure that we create a residual binding
         -- for any variable in the resid_xs set, as we're not going to inline it to continue.
@@ -357,7 +351,7 @@ splitt (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply
         fill_ids = fmap (\(ent, f) -> (ent, f ids_brack))
         (deeds0_unreleased, bracketeds_updated, bracketed_focus)
           = (\(a, b, c) -> (a, M.map fill_ids b, fill_ids c)) $
-            pushStack ids resid_xs deeds scruts k bracketed_qa
+            pushStack ids deeds scruts [(i `IS.notMember` resid_kfs, kf) | (i, kf) <- named_k] bracketed_qa
         
         -- 2) Build a splitting for those elements of the heap we propose to residualise in resid_xs
         (h_residualised, h_not_residualised) = M.partitionWithKey (\x' _ -> x' `S.member` resid_xs) h
@@ -420,7 +414,7 @@ splitt (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply
         (newly_resid, _not_newly_resid) = -- traceRender ("entered_resid", fvs_paths') $
                                           lfpFrom (S.empty, M.keysSet h_cheap `S.union` resid_xs) entered_resid_step
         resid_xs' = fvs' `S.union` newly_resid
-        resid_kfs' = StackSplitPoint 0
+        resid_kfs' = IS.fromList [i | (i, kf) <- named_k, Update (annee -> x') <- [kf], x' `S.member` resid_xs']
 
 -- Note [Better fixed points of Entered information]
 --
@@ -532,28 +526,24 @@ cheapifyHeap (deeds, Heap h (splitIdSupply -> (ids, ids'))) = (deeds', Heap (M.f
 
 
 pushStack :: IdSupply
-          -> S.Set Var -- ^ Those variables that must be bound now, and cannot have their update frames pushed down
           -> Deeds
           -> [Out Var]
-          -> Stack
+          -> [(Bool, StackFrame)]
           -> (Tailness -> Bracketed (Entered, IdSupply -> State))
           -> (Deeds,
               M.Map (Out Var) (Bracketed (Entered, IdSupply -> State)),
               Bracketed (Entered, IdSupply -> State))
-pushStack ids must_bind_updates deeds scruts k mk_bracketed_hole = case k of
-    []     -> (deeds, M.empty, mk_bracketed_hole Tail)
-    (kf:k) -> second3 (`M.union` bracketed_heap') $ pushStack ids2 must_bind_updates deeds' scruts' k (\_kf -> bracketed_hole')
-      where
-        (ids1, ids2) = splitIdSupply ids
-        -- Split the continuation eligible for inlining into two parts: that part which can be pushed into
-        -- the case branch, and that part which could have been except that we need to refer to a variable it binds
-        -- in the residualised part of the term we create
-        bracketed_hole = mk_bracketed_hole NonTail
-        guardOK | Update (annee -> x') <- kf = guard (x' `S.notMember` must_bind_updates)
-                | otherwise                  = return ()
-        (deeds', (scruts', bracketed_heap', bracketed_hole'))
-          = (guardOK >> fmap (\(deeds', bracketed_hole') -> (deeds', ([], M.empty, bracketed_hole'))) (pushStackFrame kf deeds bracketed_hole)) `orElse`
-            (deeds, splitStackFrame ids1 kf scruts bracketed_hole)
+pushStack _   deeds _      []                 mk_bracketed_hole = (deeds, M.empty, mk_bracketed_hole Tail)  -- FIXME: don't think anyone is actually using Tailness
+pushStack ids deeds scruts ((may_push, kf):k) mk_bracketed_hole = second3 (`M.union` bracketed_heap') $ pushStack ids2 deeds' scruts' k (\_kf -> bracketed_hole')
+  where
+    (ids1, ids2) = splitIdSupply ids
+    -- Split the continuation eligible for inlining into two parts: that part which can be pushed into
+    -- the case branch, and that part which could have been except that we need to refer to a variable it binds
+    -- in the residualised part of the term we create
+    bracketed_hole = mk_bracketed_hole NonTail
+    (deeds', (scruts', bracketed_heap', bracketed_hole'))
+      = (guard may_push >> fmap (\(deeds', bracketed_hole') -> (deeds', ([], M.empty, bracketed_hole'))) (pushStackFrame kf deeds bracketed_hole)) `orElse`
+        (deeds, splitStackFrame ids1 kf scruts bracketed_hole)
 
 pushStackFrame :: StackFrame
                -> Deeds
