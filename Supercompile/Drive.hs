@@ -260,8 +260,9 @@ sc' hist (deeds, state) = (check . Just . RB) `catchScpM` \hist' -> stop (hist `
     check mb_rb = case terminate hist (stateTagBag state) of
                  Continue mk_hist -> continue (mk_hist mb_rb)
                  Stop mb_rb       -> maybe (stop hist) (`rollbackWith` hist) $ guard sC_ROLLBACK >> mb_rb
-    stop     hist = trace "sc-stop" $ split (sc hist)         (deeds, state)
-    continue hist =                   split (sc hist) (reduce (deeds, state))
+    stop     hist = trace "sc-stop" $ split (admissable hist) (sc hist)         (deeds, state)
+    continue hist =                   split (const False)     (sc hist) (reduce (deeds, state))
+    admissable hist state = isContinue (terminate hist (stateTagBag state))
 
 memo :: ((Deeds, State) -> ScpM (Deeds, Out FVedTerm))
      ->  (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
