@@ -261,7 +261,7 @@ sc' hist (deeds, state) = (check . Just . RB) `catchScpM` \hist' -> stop (hist `
                  Continue mk_hist -> continue (mk_hist mb_rb)
                  Stop mb_rb       -> maybe (stop hist) (`rollbackWith` hist) $ guard sC_ROLLBACK >> mb_rb
     stop     hist = trace "sc-stop" $ split (admissable hist) (sc hist)         (deeds, state)
-    continue hist =                   split (const False)     (sc hist) (reduce (deeds, state))
+    continue hist =                   split (const False)     (sc hist) (reduce (deeds, state)) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
     admissable hist state = isContinue (terminate hist (stateTagBag state))
 
 memo :: ((Deeds, State) -> ScpM (Deeds, Out FVedTerm))
