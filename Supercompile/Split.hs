@@ -228,6 +228,20 @@ zipBracketeds a b c d bracketeds = Bracketed {
 bracketedFreeVars :: (a -> FreeVars) -> Bracketed a -> FreeVars
 bracketedFreeVars fvs bracketed = extraFvs bracketed `S.union` transfer bracketed (map fvs (fillers bracketed))
 
+modifyTails :: ([a] -> [a]) -> Bracketed a -> Maybe (Bracketed a)
+modifyTails f bracketed = do
+    is <- tails bracketed
+    return $ bracketed { fillers = fillIndexes (is `zip` f (takeIndexes is (fillers bracketed))) (fillers bracketed) }
+
+
+takeIndexes :: [Int] -> [a] -> [a]
+takeIndexes is xs = map (xs !!) is
+
+fillIndexes :: [(Int, a)] -> [a] -> [a]
+fillIndexes []             xs = xs
+fillIndexes ((i, x'):ixs') xs = fillIndexes ixs' (xs_l ++ x' : xs_r)
+  where (xs_l, _:xs_r) = splitAt i xs
+
 
 optimiseMany :: Monad m
              => ((Deeds, a) -> m (Deeds, Out FVedTerm))
