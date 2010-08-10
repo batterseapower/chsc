@@ -73,19 +73,23 @@ split :: MonadStatics m
       => ((Deeds, State) -> m (Deeds, Out FVedTerm))
       -> (Deeds, State)
       -> m (Deeds, Out FVedTerm)
-split opt (deeds, s) = uncurry3 (optimiseSplit opt) (splitt bottom (deeds', (Heap h ids1, [0..] `zip` k, (case snd in_qa of Question x -> [rename (fst in_qa) x]; Answer _ -> [], splitQA ids2 in_qa))))
-  where (deeds', (Heap h (splitIdSupply -> (ids1, ids2)), k, in_qa)) = simplify (deeds, s)
+split opt (deeds, s) = uncurry3 (optimiseSplit opt) (splitt bottom (deeds', (heap, [0..] `zip` k, res)))
+  where (deeds', (heap, k, res)) = simplify (deeds, s)
 
 -- Non-expansive simplification that we can safely do just before splitting to make the splitter a bit simpler
 data QA = Question Var
         | Answer   (ValueF Anned)
 
-simplify :: (Deeds, State) -> (Deeds, (Heap, Stack, In QA))
+simplify :: (Deeds, State) -> (Deeds, (Heap, Stack, ([Out Var], Bracketed (Entered, IdSupply -> State))))
 simplify (deeds, s) = expectHead "simplify" [(deeds, res) | (deeds, s) <- (deeds, s) : unfoldr (\(deeds, s) -> fmap (\(_, a, b) -> ((a, b), (a, b))) (step (const id) S.empty (emptyLosers, deeds, s))) (deeds, s), Just res <- [stop s]]
   where
-    stop (h, k, (rn, annee -> Var x))   = Just (h, k, (rn, Question x))
-    stop (h, k, (rn, annee -> Value v)) = Just (h, k, (rn, Answer v))
-    stop _ = Nothing
+    toQA (Var x)   = Just (Question x)
+    toQA (Value v) = Just (Answer v)
+    toQA _ = Nothing
+    
+    stop (Heap h (splitIdSupply -> (ids1, ids2)), k, (rn, annee -> e)) = do
+        qa <- toQA e
+        return (Heap h ids1, k, (case qa of Question x -> [rename rn x]; Answer _ -> [], splitQA ids2 (rn, qa)))
 
 -- Discard dead bindings:
 --  let x = ...
