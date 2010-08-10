@@ -548,9 +548,28 @@ splitStack ids must_bind_updates deeds scruts k mk_bracketed_hole = case k of
         -- Split the continuation eligible for inlining into two parts: that part which can be pushed into
         -- the case branch, and that part which could have been except that we need to refer to a variable it binds
         -- in the residualised part of the term we create
+        bracketed_hole = mk_bracketed_hole NonTail
+        guardOK | Update (annee -> x') <- kf = guard (x' `S.notMember` must_bind_updates)
+                | otherwise                  = return ()
         (deeds', scruts', bracketed_heap', bracketed_hole')
-          | Update (annee -> x') <- kf, x' `S.member` must_bind_updates = splitUpdate deeds scruts x' (mk_bracketed_hole NonTail)
-          | otherwise                                                   = splitStackFrame ids1 kf deeds scruts (mk_bracketed_hole NonTail)
+          = (guardOK >> fmap (\(deeds', bracketed_hole') -> (deeds', [], M.empty, bracketed_hole')) (pushStackFrame kf deeds bracketed_hole)) `orElse`
+            splitStackFrame ids1 kf deeds scruts bracketed_hole
+
+
+pushStackFrame :: StackFrame
+               -> Deeds
+               -> Bracketed (Entered, IdSupply -> State)
+               -> Maybe (Deeds, Bracketed (Entered, IdSupply -> State))
+pushStackFrame kf deeds bracketed_hole = do
+    -- If we have access to hole tail positions, we should try to inline this stack frame into that tail position
+    (Just deeds', bracketed_hole') <- modifyTails push bracketed_hole
+    return (deeds', bracketed_hole')
+  where
+    -- Inline parts of the evaluation context into each branch only if we can get that many deeds for duplication
+    push fillers = case foldM (\deeds tag -> claimDeeds deeds tag (branch_factor - 1)) deeds (stackFrameTags kf) of -- NB: subtract one because one occurrence is already "paid for". It is OK if the result is negative (i.e. branch_factor 0)!
+            Nothing    -> traceRender ("splitStack: deed claim failure", branch_factor) (Nothing, fillers)
+            Just deeds -> (Just deeds, map (\(ent, f) -> (ent, second3 (++ [kf]) . f)) fillers)
+      where branch_factor = length fillers
 
 splitStackFrame :: IdSupply
                 -> StackFrame
@@ -562,14 +581,6 @@ splitStackFrame :: IdSupply
                     M.Map (Out Var) (Bracketed (Entered, IdSupply -> State)),
                     Bracketed (Entered, IdSupply -> State))
 splitStackFrame ids kf deeds scruts bracketed_hole
-   -- If we have access to hole tail positions, we should try to inline this stack frame into that tail position
-  | let  -- Inline parts of the evaluation context into each branch only if we can get that many deeds for duplication
-         inline fillers = case foldM (\deeds tag -> claimDeeds deeds tag (branch_factor - 1)) deeds (stackFrameTags kf) of -- NB: subtract one because one occurrence is already "paid for". It is OK if the result is negative (i.e. branch_factor 0)!
-                 Nothing    -> traceRender ("splitStack: deed claim failure", branch_factor) (Nothing, fillers)
-                 Just deeds -> (Just deeds, map (\(ent, f) -> (ent, second3 (++ [kf]) . f)) fillers)
-           where branch_factor = length fillers
-  , Just (Just deeds', bracketed_hole') <- modifyTails inline bracketed_hole
-  = (deeds', [], M.empty, bracketed_hole')
    -- If we do not have access to the tail positions of the hole, all we can do is rebuild a bit of residual syntax around the hole
   | Update (annee -> x') <- kf = splitUpdate deeds scruts x' bracketed_hole
   | otherwise = (deeds, [], M.empty, case kf of

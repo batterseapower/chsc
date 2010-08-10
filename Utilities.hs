@@ -388,6 +388,10 @@ dropBy :: [b] -> [a] -> [a]
 dropBy bs = snd . splitBy bs
 
 
+orElse :: Maybe a -> a -> a
+orElse = flip fromMaybe
+
+
 takeFirst :: (a -> Bool) -> [a] -> (Maybe a, [a])
 takeFirst p = takeFirstJust (\x -> guard (p x) >> return x)
 
