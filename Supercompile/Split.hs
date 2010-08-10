@@ -186,7 +186,7 @@ data Bracketed a = Bracketed {
     extraFvs :: FreeVars,                      -- Maximum free variables added by the residual wrapped around the holes
     transfer :: [FreeVars] -> FreeVars,        -- Strips any variables bound by the residual out of the hole FVs
     fillers :: [a],                            -- Hole-fillers themselves. Usually State
-    tails :: Maybe [Int]
+    tails :: Maybe [Int]                       -- The indexes of all holes in tail position. If this is not Nothing, this is an *exhaustive* list of possible tail positions.
   } deriving (Functor, Foldable.Foldable, Traversable.Traversable)
 
 instance Accumulatable Bracketed where
