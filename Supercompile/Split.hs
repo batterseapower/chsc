@@ -38,7 +38,7 @@ class Monad m => MonadStatics m where
 --
 
 data Entered = Once (Maybe Id) -- ^ The Id is a context identifier: if a binding is Entered twice from the same context it's really a single Entrance. Nothing signifies the residual context (i.e. there is no associated float)
-             | Many Bool       -- ^ The Bool records whether any of those Many occurrences are in the residual
+             | Many            -- ^ The Bool records whether any of those Many occurrences are in the residual
              deriving (Eq, Show)
 
 instance Pretty Entered where
@@ -51,15 +51,11 @@ isOnce :: Entered -> Bool
 isOnce (Once _) = True
 isOnce _ = False
 
-enteredInResidual :: Entered -> Bool
-enteredInResidual (Once mb_id) = isNothing mb_id
-enteredInResidual (Many resid) = resid
-
 plusEntered :: Entered -> Entered -> Entered
 plusEntered (Once mb_id1) (Once mb_id2)
   | mb_id1 == mb_id2 = Once mb_id1
-  | otherwise        = {- traceRender ("Once promotion", mb_id1, mb_id2) $ -} Many (isNothing mb_id1 || isNothing mb_id2)
-plusEntered e1 e2 = Many (enteredInResidual e1 || enteredInResidual e2)
+  | otherwise        = {- traceRender ("Once promotion", mb_id1, mb_id2) $ -} Many
+plusEntered e1 e2 = Many
 
 
 type EnteredEnv = M.Map (Out Var) Entered
@@ -565,7 +561,7 @@ splitStack ids must_bind_updates deeds scruts (kf:k) bracketed_hole = case kf of
     altConToValue (DefaultAlt _)  = Nothing
 
 splitValue :: IdSupply -> In AnnedValue -> Bracketed (Entered, IdSupply -> State)
-splitValue ids (rn, Lambda x e) = zipBracketeds (\[e'] -> lambda x' e') (\[fvs'] -> fvs') (\[fvs'] -> S.delete x' fvs') [oneBracketed (Many False, \ids -> (Heap M.empty ids, [], (rn', e)))]
+splitValue ids (rn, Lambda x e) = zipBracketeds (\[e'] -> lambda x' e') (\[fvs'] -> fvs') (\[fvs'] -> S.delete x' fvs') [oneBracketed (Many, \ids -> (Heap M.empty ids, [], (rn', e)))]
   where (_ids', rn', x') = renameBinder ids rn x
 splitValue ids in_v                  = noneBracketed (value v') (inFreeVars annedValueFreeVars' in_v)
   where v' = detagAnnedValue' $ renameIn renameAnnedValue' ids in_v
