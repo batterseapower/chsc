@@ -87,26 +87,56 @@ data QA = Question Var
 simplify :: (State -> Bool)
          -> (Deeds, State)
          -> (Deeds, M.Map (Out Var) (Bracketed State), Bracketed State)
-simplify admissable = go
+simplify admissable (deeds, state) = (deeds', fmap (fmap snd) bracketed_heap, fmap snd bracketed_focus)
   where
+    (deeds', bracketed_heap, bracketed_focus) = go (deeds, state)
+    
     go (deeds, s@(Heap h ids, k, (rn, e)))
          -- We can't step past a variable or value, because if we do so I can't prove that simplify terminates and the sc recursion has finite depth
          -- If the termination criteria has not hit, we
-        | Just qa <- toQA (annee e),           (ids1, ids2)    <- splitIdSupply ids = splitt bottom     (deeds, (Heap h ids1, named_k, (case qa of Question x -> [rename rn x]; Answer _ -> [], splitQA ids2 (rn, qa))))
+        | Just qa <- toQA (annee e)
+        , (ids1, ids2) <- splitIdSupply ids
+        = splitt bottom (deeds, (Heap h ids1, named_k, (case qa of Question x -> [rename rn x]; Answer _ -> [], splitQA ids2 (rn, qa))))
          -- If we can find some fraction of the stack or heap to drop that looks like it will be admissable, just residualise those parts and continue
-        | Just split_from <- seekAdmissable s, (ids', ctxt_id) <- stepIdSupply ids  = splitt split_from (deeds, (Heap h ids', named_k, ([],                                                     oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], (rn, e))))))
+        | gENERALISATION
+        , (ids', ctxt_id) <- stepIdSupply ids
+        , Just res <- seekAdmissable ctxt_id named_k (\split_from -> splitt split_from (deeds, (Heap h ids', named_k, ([], oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], (rn, e)))))))
+        = res
          -- Otherwise, keep dropping stuff until one of the two conditions above holds
-        | Just (_, deeds', s') <- step (const id) S.empty (emptyLosers, deeds, s)   = go (deeds', s')
+        | Just (_, deeds', s') <- step (const id) S.empty (emptyLosers, deeds, s)
+        = go (deeds', s')
          -- Even if we can never find some admissable fragment of the input, we *must* eventually reach a variable or value
-        | otherwise                                                                 = error "simplify: could not stop or step!"
+        | otherwise
+        = error "simplify: could not stop or step!"
       where named_k = [0..] `zip` k
     
     toQA (Var x)   = Just (Question x)
     toQA (Value v) = Just (Answer v)
     toQA _ = Nothing
     
-    seekAdmissable :: State -> Maybe (IS.IntSet, S.Set (Out Var))
-    seekAdmissable s = Nothing
+    seekAdmissable :: Id
+                   -> NamedStack
+                   -> ((IS.IntSet, S.Set (Out Var)) ->
+                       (Deeds, M.Map (Out Var) (Bracketed (Entered, State)), Bracketed (Entered, State)))
+                   -> Maybe (Deeds, M.Map (Out Var) (Bracketed (Entered, State)), Bracketed (Entered, State))
+    seekAdmissable ctxt_id named_k f = seekStack ctxt_id named_k f `mplus` seekHeap ctxt_id named_k f
+    
+    -- Generalisation heuristic: try residualising the stack at varying points (beginning from the first frame)
+    -- to see if discarding the tail makes the "main" filler admissable
+    seekStack ctxt_id named_k f
+      = listToMaybe [ traceRender ("seekStack: SUCCESS", i) $ res
+                    | (i, _) <- named_k
+                    , let res@(_, bracketed_heap, bracketed_focus) = f (IS.singleton i, S.empty)
+                          main_ss = [ s
+                                    | bracketed <- bracketed_focus : M.elems bracketed_heap
+                                    , (Once this_ctxt_id, s) <- fillers bracketed
+                                    , ctxt_id == this_ctxt_id
+                                    ]
+                    , all admissable main_ss
+                    ]
+    
+    -- FIXME: implement
+    seekHeap _ _ _ = Nothing
 
 -- Discard dead bindings:
 --  let x = ...
@@ -341,8 +371,8 @@ type NamedStack = [(Int, StackFrame)]
 splitt :: (IS.IntSet, S.Set (Out Var))
        -> (Deeds, (Heap, NamedStack, ([Out Var], Bracketed (Entered, IdSupply -> State))))         -- ^ The thing to split, and the Deeds we have available to do it
        -> (Deeds,                               -- ^ The Deeds still available after splitting
-           M.Map (Out Var) (Bracketed State),   -- ^ The residual "let" bindings
-           Bracketed State)                     -- ^ The residual "let" body
+           M.Map (Out Var) (Bracketed (Entered, State)),   -- ^ The residual "let" bindings
+           Bracketed (Entered, State))                     -- ^ The residual "let" body
 splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply -> (ids_brack, ids))), named_k, (scruts, bracketed_qa)))
     = -- traceRender ("splitt", residualiseHeap (Heap h ids_brack) (\ids -> residualiseStack ids k (case tagee qa of Question x' -> var x'; Answer in_v -> value $ detagTaggedValue $ renameIn renameTaggedValue ids in_v))) $
       snd $ split_step split_fp -- TODO: eliminate redundant recomputation here?
@@ -399,7 +429,7 @@ splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (sp
         inlineHeapT f deeds b = (deeds', fvs_paths', entered', b')
           where ((deeds', fvs_paths', entered'), b') = mapAccumT (\(deeds, fvs_paths, entered) s -> case f deeds s of (deeds, fvs_paths', entered', s) -> ((deeds, M.unionWith (++) fvs_paths fvs_paths', entered `join` entered'), s)) (deeds, M.empty, bottom) b
 
-        inlineBracketHeap :: Deeds -> Bracketed (Entered, State) -> (Deeds, FreeVarPaths, EnteredEnv, Bracketed State)
+        inlineBracketHeap :: Deeds -> Bracketed (Entered, State) -> (Deeds, FreeVarPaths, EnteredEnv, Bracketed (Entered, State))
         inlineBracketHeap = inlineHeapT (`transitiveInline` h_inlineable)
         
         -- 3c) Actually do the inlining of as much of the heap as possible into the proposed floats
@@ -414,7 +444,7 @@ splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (sp
         --  b) Lastly, we should residualise non-cheap bindings that got Entered more than once in the proposal
         --     to make the splitter more agressive (see Note [Better fixed points of Entered information]), I only
         --     do this for bindings that were actually direct free variables of the original term.
-        fvs' = bracketedFreeVars stateFreeVars bracketed_focus' `S.union` S.unions [bracketedFreeVars stateFreeVars bracketed' | (_, bracketed') <- M.toList bracketeds_heap']
+        fvs' = bracketedFreeVars (stateFreeVars . snd) bracketed_focus' `S.union` S.unions [bracketedFreeVars (stateFreeVars . snd) bracketed' | (_, bracketed') <- M.toList bracketeds_heap']
         entered    = entered_focus `join` entered_heap
         fvs_paths' = M.unionWith (++) fvs_paths_focus' fvs_paths_heap'
         entered_resid_substep x' paths no_change@(newly_resid, not_newly_resid)
@@ -491,10 +521,10 @@ type FreeVarPaths = M.Map (Out Var) [Path]
 -- We are going to use this helper function to inline any eligible inlinings to produce the expressions for driving.
 -- Returns (along with the augmented state) the names of those bindings in the input PureHeap that could have been inlined
 -- but were not due to generalisation.
-transitiveInline :: Deeds -> PureHeap -> (Entered, State) -> (Deeds, FreeVarPaths, EnteredEnv, State)
+transitiveInline :: Deeds -> PureHeap -> (Entered, State) -> (Deeds, FreeVarPaths, EnteredEnv, (Entered, State))
 transitiveInline deeds h_inlineable (ent, (Heap h ids, k, in_e))
     = -- (if not (S.null not_inlined_vs') then traceRender ("transitiveInline: generalise", not_inlined_vs') else id) $
-      (deeds', paths, mkEnteredEnv ent (M.keysSet h' S.\\ M.keysSet h), (Heap h' ids, k, in_e))
+      (deeds', paths, mkEnteredEnv ent (M.keysSet h' S.\\ M.keysSet h), (ent, (Heap h' ids, k, in_e)))
   where
     (deeds', paths, h') = go 0 deeds (h_inlineable `M.union` h) M.empty (setToMap [[]] (stateFreeVars (Heap M.empty ids, k, in_e)))
     
