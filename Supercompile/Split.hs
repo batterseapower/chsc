@@ -69,27 +69,44 @@ mkEnteredEnv = setToMap
 --
 
 
+{-# INLINE split #-}
 split :: MonadStatics m
       => (State -> Bool)
       -> ((Deeds, State) -> m (Deeds, Out FVedTerm))
       -> (Deeds, State)
       -> m (Deeds, Out FVedTerm)
-split admissable opt (deeds, s) = uncurry3 (optimiseSplit opt) (splitt bottom (simplify admissable (deeds, s)))
+split admissable opt (deeds, s) = uncurry3 (optimiseSplit opt) (simplify admissable (deeds, s))
+
 
 -- Non-expansive simplification that we can safely do just before splitting to make the splitter a bit simpler
 data QA = Question Var
         | Answer   (ValueF Anned)
 
-simplify :: (State -> Bool) -> (Deeds, State) -> (Deeds, (Heap, NamedStack, ([Out Var], Bracketed (Entered, IdSupply -> State))))
-simplify admissable (deeds, s) = expectHead "simplify" [(deeds, res) | (deeds, s) <- (deeds, s) : unfoldr (\(deeds, s) -> fmap (\(_, a, b) -> ((a, b), (a, b))) (step (const id) S.empty (emptyLosers, deeds, s))) (deeds, s), Just res <- [stop s]]
+
+{-# INLINE simplify #-}
+simplify :: (State -> Bool)
+         -> (Deeds, State)
+         -> (Deeds, M.Map (Out Var) (Bracketed State), Bracketed State)
+simplify admissable = go
   where
+    go (deeds, s@(Heap h ids, k, (rn, e)))
+         -- We can't step past a variable or value, because if we do so I can't prove that simplify terminates and the sc recursion has finite depth
+         -- If the termination criteria has not hit, we
+        | Just qa <- toQA (annee e),           (ids1, ids2)    <- splitIdSupply ids = splitt bottom     (deeds, (Heap h ids1, named_k, (case qa of Question x -> [rename rn x]; Answer _ -> [], splitQA ids2 (rn, qa))))
+         -- If we can find some fraction of the stack or heap to drop that looks like it will be admissable, just residualise those parts and continue
+        | Just split_from <- seekAdmissable s, (ids', ctxt_id) <- stepIdSupply ids  = splitt split_from (deeds, (Heap h ids', named_k, ([],                                                     oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], (rn, e))))))
+         -- Otherwise, keep dropping stuff until one of the two conditions above holds
+        | Just (_, deeds', s') <- step (const id) S.empty (emptyLosers, deeds, s)   = go (deeds', s')
+         -- Even if we can never find some admissable fragment of the input, we *must* eventually reach a variable or value
+        | otherwise                                                                 = error "simplify: could not stop or step!"
+      where named_k = [0..] `zip` k
+    
     toQA (Var x)   = Just (Question x)
     toQA (Value v) = Just (Answer v)
     toQA _ = Nothing
     
-    stop (Heap h (splitIdSupply -> (ids1, ids2)), k, (rn, annee -> e)) = do
-        qa <- toQA e
-        return (Heap h ids1, [0..] `zip` k, (case qa of Question x -> [rename rn x]; Answer _ -> [], splitQA ids2 (rn, qa)))
+    seekAdmissable :: State -> Maybe (IS.IntSet, S.Set (Out Var))
+    seekAdmissable s = Nothing
 
 -- Discard dead bindings:
 --  let x = ...
