@@ -50,7 +50,7 @@ claimDeed deeds tg = claimDeeds deeds tg 1
 
 -- NB: it is OK if the number of deeds to claim is negative -- that just causes some deeds to be released
 claimDeeds :: Deeds -> Tag -> Int -> Maybe Deeds
-claimDeeds deeds tg want = if gENERALISATION && (unclaimed < want) then Nothing else foldM claimDeed (deeds { unclaimedMap = IM.insert tg (child_tgs, unclaimed - want) (unclaimedMap deeds) }) child_tgs
+claimDeeds deeds tg want = if dEEDS && (unclaimed < want) then Nothing else foldM claimDeed (deeds { unclaimedMap = IM.insert tg (child_tgs, unclaimed - want) (unclaimedMap deeds) }) child_tgs
   where !(child_tgs, unclaimed) = lookupTag tg (unclaimedMap deeds)
 
 releaseDeedDeep :: Deeds -> Tag -> Deeds

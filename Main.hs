@@ -72,6 +72,7 @@ testOne file = do
         -- Save a copy of the supercompiled code somewhere so I can consult it at my leisure
         let output_dir = foldl1 (</>) [ "output"
                                       , if eVALUATE_PRIMOPS then "primops"  else "no-primops"
+                                      , if dEEDS            then "deeds"    else "no-deeds"
                                       , if gENERALISATION   then "gen"      else "no-gen"
                                       , if sPECULATION      then "spec"     else "no-spec"
                                       , if rEDUCE_ROLLBACK  then "reducerb" else "no-reducerb"

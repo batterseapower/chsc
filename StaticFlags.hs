@@ -22,6 +22,10 @@ tERMINATION_CHECK = not $ "--no-termination" `elem` unsafePerformIO getArgs
 eVALUATE_PRIMOPS :: Bool
 eVALUATE_PRIMOPS = not $ "--no-primops" `elem` unsafePerformIO getArgs
 
+{-# NOINLINE dEEDS #-}
+dEEDS :: Bool
+dEEDS = not $ "--no-deeds" `elem` unsafePerformIO getArgs
+
 {-# NOINLINE gENERALISATION #-}
 gENERALISATION :: Bool
 gENERALISATION = not $ "--no-generalisation" `elem` unsafePerformIO getArgs
