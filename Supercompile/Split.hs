@@ -1,6 +1,6 @@
 {-# LANGUAGE PatternGuards, ViewPatterns, TupleSections, DeriveFunctor, DeriveFoldable, DeriveTraversable, MultiParamTypeClasses, FlexibleInstances #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
-module Supercompile.Split (Statics, MonadStatics(..), split) where
+module Supercompile.Split (Statics, MonadStatics(..), split, pureHeapBindingTag', stackFrameTags', focusedTermTag') where
 
 --import Supercompile.Residualise
 
@@ -71,11 +71,11 @@ mkEnteredEnv = setToMap
 
 {-# INLINE split #-}
 split :: MonadStatics m
-      => (State -> Bool)
+      => (Tag -> Bool)
       -> ((Deeds, State) -> m (Deeds, Out FVedTerm))
       -> (Deeds, State)
       -> m (Deeds, Out FVedTerm)
-split admissable opt (deeds, s) = uncurry3 (optimiseSplit opt) (simplify admissable (deeds, s))
+split growing opt (deeds, s) = uncurry3 (optimiseSplit opt) (simplify growing (deeds, s))
 
 
 -- Non-expansive simplification that we can safely do just before splitting to make the splitter a bit simpler
@@ -84,17 +84,17 @@ data QA = Question Var
 
 
 {-# INLINE simplify #-}
-simplify :: (State -> Bool)
+simplify :: (Tag -> Bool)
          -> (Deeds, State)
          -> (Deeds, M.Map (Out Var) (Bracketed State), Bracketed State)
-simplify admissable = go
+simplify growing = go
   where
     go (deeds, s@(Heap h ids, k, (rn, e)))
          -- We can't step past a variable or value, because if we do so I can't prove that simplify terminates and the sc recursion has finite depth
          -- If the termination criteria has not hit, we
-        | Just qa <- toQA (annee e),           (ids1, ids2)    <- splitIdSupply ids = splitt bottom     (deeds, (Heap h ids1, named_k, (case qa of Question x -> [rename rn x]; Answer _ -> [], splitQA ids2 (rn, qa))))
+        | Just qa <- toQA (annee e),                   (ids1, ids2)    <- splitIdSupply ids = splitt bottom     (deeds, (Heap h ids1, named_k, (case qa of Question x -> [rename rn x]; Answer _ -> [], splitQA ids2 (rn, qa))))
          -- If we can find some fraction of the stack or heap to drop that looks like it will be admissable, just residualise those parts and continue
-        | Just split_from <- seekAdmissable s, (ids', ctxt_id) <- stepIdSupply ids  = splitt split_from (deeds, (Heap h ids', named_k, ([],                                                     oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], (rn, e))))))
+        | Just split_from <- seekAdmissable h named_k, (ids', ctxt_id) <- stepIdSupply ids  = splitt split_from (deeds, (Heap h ids', named_k, ([],                                                     oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], (rn, e))))))
          -- Otherwise, keep dropping stuff until one of the two conditions above holds
         | Just (_, deeds', s') <- step (const id) S.empty (emptyLosers, deeds, s)   = go (deeds', s')
          -- Even if we can never find some admissable fragment of the input, we *must* eventually reach a variable or value
@@ -105,8 +105,22 @@ simplify admissable = go
     toQA (Value v) = Just (Answer v)
     toQA _ = Nothing
     
-    seekAdmissable :: State -> Maybe (IS.IntSet, S.Set (Out Var))
-    seekAdmissable s = Nothing
+    seekAdmissable :: PureHeap -> NamedStack -> Maybe (IS.IntSet, S.Set (Out Var))
+    seekAdmissable h named_k = traceRender ("gen_kfs", gen_kfs, "gen_xs'", gen_xs') $ guard (not (IS.null gen_kfs) || not (S.null gen_xs')) >> Just (traceRender ("seekAdmissable", gen_kfs, gen_xs') (gen_kfs, gen_xs'))
+      where gen_kfs = IS.fromList [i  | (i, kf) <- named_k, any growing (stackFrameTags' kf)]
+            gen_xs' = S.fromList  [x' | (x', (_, e)) <- M.toList h, growing (pureHeapBindingTag' e)]
+
+
+-- FIXME: better encapsulation for this stuff:
+
+pureHeapBindingTag' :: AnnedTerm -> Tag
+pureHeapBindingTag' = injectTag 5 . annedTag
+
+stackFrameTags' :: StackFrame -> [Tag]
+stackFrameTags' = map (injectTag 3) . stackFrameTags
+
+focusedTermTag' :: AnnedTerm -> Tag
+focusedTermTag' = injectTag 2 . annedTag
 
 -- Discard dead bindings:
 --  let x = ...
@@ -388,7 +402,7 @@ splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (sp
         -- 3b) Work out which part of the heap is admissable for inlining
         -- We are allowed to inline anything which is duplicatable or is not residualised right here and now
         h_cheap = M.filter (\(_, e) -> isCheap (annee e)) h
-        h_inlineable = h_not_residualised `M.union` h_cheap
+        h_inlineable = (h_not_residualised `M.union` h_cheap) `exclude` snd split_from -- FIXME: reduce hack value and explain??
         
         -- Generalising the final proposed floats may cause some bindings that we *thought* were going to be inlined to instead be
         -- residualised. We need to account for this in the Entered information (for work-duplication purposes), and in that we will

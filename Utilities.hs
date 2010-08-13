@@ -28,6 +28,7 @@ import Data.Maybe
 import Data.Monoid
 import Data.List
 import qualified Data.IntMap as IM
+import qualified Data.IntSet as IS
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Tree
@@ -167,6 +168,12 @@ instance Pretty Doc where
 
 instance Pretty Id where
     pPrint = text . show
+
+instance Pretty IS.IntSet where
+    pPrint xs = braces $ hsep (punctuate comma (map pPrint $ IS.toList xs))
+
+instance Pretty v => Pretty (IM.IntMap v) where
+    pPrint m = brackets $ fsep (punctuate comma [pPrint k <+> text "|->" <+> pPrint v | (k, v) <- IM.toList m])
 
 instance Pretty a => Pretty (S.Set a) where
     pPrint xs = braces $ hsep (punctuate comma (map pPrint $ S.toList xs))

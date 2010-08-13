@@ -50,7 +50,7 @@ tb1 <| tb2 = -- traceRender ("<|", tb1, tb2, tb1 `setEqual` tb2, cardinality tb1
 type GrowingTags = IS.IntSet
 
 tagBagDifference :: TagBag -> TagBag -> GrowingTags
-tagBagDifference (TagBag tb1) (TagBag tb2) = IM.keysSet (IM.mapMaybe id (combineIntMaps (const Nothing) Just (\i1 i2 -> Just (i2 - i1)) tb1 tb2))
+tagBagDifference (TagBag tb1) (TagBag tb2) = IM.keysSet (IM.filter (/= 0) (IM.mapMaybe id (combineIntMaps (const Nothing) Just (\i1 i2 -> Just (i2 - i1)) tb1 tb2)))
 
 isTagGrowing :: GrowingTags -> Tag -> Bool
 isTagGrowing gts tg = tg `IS.member` gts
@@ -64,7 +64,7 @@ instance Functor History where
 emptyHistory :: History a
 emptyHistory = History []
 
-data TermRes a = Stop a | Continue (a -> History a)
+data TermRes a = Stop GrowingTags a | Continue (a -> History a)
 
 isContinue :: TermRes a -> Bool
 isContinue (Continue _) = True
@@ -75,7 +75,7 @@ terminate hist here
   -- | traceRender (length hist, tagBag here) && False = undefined
   | tERMINATION_CHECK
   , (prev, prev_extra):_ <- [(prev, prev_extra) | (prev, prev_extra) <- unHistory hist, if prev <| here then {- traceRender (hang (text "terminate") 2 (pPrint hist $$ pPrint here)) -} True else False]
-  = Stop prev_extra
+  = Stop (prev `tagBagDifference` here) prev_extra
   | otherwise
   = Continue (\here_extra -> History $ (here, here_extra) : unHistory hist)
 

@@ -79,22 +79,17 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ run
 -- This family of functions is the whole reason that I have to thread Tag information throughout the rest of the code:
 
 stateTagBag :: State -> TagBag
-stateTagBag (Heap h _, k, (_, e)) = pureHeapTagBag h `plusTagBag` stackTagBag k `plusTagBag` annedTermTagBag e
+stateTagBag (Heap h _, k, (_, e)) = traceRender ("stateTagBag", M.map (pureHeapBindingTag' . snd) h, map stackFrameTags' k, focusedTermTag' e) $
+                                    pureHeapTagBag h `plusTagBag` stackTagBag k `plusTagBag` tagTagBag (focusedTermTag' e)
 
 pureHeapTagBag :: PureHeap -> TagBag
-pureHeapTagBag = plusTagBags . map (annedTagBag 5 . snd) . M.elems
+pureHeapTagBag = plusTagBags . map (tagTagBag . pureHeapBindingTag' . snd) . M.elems
 
 stackTagBag :: Stack -> TagBag
-stackTagBag = plusTagBags . map (tagTagBag 3) . concatMap stackFrameTags
+stackTagBag = mkTagBag . concatMap stackFrameTags'
 
-annedTermTagBag :: AnnedTerm -> TagBag
-annedTermTagBag = annedTagBag 2
-
-annedTagBag :: Int -> Anned a -> TagBag
-annedTagBag cls = tagTagBag cls . annedTag
-
-tagTagBag :: Int -> Tag -> TagBag
-tagTagBag cls = mkTagBag . return . injectTag cls
+tagTagBag :: Tag -> TagBag
+tagTagBag = mkTagBag . return
 
 
 --
@@ -113,7 +108,7 @@ reduce (deeds, state) = (deeds', state')
           hist' <- case terminate hist (stateTagBag state) of
                       _ | intermediate state  -> Right hist
                       Continue mk_hist        -> Right (mk_hist (deeds, state))
-                      Stop     (deeds, state) -> trace "reduce-stop" $ Left (guard rEDUCE_ROLLBACK >> return (losers, deeds, state))
+                      Stop _   (deeds, state) -> trace "reduce-stop" $ Left (guard rEDUCE_ROLLBACK >> return (losers, deeds, state)) -- FIXME: generalise?
           Right $ fmap (go hist' lives) $ step (go hist') lives (losers, deeds, state)
     
     intermediate :: State -> Bool
@@ -251,18 +246,17 @@ catchScpM :: ((c -> ScpM b) -> ScpM a) -- ^ Action to try: supplies a function t
 catchScpM f_try f_abort = ScpM $ \e s k -> unScpM (f_try (\c -> ScpM $ \_ _ _ -> unScpM (f_abort c) e s k)) e s k
 
 
-newtype Rollback = RB { rollbackWith :: History (Maybe Rollback) -> ScpM (Deeds, Out FVedTerm) }
+newtype Rollback = RB { rollbackWith :: (GrowingTags, History (Maybe Rollback)) -> ScpM (Deeds, Out FVedTerm) }
 
 sc, sc' :: History (Maybe Rollback) -> (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
 sc  hist = memo (sc' hist)
-sc' hist (deeds, state) = (check . Just . RB) `catchScpM` \hist' -> stop (hist `forgetFutureHistory` hist') -- NB: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
+sc' hist (deeds, state) = (check . Just . RB) `catchScpM` \(gtgs, hist') -> stop gtgs (hist `forgetFutureHistory` hist') -- NB: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
   where
     check mb_rb = case terminate hist (stateTagBag state) of
-                 Continue mk_hist -> continue (mk_hist mb_rb)
-                 Stop mb_rb       -> maybe (stop hist) (`rollbackWith` hist) $ guard sC_ROLLBACK >> mb_rb
-    stop     hist = trace "sc-stop" $ split (admissable hist) (sc hist)         (deeds, state)
-    continue hist =                   split (const False)     (sc hist) (reduce (deeds, state)) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
-    admissable hist state = isContinue (terminate hist (stateTagBag state))
+                    Continue mk_hist -> continue (mk_hist mb_rb)
+                    Stop gtgs mb_rb  -> maybe (stop gtgs hist) (`rollbackWith` (gtgs, hist)) $ guard sC_ROLLBACK >> mb_rb
+    stop gtgs hist = trace "sc-stop" $ split (traceRender ("gtgs", gtgs) $ (gtgs `isTagGrowing`)) (sc hist)         (deeds, state)
+    continue  hist =                   split (const False)         (sc hist) (reduce (deeds, state)) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
 
 memo :: ((Deeds, State) -> ScpM (Deeds, Out FVedTerm))
      ->  (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
