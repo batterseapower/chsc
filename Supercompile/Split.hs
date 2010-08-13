@@ -20,6 +20,8 @@ import Renaming
 import StaticFlags
 import Utilities hiding (tails)
 
+import Data.Ord
+import qualified Data.Graph.Wrapper as G
 import qualified Data.Foldable as Foldable
 import qualified Data.Traversable as Traversable
 import qualified Data.Map as M
@@ -100,7 +102,7 @@ simplify admissable (deeds, state) = (deeds', fmap (fmap snd) bracketed_heap, fm
          -- If we can find some fraction of the stack or heap to drop that looks like it will be admissable, just residualise those parts and continue
         | gENERALISATION
         , (ids', ctxt_id) <- stepIdSupply ids
-        , Just res <- seekAdmissable ctxt_id named_k (\split_from -> splitt split_from (deeds, (Heap h ids', named_k, ([], oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], (rn, e)))))))
+        , Just res <- seekAdmissable ctxt_id h named_k (inFreeVars annedTermFreeVars (rn, e)) (\split_from -> splitt split_from (deeds, (Heap h ids', named_k, ([], oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], (rn, e)))))))
         = res
          -- Otherwise, keep dropping stuff until one of the two conditions above holds
         | Just (_, deeds', s') <- step (const id) S.empty (emptyLosers, deeds, s)
@@ -115,18 +117,16 @@ simplify admissable (deeds, state) = (deeds', fmap (fmap snd) bracketed_heap, fm
     toQA _ = Nothing
     
     seekAdmissable :: Id
+                   -> PureHeap
                    -> NamedStack
+                   -> FreeVars
                    -> ((IS.IntSet, S.Set (Out Var)) ->
                        (Deeds, M.Map (Out Var) (Bracketed (Entered, State)), Bracketed (Entered, State)))
                    -> Maybe (Deeds, M.Map (Out Var) (Bracketed (Entered, State)), Bracketed (Entered, State))
-    seekAdmissable ctxt_id named_k f = seekStack ctxt_id named_k f `mplus` seekHeap ctxt_id named_k f
-    
-    -- Generalisation heuristic: try residualising the stack at varying points (beginning from the first frame)
-    -- to see if discarding the tail makes the "main" filler admissable
-    seekStack ctxt_id named_k f
-      = listToMaybe [ traceRender ("seekStack: SUCCESS", i) $ res
-                    | (i, _) <- named_k
-                    , let res@(_, bracketed_heap, bracketed_focus) = f (IS.singleton i, S.empty)
+    seekAdmissable ctxt_id h named_k focus_fvs f
+      = listToMaybe [ traceRender "seekAdmissable: SUCCESS" $ res
+                    | split_from <- seekStack named_k ++ seekHeap h (S.toList focus_fvs)
+                    , let res@(_, bracketed_heap, bracketed_focus) = f split_from
                           main_ss = [ s
                                     | bracketed <- bracketed_focus : M.elems bracketed_heap
                                     , (Once this_ctxt_id, s) <- fillers bracketed
@@ -135,8 +135,33 @@ simplify admissable (deeds, state) = (deeds', fmap (fmap snd) bracketed_heap, fm
                     , all admissable main_ss
                     ]
     
-    -- FIXME: implement
-    seekHeap _ _ _ = Nothing
+    -- Generalisation heuristic: try residualising the stack at varying points (beginning from the first frame)
+    -- to see if discarding the tail makes the "main" filler admissable
+    seekStack named_k = [ (IS.singleton i, S.empty) | (i, _) <- named_k ]
+    
+    -- Generalisation heuristic: TODO describe
+    seekHeap h focus_fvs = [ (IS.empty, S.fromList drop_what)
+                           | drop_whats <- subsets (M.keys h)
+                           , (drop_what, _) <- sortBy (comparing snd) [ (drop_what, negate (sum distances)) -- Break ties between sets of the same length by choosing more distant sets first
+                                                                      | drop_what <- drop_whats
+                                                                      , not (null drop_what)
+                                                                      , Just distances <- [mapM distance drop_what] -- NB: VERY important that we drop at least one *reachable* binder, or we get trivial tieback :(
+                                                                      ]
+                           ]
+      where
+        -- Number of hops required before the root might access the definition
+        graph = G.fromListSimple $ (Nothing, map Just focus_fvs) : [ (Just x', map Just (S.toList (inFreeVars annedTermFreeVars in_e))) | (x', in_e) <- M.toList h ]
+        distance_graph = G.depthNumbering graph [Nothing]
+        distance x' = snd (G.vertex distance_graph (Just x'))
+        
+        -- Modified from David Tran (http://davidtran.doublegifts.com/blog/?p=144)
+        subsets :: [a] -> [[[a]]]
+        subsets xs = [combination xs k | k <- [0..length xs]]
+          where
+            combination :: [a] -> Int -> [[a]]
+            combination _      0 = [[]]
+            combination []     _ = []
+            combination (x:xs) n = map (x:) (combination xs (n-1)) ++ combination xs n
 
 -- Discard dead bindings:
 --  let x = ...
