@@ -6,6 +6,7 @@ import Supercompile.Match
 import Supercompile.Residualise
 import Supercompile.Split
 
+import Core.Counted
 import Core.FreeVars
 import Core.Renaming
 import Core.Syntax

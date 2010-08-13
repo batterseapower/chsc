@@ -124,8 +124,8 @@ simplify admissable (deeds, state) = (deeds', fmap (fmap snd) bracketed_heap, fm
                        (Deeds, M.Map (Out Var) (Bracketed (Entered, State)), Bracketed (Entered, State)))
                    -> Maybe (Deeds, M.Map (Out Var) (Bracketed (Entered, State)), Bracketed (Entered, State))
     seekAdmissable ctxt_id h named_k focus_fvs f
-      = listToMaybe [ traceRender "seekAdmissable: SUCCESS" $ res
-                    | split_from <- seekStack named_k ++ seekHeap h (S.toList focus_fvs)
+      = listToMaybe [ traceRender ("seekAdmissable: SUCCESS", _doc) $ res
+                    | (_doc, split_from) <- seekHeap h (S.toList focus_fvs) ++ seekStack named_k
                     , let res@(_, bracketed_heap, bracketed_focus) = f split_from
                           main_ss = [ s
                                     | bracketed <- bracketed_focus : M.elems bracketed_heap
@@ -137,12 +137,13 @@ simplify admissable (deeds, state) = (deeds', fmap (fmap snd) bracketed_heap, fm
     
     -- Generalisation heuristic: try residualising the stack at varying points (beginning from the first frame)
     -- to see if discarding the tail makes the "main" filler admissable
-    seekStack named_k = [ (IS.singleton i, S.empty) | (i, _) <- named_k ]
+    seekStack named_k = [ (pPrint i, (IS.singleton i, S.empty)) | (i, _) <- named_k ]
     
     -- Generalisation heuristic: TODO describe
-    seekHeap h focus_fvs = [ (IS.empty, S.fromList drop_what)
+    seekHeap h focus_fvs = [ (pPrint drop_what, (IS.empty, S.fromList drop_what))
                            | drop_whats <- subsets (M.keys h)
-                           , (drop_what, _) <- sortBy (comparing snd) [ (drop_what, negate (sum distances)) -- Break ties between sets of the same length by choosing more distant sets first
+                           , (drop_what, _) <- sortBy (comparing snd) [ (drop_what, (count (\x' -> isCheap (annee (snd (fromJust (M.lookup x' h))))) drop_what, -- Break ties between sets of the same length by choosing to drop non-values first (False)
+                                                                                     negate (sum distances)))                                                   -- Fall back on dropping stuff which is the longest distance from the root
                                                                       | drop_what <- drop_whats
                                                                       , not (null drop_what)
                                                                       , Just distances <- [mapM distance drop_what] -- NB: VERY important that we drop at least one *reachable* binder, or we get trivial tieback :(
@@ -443,7 +444,7 @@ splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (sp
         -- 3b) Work out which part of the heap is admissable for inlining
         -- We are allowed to inline anything which is duplicatable or is not residualised right here and now
         h_cheap = M.filter (\(_, e) -> isCheap (annee e)) h
-        h_inlineable = h_not_residualised `M.union` h_cheap
+        h_inlineable = (h_not_residualised `M.union` h_cheap) `exclude` snd split_from -- FIXME: describe this hack to prevent trivial tieback
         
         -- Generalising the final proposed floats may cause some bindings that we *thought* were going to be inlined to instead be
         -- residualised. We need to account for this in the Entered information (for work-duplication purposes), and in that we will
