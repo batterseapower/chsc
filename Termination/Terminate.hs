@@ -2,6 +2,9 @@
 module Termination.Terminate (
         -- * TagBag construction
         TagBag, mkTagBag, plusTagBag, plusTagBags,
+        
+        -- * Testing for growing bags
+        GrowingTags, tagBagDifference, isTagGrowing,
 
         -- * The termination criterion
         History, emptyHistory, TermRes(..), isContinue, terminate,
@@ -13,6 +16,7 @@ module Termination.Terminate (
 import StaticFlags
 import Utilities
 
+import qualified Data.IntSet as IS
 import qualified Data.IntMap as IM
 
 
@@ -43,6 +47,15 @@ tb1 <| tb2 = -- traceRender ("<|", tb1, tb2, tb1 `setEqual` tb2, cardinality tb1
              tb1 `setEqual` tb2 && cardinality tb1 <= cardinality tb2
 
 
+type GrowingTags = IS.IntSet
+
+tagBagDifference :: TagBag -> TagBag -> GrowingTags
+tagBagDifference (TagBag tb1) (TagBag tb2) = IM.keysSet (IM.mapMaybe id (combineIntMaps (const Nothing) Just (\i1 i2 -> Just (i2 - i1)) tb1 tb2))
+
+isTagGrowing :: GrowingTags -> Tag -> Bool
+isTagGrowing gts tg = tg `IS.member` gts
+
+
 newtype History a = History { unHistory :: [(TagBag, a)] }
 
 instance Functor History where
@@ -61,7 +74,7 @@ terminate :: History a -> TagBag -> TermRes a
 terminate hist here
   -- | traceRender (length hist, tagBag here) && False = undefined
   | tERMINATION_CHECK
-  , prev_extra:_ <- [prev_extra | (prev, prev_extra) <- unHistory hist, if prev <| here then {- traceRender (hang (text "terminate") 2 (pPrint hist $$ pPrint here)) -} True else False]
+  , (prev, prev_extra):_ <- [(prev, prev_extra) | (prev, prev_extra) <- unHistory hist, if prev <| here then {- traceRender (hang (text "terminate") 2 (pPrint hist $$ pPrint here)) -} True else False]
   = Stop prev_extra
   | otherwise
   = Continue (\here_extra -> History $ (here, here_extra) : unHistory hist)

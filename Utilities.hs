@@ -27,6 +27,7 @@ import Control.Monad hiding (join)
 import Data.Maybe
 import Data.Monoid
 import Data.List
+import qualified Data.IntMap as IM
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Tree
@@ -196,6 +197,27 @@ mapMaybeSet f = S.fromList . mapMaybe f . S.toList
 
 setToMap :: Ord k => v -> S.Set k -> M.Map k v
 setToMap v = M.fromAscList . map (,v) . S.toAscList
+
+
+data Combining a b = LeftOnly a | Both a b | RightOnly b
+
+{-# INLINE finishCombining #-}
+finishCombining :: (a -> c) -> (b -> c) -> (a -> b -> c) -> Combining a b -> c
+finishCombining l r both combining = case combining of
+    LeftOnly x  -> l x
+    Both x y    -> both x y
+    RightOnly y -> r y
+
+{-# INLINE combineMaps #-}
+combineMaps :: Ord k
+            => (a -> c) -> (b -> c) -> (a -> b -> c)
+            -> M.Map k a -> M.Map k b -> M.Map k c
+combineMaps l r both m1 m2 = M.map (finishCombining l r both) $ M.intersectionWith (\(LeftOnly x) (RightOnly y) -> Both x y) (M.map LeftOnly m1) (M.map RightOnly m2)
+
+{-# INLINE combineIntMaps #-}
+combineIntMaps :: (a -> c) -> (b -> c) -> (a -> b -> c)
+               -> IM.IntMap a -> IM.IntMap b -> IM.IntMap c
+combineIntMaps l r both im1 im2 = IM.map (finishCombining l r both) $ IM.intersectionWith (\(LeftOnly x) (RightOnly y) -> Both x y) (IM.map LeftOnly im1) (IM.map RightOnly im2)
 
 
 {-# NOINLINE parseIdSupply #-}
