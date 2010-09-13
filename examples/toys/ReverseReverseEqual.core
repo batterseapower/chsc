@@ -1,0 +1,16 @@
+#include "../Prelude.core"
+
+rev ys = case ys of []   -> []
+                    x:xs -> rev xs ++ [x]
+
+listEq xs ys = case xs of
+  []       -> case ys of []       -> True
+                         (y':ys') -> False
+  (x':xs') -> case ys of []       -> False
+                         (y':ys') -> if x' == y' then listEq xs' ys' else False
+
+root xs = xs `listEq` rev (rev xs)
+
+tests = [
+    (root [1], True)
+  ]
