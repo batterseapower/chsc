@@ -30,6 +30,13 @@ dEEDS = not $ "--no-deeds" `elem` unsafePerformIO getArgs
 gLOBAL_DEEDS :: Bool
 gLOBAL_DEEDS = not $ "--local-deeds" `elem` unsafePerformIO getArgs
 
+data DeedsPolicy = FCFS | Proportional
+                 deriving (Read)
+
+{-# NOINLINE dEEDS_POLICY #-}
+dEEDS_POLICY :: DeedsPolicy
+dEEDS_POLICY = fromMaybe FCFS $ listToMaybe [read arg | '-':'-':'d':'e':'e':'d':'s':'-':'p':'o':'l':'i':'c':'y':'=':arg <- unsafePerformIO getArgs]
+
 {-# NOINLINE gENERALISATION #-}
 gENERALISATION :: Bool
 gENERALISATION = not $ "--no-generalisation" `elem` unsafePerformIO getArgs
