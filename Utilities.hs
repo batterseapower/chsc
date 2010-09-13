@@ -1,5 +1,5 @@
 {-# LANGUAGE TupleSections, PatternGuards, ExistentialQuantification, DeriveFunctor,
-             FlexibleInstances, IncoherentInstances, OverlappingInstances, TypeOperators #-}
+             TypeSynonymInstances, FlexibleInstances, IncoherentInstances, OverlappingInstances, TypeOperators #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Utilities (
     module IdSupply,
@@ -43,6 +43,16 @@ import qualified Text.PrettyPrint.HughesPJClass as Pretty
 
 import System.IO
 import System.IO.Unsafe (unsafePerformIO)
+
+
+-- | Copointed functors. The defining property is:
+--
+--   extract (fmap f a) == f (extract a)
+class Functor f => Copointed f where
+    extract :: f a -> a
+
+instance Copointed ((,) a) where
+    extract = snd
 
 
 instance Monad (Either a) where
@@ -90,6 +100,9 @@ instance (Pretty1 f, Pretty a) => Pretty (f a) where
 instance NFData Id where
     rnf i = rnf (hashedId i)
 
+instance NFData a => NFData1 ((,) a) where
+    rnf1 (a, b) = rnf a `seq` rnf b
+
 
 data Counted a = Counted { count :: Int, countee :: a }
 
@@ -133,6 +146,15 @@ instance (Functor f, Functor g) => Functor (f :.: g) where
     fmap f (Comp x) = Comp (fmap (fmap f) x)
 
 
+newtype Down a = Down { unDown :: a }
+
+instance Eq a => Eq (Down a) where
+    Down a == Down b = a == b
+
+instance Ord a => Ord (Down a) where
+    Down a `compare` Down b = b `compare` a
+
+
 type Tag = Int
 
 injectTag :: Int -> Tag -> Tag
@@ -165,6 +187,9 @@ instance Show IdSupply where
 
 instance Pretty Doc where
     pPrint = id
+
+instance Pretty Rational where
+    pPrint = rational
 
 instance Pretty Id where
     pPrint = text . show
@@ -449,6 +474,9 @@ uncons :: [a] -> Maybe (a, [a])
 uncons []     = Nothing
 uncons (x:xs) = Just (x, xs)
 
+listSelectors :: [[a] -> a]
+listSelectors = iterate (\f xs -> f (tail xs)) head
+
 fixpoint :: Eq a => (a -> a) -> a -> a
 fixpoint f x
    | x' == x   = x
@@ -494,6 +522,9 @@ instance NFData1 Identity where
 
 instance Pretty1 Identity where
     pPrintPrec1 level prec (I x) = pPrintPrec level prec x
+
+instance Copointed Identity where
+    extract = unI
 
 instance Monad Identity where
     return = I

@@ -298,6 +298,8 @@ optimiseSplit :: MonadStatics m
               -> Bracketed State
               -> m (Deeds, Out FVedTerm)
 optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
+    -- FIXME: use dEEDS_POLICY here to apportion 'deeds' between the 'bracketed_*'
+    
     -- 1) Recursively drive the focus itself
     let statics = M.keysSet bracketeds_heap
     (hes, (deeds, e_focus)) <- withStatics statics $ optimiseBracketed opt (deeds, bracketed_focus)
