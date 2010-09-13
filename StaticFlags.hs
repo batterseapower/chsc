@@ -26,6 +26,10 @@ eVALUATE_PRIMOPS = not $ "--no-primops" `elem` unsafePerformIO getArgs
 dEEDS :: Bool
 dEEDS = not $ "--no-deeds" `elem` unsafePerformIO getArgs
 
+{-# NOINLINE gLOBAL_DEEDS #-}
+gLOBAL_DEEDS :: Bool
+gLOBAL_DEEDS = not $ "--local-deeds" `elem` unsafePerformIO getArgs
+
 {-# NOINLINE gENERALISATION #-}
 gENERALISATION :: Bool
 gENERALISATION = not $ "--no-generalisation" `elem` unsafePerformIO getArgs
