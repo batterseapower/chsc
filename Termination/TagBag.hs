@@ -20,7 +20,7 @@ newtype TagBag = TagBag { unTagBag :: IM.IntMap Int }
                deriving (Eq)
 
 instance Pretty TagBag where
-    pPrint (TagBag m) = braces $ hsep $ punctuate (text ",") [pPrint n | (n, count) <- IM.toList m, _ <- replicate count n]
+    pPrint (TagBag m) = braces $ hsep $ punctuate (text ",") [pPrint tg | (tg, count) <- IM.toList m, _ <- replicate count ()]
 
 instance TagCollection TagBag where
     -- NB: this is inverted compared to Neil's definitions (to make it a better match for w.q.o theory)

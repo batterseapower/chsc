@@ -23,7 +23,7 @@ data TagGraph = TagGraph { vertices :: IM.IntMap Int, edges :: IM.IntMap IS.IntS
                deriving (Eq)
 
 instance Pretty TagGraph where
-    pPrint _tr = text "TagGraph (FIXME: pretty printer)" -- FIXME
+    pPrint tr = braces $ hsep $ punctuate (text ",") [pPrint tg <+> text "*" <+> pPrint count <+> parens (pPrint (maybe 0 IS.size (IM.lookup tg (edges tr))) <+> text "edge(s)") | (tg, count) <- IM.toList (vertices tr)]
 
 instance TagCollection TagGraph where
     tr1 <| tr2 = tr1 `setEqual` tr2 && cardinality tr1 <= cardinality tr2
