@@ -13,6 +13,8 @@ module Termination.Terminate (
         forgetFutureHistory
     ) where
 
+import Evaluator.Syntax
+
 import StaticFlags
 import Utilities
 
@@ -22,6 +24,7 @@ import qualified Data.IntSet as IS
 class TagCollection tc where
     (<|) :: tc -> tc -> Bool
     growingTags :: tc -> tc -> GrowingTags
+    stateTags :: State -> tc
 
 
 type GrowingTags = IS.IntSet

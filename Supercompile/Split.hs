@@ -15,6 +15,8 @@ import Evaluator.Syntax
 
 import Size.Deeds
 
+import Termination.TagBag (pureHeapBindingTag', stackFrameTags', focusedTermTag')
+
 import Algebra.Lattice
 import Name
 import Renaming
@@ -111,17 +113,6 @@ simplify growing = go
       where gen_kfs = IS.fromList [i  | (i, kf) <- named_k, any growing (stackFrameTags' kf)]
             gen_xs' = S.fromList  [x' | (x', (_, e)) <- M.toList h, growing (pureHeapBindingTag' e)]
 
-
--- FIXME: better encapsulation for this stuff:
-
-pureHeapBindingTag' :: AnnedTerm -> Tag
-pureHeapBindingTag' = injectTag 5 . annedTag
-
-stackFrameTags' :: StackFrame -> [Tag]
-stackFrameTags' = map (injectTag 3) . stackFrameTags
-
-focusedTermTag' :: AnnedTerm -> Tag
-focusedTermTag' = injectTag 2 . annedTag
 
 -- Discard dead bindings:
 --  let x = ...

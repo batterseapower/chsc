@@ -32,7 +32,7 @@ import Data.Tree
 
 
 supercompile :: Term -> Term
-supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ runScpM input_fvs $ fmap snd $ sc emptyHistory (deeds, state)
+supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ runScpM input_fvs $ fmap snd $ sc (undefined :: TagBag) emptyHistory (deeds, state)
   where input_fvs = annedTermFreeVars anned_e
         state = (Heap M.empty reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, anned_e))
         anned_e = toAnnedTerm e
@@ -71,34 +71,11 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ run
 
 
 --
--- == Termination ==
---
-
--- Other functions:
---  Termination.Terminate.terminate
-
--- This family of functions is the whole reason that I have to thread Tag information throughout the rest of the code:
-
-stateTagBag :: State -> TagBag
-stateTagBag (Heap h _, k, (_, e)) = traceRender ("stateTagBag", M.map (pureHeapBindingTag' . snd) h, map stackFrameTags' k, focusedTermTag' e) $
-                                    pureHeapTagBag h `plusTagBag` stackTagBag k `plusTagBag` tagTagBag (focusedTermTag' e)
-
-pureHeapTagBag :: PureHeap -> TagBag
-pureHeapTagBag = plusTagBags . map (tagTagBag . pureHeapBindingTag' . snd) . M.elems
-
-stackTagBag :: Stack -> TagBag
-stackTagBag = mkTagBag . concatMap stackFrameTags'
-
-tagTagBag :: Tag -> TagBag
-tagTagBag = mkTagBag . return
-
-
---
 -- == Bounded multi-step reduction ==
 --
 
-reduce :: (Deeds, State) -> (Deeds, State)
-reduce (deeds, state) = (deeds', state')
+reduce :: TagCollection tc => tc -> (Deeds, State) -> (Deeds, State)
+reduce tc (deeds, state) = (deeds', state')
   where
     (_, deeds', state') = go emptyHistory S.empty (emptyLosers, deeds, state)
       
@@ -106,7 +83,7 @@ reduce (deeds, state) = (deeds', state')
       -- | traceRender ("reduce.go", residualiseState state) False = undefined
       | not eVALUATE_PRIMOPS, (_, _, (_, annee -> PrimOp _ _)) <- state = (losers, deeds, state)
       | otherwise = fromMaybe (losers, deeds, state) $ either id id $ do
-          hist' <- case terminate hist (stateTagBag state) of
+          hist' <- case terminate hist (stateTags state `asTypeOf` tc) of
                       _ | intermediate state  -> Right hist
                       -- _ | traceRender ("reduce.go (non-intermediate)", residualiseState state) False -> undefined
                       Continue mk_hist        -> Right (mk_hist (deeds, state))
@@ -250,15 +227,15 @@ catchScpM f_try f_abort = ScpM $ \e s k -> unScpM (f_try (\c -> ScpM $ \_ _ _ ->
 
 newtype Rollback tc = RB { rollbackWith :: (GrowingTags, History tc (Maybe (Rollback tc))) -> ScpM (Deeds, Out FVedTerm) }
 
-sc, sc' :: History TagBag (Maybe (Rollback TagBag)) -> (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
-sc  hist = memo (sc' hist)
-sc' hist (deeds, state) = (check . Just . RB) `catchScpM` \(gtgs, hist') -> stop gtgs (hist `forgetFutureHistory` hist') -- NB: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
+sc, sc' :: TagCollection tc => tc -> History tc (Maybe (Rollback tc)) -> (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
+sc  tc hist = memo (sc' tc hist)
+sc' tc hist (deeds, state) = (check . Just . RB) `catchScpM` \(gtgs, hist') -> stop gtgs (hist `forgetFutureHistory` hist') -- NB: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
   where
-    check mb_rb = case terminate hist (stateTagBag state) of
+    check mb_rb = case terminate hist (stateTags state `asTypeOf` tc) of
                     Continue mk_hist -> continue (mk_hist mb_rb)
                     Stop gtgs mb_rb  -> maybe (stop gtgs hist) (`rollbackWith` (gtgs, hist)) $ guard sC_ROLLBACK >> mb_rb
-    stop gtgs hist = trace "sc-stop" $ split (traceRender ("gtgs", gtgs) $ (gtgs `isTagGrowing`)) (sc hist)         (deeds, state)
-    continue  hist =                   split (const False)         (sc hist) (reduce (deeds, state)) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
+    stop gtgs hist = trace "sc-stop" $ split (traceRender ("gtgs", gtgs) $ (gtgs `isTagGrowing`)) (sc tc hist)         (deeds, state)
+    continue  hist =                   split (const False)         (sc tc hist) (reduce tc (deeds, state)) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
 
 memo :: ((Deeds, State) -> ScpM (Deeds, Out FVedTerm))
      ->  (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
