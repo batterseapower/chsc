@@ -17,6 +17,7 @@ import Evaluator.Syntax
 
 import Size.Deeds
 
+import Termination.TagBag
 import Termination.Terminate
 
 import Name
@@ -247,9 +248,9 @@ catchScpM :: ((c -> ScpM b) -> ScpM a) -- ^ Action to try: supplies a function t
 catchScpM f_try f_abort = ScpM $ \e s k -> unScpM (f_try (\c -> ScpM $ \_ _ _ -> unScpM (f_abort c) e s k)) e s k
 
 
-newtype Rollback = RB { rollbackWith :: (GrowingTags, History (Maybe Rollback)) -> ScpM (Deeds, Out FVedTerm) }
+newtype Rollback tc = RB { rollbackWith :: (GrowingTags, History tc (Maybe (Rollback tc))) -> ScpM (Deeds, Out FVedTerm) }
 
-sc, sc' :: History (Maybe Rollback) -> (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
+sc, sc' :: History TagBag (Maybe (Rollback TagBag)) -> (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
 sc  hist = memo (sc' hist)
 sc' hist (deeds, state) = (check . Just . RB) `catchScpM` \(gtgs, hist') -> stop gtgs (hist `forgetFutureHistory` hist') -- NB: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
   where
