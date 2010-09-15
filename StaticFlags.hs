@@ -1,5 +1,6 @@
 module StaticFlags where
 
+import Data.Char (toLower)
 import Data.Maybe
 
 import System.Environment
@@ -35,7 +36,8 @@ data DeedsPolicy = FCFS | Proportional
 
 {-# NOINLINE dEEDS_POLICY #-}
 dEEDS_POLICY :: DeedsPolicy
-dEEDS_POLICY = fromMaybe FCFS $ listToMaybe [read arg | '-':'-':'d':'e':'e':'d':'s':'-':'p':'o':'l':'i':'c':'y':'=':arg <- unsafePerformIO getArgs]
+dEEDS_POLICY = fromMaybe FCFS $ listToMaybe [parse arg | '-':'-':'d':'e':'e':'d':'s':'-':'p':'o':'l':'i':'c':'y':'=':arg <- unsafePerformIO getArgs]
+  where parse = fromJust . flip lookup [("fcfs", FCFS), ("proportional", Proportional)] . map toLower
 
 {-# NOINLINE gENERALISATION #-}
 gENERALISATION :: Bool
