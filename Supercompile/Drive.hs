@@ -102,11 +102,12 @@ reduce (deeds, state) = (deeds', state')
     (_, deeds', state') = go emptyHistory S.empty (emptyLosers, deeds, state)
       
     go hist lives (losers, deeds, state)
-      -- | traceRender ("reduce.go", deeds, residualiseState state) False = undefined
+      -- | traceRender ("reduce.go", residualiseState state) False = undefined
       | not eVALUATE_PRIMOPS, (_, _, (_, annee -> PrimOp _ _)) <- state = (losers, deeds, state)
       | otherwise = fromMaybe (losers, deeds, state) $ either id id $ do
           hist' <- case terminate hist (stateTagBag state) of
                       _ | intermediate state  -> Right hist
+                      -- _ | traceRender ("reduce.go (non-intermediate)", residualiseState state) False -> undefined
                       Continue mk_hist        -> Right (mk_hist (deeds, state))
                       Stop _   (deeds, state) -> trace "reduce-stop" $ Left (guard rEDUCE_ROLLBACK >> return (losers, deeds, state)) -- FIXME: generalise?
           Right $ fmap (go hist' lives) $ step (go hist') lives (losers, deeds, state)
