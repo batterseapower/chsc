@@ -4,7 +4,10 @@ module Size.Deeds (
     mkDeeds,
     claimDeed, claimDeeds,
     releaseDeedDeep, releaseDeedDescend_,
-    apportionN
+    
+    -- * Deed allocation policy
+    apportion,
+    mkEmptyDeeds, releaseDeedsTo
   ) where
 
 import StaticFlags
@@ -74,13 +77,10 @@ instance Pretty GlobalDeeds where
 
 mkDeeds :: Unclaimed -> (Tree Tag, Tree Tag -> Doc) -> Deeds
 mkDeeds k (t@(Node root_tg _), rb)
-  | gLOBAL_DEEDS = Global gdeeds
+  | gLOBAL_DEEDS = Global $ GlobalDeeds (k * length (flatten t)) (TagTree root_tg (fmap I children))
   | otherwise    = -- traceRender ("mkDeeds", fmap (const (1 :: Int)) t, fmap (const (1 :: Int)) (reifyDeedsTree deeds), rb (fmap (const (1 :: Int)) (reifyDeedsTree deeds))) $
-                   Local ldeeds
+                   Local $ LocalDeeds rb (TagTree root_tg (fmap (k,) children))
   where
-    gdeeds = GlobalDeeds (k * length (flatten t)) (TagTree root_tg (fmap I children))
-    ldeeds = LocalDeeds rb (TagTree root_tg (fmap (k,) children))
-    
     children = go IM.empty t
     go m (Node tg trees) = foldl' go (IM.insert tg (map rootLabel trees) m) trees
 
@@ -115,9 +115,6 @@ lookupTag tg ttree = expectJust "lookupTag: bad Tag" (IM.lookup tg (childrenMap 
 updateTag :: Tag -> f [Tag] -> TagTree f -> TagTree f
 updateTag tg x ttree = ttree { childrenMap = IM.insert tg x (childrenMap ttree) }
 
-tagSize :: Copointed f => Tag -> TagTree f -> Int
-tagSize tg ttree = 1 + sum [tagSize tg ttree | tg <- extract (lookupTag tg ttree)]
-
 ffmapTags :: (forall a. f a -> g a) -> TagTree f -> TagTree g
 ffmapTags phi ttree = TagTree { rootTag = rootTag ttree, childrenMap = IM.map phi (childrenMap ttree) }
 
@@ -125,21 +122,16 @@ unionTagsWith :: (f [Tag] -> f [Tag] -> f [Tag]) -> TagTree f -> TagTree f -> Ta
 unionTagsWith comb left right = TagTree { rootTag = rootTag right, childrenMap = IM.unionWith comb (childrenMap left) (childrenMap right) }
 
 
-sizeUp :: Copointed f => TagTree f -> [[Tag]] -> [Rational]
-sizeUp ttree weighting = map (/ denominator) numerators
-  where
-    numerators = [sum [fromIntegral (tagSize tg ttree) | tg <- tgs] | tgs <- weighting]
-    denominator = sum numerators
+apportion :: Deeds -> [Int] -> [Deeds]
+apportion (Local ldeeds) weighting = [Local (ldeeds { localChildren = ffmapTags (\(unclaimed, tags) -> (sel (apportionN unclaimed weighting), tags)) (localChildren ldeeds) }) | (sel, _) <- listSelectors `zip` weighting]
+apportion (Global gdeeds) weighting = [Global (gdeeds { globalUnclaimed = unclaimed }) | unclaimed <- apportionN (globalUnclaimed gdeeds) weighting]
 
-apportion :: [[Tag]] -> Deeds -> [Deeds]
-apportion weighting (Local ldeeds) = [Local (ldeeds { localChildren = ffmapTags (\(unclaimed, tags) -> (sel (apportionN fracs unclaimed), tags)) (localChildren ldeeds) }) | (sel, _) <- listSelectors `zip` fracs]
-  where fracs = sizeUp (localChildren ldeeds) weighting
-apportion weighting (Global gdeeds) = [Global (gdeeds { globalUnclaimed = unclaimed }) | unclaimed <- apportionN fracs (globalUnclaimed gdeeds)]
-  where fracs = sizeUp (globalChildren gdeeds) weighting
-
-apportionN :: [Rational] -> Int -> [Int]
-apportionN fracs orig_n = result
+apportionN :: Int -> [Int] -> [Int]
+apportionN orig_n weighting = result
   where
+    fracs = map (\numerator -> fromIntegral numerator / denominator) weighting
+      where denominator = fromIntegral (sum weighting)
+    
     -- Here is the idea:
     --  1) Do one pass through the list of fractians
     --  2) Start by allocating the floor of the number of "n" that we should allocate to this weight of the fraction
@@ -155,7 +147,16 @@ apportionN fracs orig_n = result
     -- We cannot allocate more of these "fixup" pieces than we had "n" left at the end of the first pass.
     final_deserving_allowed = map fst (take remaining (sortBy (comparing (Down . snd)) final_deserving))
 
+-- | Puts any unclaimed deeds in the first argument into the unclaimed deed store of the second argument
 releaseDeedsTo :: Deeds -> Deeds -> Deeds
 releaseDeedsTo (Local  ldeeds_release) (Local  ldeeds_to) = Local  (ldeeds_to { localChildren = unionTagsWith (\(unclaimed_l, tgs_l) (unclaimed_r, _tgs_r) -> (unclaimed_l + unclaimed_r, tgs_l)) (localChildren ldeeds_release) (localChildren ldeeds_to) } )
 releaseDeedsTo (Global gdeeds_release) (Global gdeeds_to) = Global (gdeeds_to { globalUnclaimed = globalUnclaimed gdeeds_to + globalUnclaimed gdeeds_release })
 releaseDeedsTo _ _ = error "releaseDeedsTo: unsupported release combination"
+
+-- | Returned 'Deeds' are the identity element of 'releaseDeedsTo'
+--
+-- mkEmptyDeeds deeds `releaseDeedsTo` deeds == deeds
+-- deeds `releaseDeedsTo` mkEmptyDeeds deeds == deeds
+mkEmptyDeeds :: Deeds -> Deeds
+mkEmptyDeeds (Local ldeeds)  = Local (ldeeds { localChildren = ffmapTags (\(_, tgs) -> (0, tgs)) (localChildren ldeeds) })
+mkEmptyDeeds (Global gdeeds) = Global (gdeeds { globalUnclaimed = 0 })

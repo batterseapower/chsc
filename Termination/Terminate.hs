@@ -29,6 +29,9 @@ instance Pretty TagBag where
 mkTagBag :: [Tag] -> TagBag
 mkTagBag = TagBag . IM.unionsWith (+) . map (`IM.singleton` 1)
 
+-- tagBagToList :: TagBag -> [Tag]
+-- tagBagToList = IM.foldWithKey (\tg n rest -> replicate n tg ++ rest) [] . unTagBag
+
 plusTagBag :: TagBag -> TagBag -> TagBag
 plusTagBag (TagBag tb1) (TagBag tb2) = TagBag (IM.unionWith (+) tb1 tb2)
 
