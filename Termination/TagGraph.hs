@@ -39,15 +39,22 @@ instance TagCollection TagGraph where
         
         stackTagGraph :: [Tag] -> Stack -> TagGraph
         stackTagGraph _         []     = emptyTagGraph
-        stackTagGraph focus_tgs (kf:k) = emptyTagGraph { edges = IM.fromList [(kf_tg, IS.singleton focus_tg) | kf_tg <- kf_tgs, focus_tg <- focus_tgs] } -- Binding structure of the stack itself
-                                            `plusTagGraph` mkTagGraph kf_tgs (snd (stackFrameFreeVars kf))                                               -- Binding structure of the stack referring to the heap. TODO: update frames?
+        stackTagGraph focus_tgs (kf:k) = emptyTagGraph { edges = IM.fromList [(kf_tg, IS.singleton focus_tg) | kf_tg <- kf_tgs, focus_tg <- focus_tgs] } -- Binding structure of the stack itself (outer frames refer to inner ones)
+                                            `plusTagGraph` mkTagGraph kf_tgs (snd (stackFrameFreeVars kf))                                               -- Binding structure of the stack referring to bound names
                                             `plusTagGraph` stackTagGraph kf_tgs k                                                                        -- Recurse to deal with rest of the stack
           where kf_tgs = stackFrameTags' kf
         
+        -- Stores the tags associated with any bound name
+        referants = M.map (\(_, e) -> IS.singleton (pureHeapBindingTag' e)) h `M.union` M.fromList [(annee x', IS.fromList (stackFrameTags' kf)) | kf@(Update x') <- k]
+        
+        -- Find the *tags* referred to from the *names* referred to
+        referrerEdges referrer_tgs fvs = M.foldWithKey go IM.empty referants
+          where go x referant_tgs edges
+                  | x `S.notMember` fvs = edges
+                  | otherwise           = foldr (\referrer_tg edges -> IM.insertWith IS.union referrer_tg referant_tgs edges) edges referrer_tgs
+        
         mkTermTagGraph e_tg in_e = mkTagGraph [e_tg] (inFreeVars annedTermFreeVars in_e)
-        mkTagGraph e_tgs fvs = TagGraph { vertices = IM.unionsWith (+) [IM.singleton e_tg 1 | e_tg <- e_tgs], edges = M.foldWithKey go IM.empty h }
-          where go x (_, e_heap) edges | x `S.notMember` fvs = edges
-                                       | otherwise           = foldr (\e_tg edges -> IM.insertWith IS.union e_tg (IS.singleton (pureHeapBindingTag' e_heap)) edges) edges e_tgs
+        mkTagGraph e_tgs fvs = TagGraph { vertices = IM.unionsWith (+) [IM.singleton e_tg 1 | e_tg <- e_tgs], edges = referrerEdges e_tgs fvs }
 
 
 emptyTagGraph :: TagGraph
