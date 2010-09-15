@@ -18,6 +18,7 @@ import Evaluator.Syntax
 import Size.Deeds
 
 import Termination.TagBag
+import Termination.TagGraph
 import Termination.Terminate
 
 import Name
@@ -32,7 +33,7 @@ import Data.Tree
 
 
 supercompile :: Term -> Term
-supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ runScpM input_fvs $ fmap snd $ sc (undefined :: TagBag) emptyHistory (deeds, state)
+supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ runScpM input_fvs $ fmap snd $ (case tAG_COLLECTION of TagBag -> sc (undefined :: TagBag) emptyHistory; TagGraph -> sc (undefined :: TagGraph) emptyHistory) (deeds, state)
   where input_fvs = annedTermFreeVars anned_e
         state = (Heap M.empty reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, anned_e))
         anned_e = toAnnedTerm e
@@ -74,6 +75,8 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ run
 -- == Bounded multi-step reduction ==
 --
 
+{-# SPECIALISE reduce :: TagBag -> (Deeds, State) -> (Deeds, State) #-}
+{-# SPECIALISE reduce :: TagGraph -> (Deeds, State) -> (Deeds, State) #-}
 reduce :: TagCollection tc => tc -> (Deeds, State) -> (Deeds, State)
 reduce tc (deeds, state) = (deeds', state')
   where
@@ -227,6 +230,8 @@ catchScpM f_try f_abort = ScpM $ \e s k -> unScpM (f_try (\c -> ScpM $ \_ _ _ ->
 
 newtype Rollback tc = RB { rollbackWith :: (GrowingTags, History tc (Maybe (Rollback tc))) -> ScpM (Deeds, Out FVedTerm) }
 
+{-# SPECIALISE sc' :: TagBag   -> History TagBag   (Maybe (Rollback TagBag))   -> (Deeds, State) -> ScpM (Deeds, Out FVedTerm) #-}
+{-# SPECIALISE sc' :: TagGraph -> History TagGraph (Maybe (Rollback TagGraph)) -> (Deeds, State) -> ScpM (Deeds, Out FVedTerm) #-}
 sc, sc' :: TagCollection tc => tc -> History tc (Maybe (Rollback tc)) -> (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
 sc  tc hist = memo (sc' tc hist)
 sc' tc hist (deeds, state) = (check . Just . RB) `catchScpM` \(gtgs, hist') -> stop gtgs (hist `forgetFutureHistory` hist') -- NB: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)

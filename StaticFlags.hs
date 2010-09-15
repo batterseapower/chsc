@@ -2,6 +2,7 @@ module StaticFlags where
 
 import Data.Char (toLower)
 import Data.Maybe
+import Data.List (stripPrefix)
 
 import System.Environment
 import System.IO.Unsafe
@@ -31,13 +32,23 @@ dEEDS = not $ "--no-deeds" `elem` unsafePerformIO getArgs
 gLOBAL_DEEDS :: Bool
 gLOBAL_DEEDS = not $ "--local-deeds" `elem` unsafePerformIO getArgs
 
+parseEnum :: String -> a -> [(String, a)] -> a
+parseEnum prefix def opts = fromMaybe def $ listToMaybe [parse opt | arg <- unsafePerformIO getArgs, Just ('=':opt) <- [stripPrefix prefix arg]]
+  where parse = fromJust . flip lookup opts . map toLower
+
 data DeedsPolicy = FCFS | Proportional
                  deriving (Read)
 
 {-# NOINLINE dEEDS_POLICY #-}
 dEEDS_POLICY :: DeedsPolicy
-dEEDS_POLICY = fromMaybe FCFS $ listToMaybe [parse arg | Just arg <- [stripPrefix "--deeds-policy=" (unsafePerformIO getArgs)]]
-  where parse = fromJust . flip lookup [("fcfs", FCFS), ("proportional", Proportional)] . map toLower
+dEEDS_POLICY = parseEnum "--deeds-policy" FCFS [("fcfs", FCFS), ("proportional", Proportional)]
+
+data TagCollectionType = TagBag | TagGraph
+                   deriving (Show)
+
+{-# NOINLINE tAG_COLLECTION #-}
+tAG_COLLECTION :: TagCollectionType
+tAG_COLLECTION = parseEnum "--tag-collection" TagBag [("bags", TagBag), ("graphs", TagGraph)]
 
 {-# NOINLINE gENERALISATION #-}
 gENERALISATION :: Bool
@@ -45,7 +56,7 @@ gENERALISATION = not $ "--no-generalisation" `elem` unsafePerformIO getArgs
 
 {-# NOINLINE bLOAT_FACTOR #-}
 bLOAT_FACTOR :: Int
-bLOAT_FACTOR = fromMaybe 10 $ listToMaybe [read arg | Just arg <- [stripPrefix "--bloat=" (unsafePerformIO getArgs)]]
+bLOAT_FACTOR = fromMaybe 10 $ listToMaybe [read val | arg <- unsafePerformIO getArgs, Just val <- [stripPrefix "--bloat=" arg]]
  -- NB: need a bloat factor of at least 5 to get append/append fusion to work. The critical point is:
  --
  --  let (++) = ...
