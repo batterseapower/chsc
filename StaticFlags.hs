@@ -36,7 +36,7 @@ data DeedsPolicy = FCFS | Proportional
 
 {-# NOINLINE dEEDS_POLICY #-}
 dEEDS_POLICY :: DeedsPolicy
-dEEDS_POLICY = fromMaybe FCFS $ listToMaybe [parse arg | '-':'-':'d':'e':'e':'d':'s':'-':'p':'o':'l':'i':'c':'y':'=':arg <- unsafePerformIO getArgs]
+dEEDS_POLICY = fromMaybe FCFS $ listToMaybe [parse arg | Just arg <- [stripPrefix "--deeds-policy=" (unsafePerformIO getArgs)]]
   where parse = fromJust . flip lookup [("fcfs", FCFS), ("proportional", Proportional)] . map toLower
 
 {-# NOINLINE gENERALISATION #-}
@@ -45,7 +45,7 @@ gENERALISATION = not $ "--no-generalisation" `elem` unsafePerformIO getArgs
 
 {-# NOINLINE bLOAT_FACTOR #-}
 bLOAT_FACTOR :: Int
-bLOAT_FACTOR = fromMaybe 10 $ listToMaybe [read arg | '-':'-':'b':'l':'o':'a':'t':'=':arg <- unsafePerformIO getArgs]
+bLOAT_FACTOR = fromMaybe 10 $ listToMaybe [read arg | Just arg <- [stripPrefix "--bloat=" (unsafePerformIO getArgs)]]
  -- NB: need a bloat factor of at least 5 to get append/append fusion to work. The critical point is:
  --
  --  let (++) = ...
