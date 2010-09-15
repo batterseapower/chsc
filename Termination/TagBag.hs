@@ -1,6 +1,6 @@
 module Termination.TagBag (
-        -- * TagBag construction
-        TagBag, mkTagBag, plusTagBag, plusTagBags,
+        -- * The TagBag type
+        TagBag,
         
         -- * Tag helpers (needed by the splitter)
         pureHeapBindingTag', stackFrameTags', focusedTermTag'
