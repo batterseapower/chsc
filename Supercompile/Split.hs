@@ -331,16 +331,18 @@ optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
         bracketSizes = map stateSize . fillers
         
         (heap_xs, bracketeds_heap_elts) = unzip (M.toList bracketeds_heap)
-        deeds_empty = mkEmptyDeeds deeds
-        (deeds_focus, deedss_heap)
-          | Proportional <- dEEDS_POLICY = transformWholeList (apportion deeds) (bracketSizes bracketed_focus) (map bracketSizes bracketeds_heap_elts)
-          | otherwise                    = (deeds : [deeds_empty | _ <- tail (bracketSizes bracketed_focus)], [[deeds_empty | _ <- bracketSizes b] | b <- bracketeds_heap_elts])
+        -- NB: it is *very important* that the list supplied to apportion contains at least one element, or some
+        -- deeds will vanish in a puff of digital smoke. We deal with this in the proportional case by padding the input list with a 0
+        (deeds_initial:deeds_focus, deedss_heap)
+          | Proportional <- dEEDS_POLICY = transformWholeList (apportion deeds) (0 : bracketSizes bracketed_focus) (map bracketSizes bracketeds_heap_elts)
+          | otherwise                    = (deeds : [deeds_empty | _ <- bracketSizes bracketed_focus], [[deeds_empty | _ <- bracketSizes b] | b <- bracketeds_heap_elts])
+            where deeds_empty = mkEmptyDeeds deeds
         
         bracketeds_deeded_heap = M.fromList (heap_xs `zip` zipWith (\deeds_heap -> modifyFillers (deeds_heap `zip`)) deedss_heap bracketeds_heap_elts)
     
     -- 1) Recursively drive the focus itself
     let statics = M.keysSet bracketeds_heap
-    (hes, (leftover_deeds, e_focus)) <- withStatics statics $ optimiseBracketed opt (deeds_empty, modifyFillers (deeds_focus `zip`) bracketed_focus)
+    (hes, (leftover_deeds, e_focus)) <- withStatics statics $ optimiseBracketed opt (deeds_initial, modifyFillers (deeds_focus `zip`) bracketed_focus)
     
     -- 2) We now need to think about how we are going to residualise the letrec. In fact, we need to loop adding
     -- stuff to the letrec because it might be the case that:

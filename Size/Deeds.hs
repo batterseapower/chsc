@@ -123,12 +123,15 @@ unionTagsWith comb left right = TagTree { rootTag = rootTag right, childrenMap =
 
 
 apportion :: Deeds -> [Int] -> [Deeds]
-apportion (Local ldeeds) weighting = [Local (ldeeds { localChildren = ffmapTags (\(unclaimed, tags) -> (sel (apportionN unclaimed weighting), tags)) (localChildren ldeeds) }) | (sel, _) <- listSelectors `zip` weighting]
+apportion _               []        = error "apportion: empty list"
+apportion (Local ldeeds)  weighting = [Local (ldeeds { localChildren = ffmapTags (\(unclaimed, tags) -> (sel (apportionN unclaimed weighting), tags)) (localChildren ldeeds) }) | (sel, _) <- listSelectors `zip` weighting]
 apportion (Global gdeeds) weighting = [Global (gdeeds { globalUnclaimed = unclaimed }) | unclaimed <- apportionN (globalUnclaimed gdeeds) weighting]
 
 apportionN :: Int -> [Int] -> [Int]
+apportionN _      []        = error "apportionN: empty list"
 apportionN orig_n weighting = result
   where
+    fracs :: [Rational]
     fracs = map (\numerator -> fromIntegral numerator / denominator) weighting
       where denominator = fromIntegral (sum weighting)
     
@@ -138,7 +141,7 @@ apportionN orig_n weighting = result
     --  3) Accumulate the fractional pieces and the indexes that generated them
     --  4) Use circular programming to feed the list of fractional pieces that we actually allowed the allocation
     --     of back in to the one pass we are doing over the list
-    ((_, remaining, final_deserving), result) = mapAccumL go (0, orig_n, []) fracs
+    ((_, remaining, final_deserving), result) = mapAccumL go (0 :: Int, orig_n, []) fracs
     go (i, n, deserving) frac = ((i + 1, n - whole, (i, remainder) : deserving),
                                  whole + if i `elem` final_deserving_allowed then 1 else 0)
       where (whole, remainder) = properFraction (frac * fromIntegral orig_n)
