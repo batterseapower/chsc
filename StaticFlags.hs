@@ -48,7 +48,7 @@ data TagCollectionType = TagBag | TagGraph
 
 {-# NOINLINE tAG_COLLECTION #-}
 tAG_COLLECTION :: TagCollectionType
-tAG_COLLECTION = parseEnum "--tag-collection" TagBag [("bags", TagBag), ("graphs", TagGraph)]
+tAG_COLLECTION = parseEnum "--tag-collection" TagGraph [("bags", TagBag), ("graphs", TagGraph)]
 
 {-# NOINLINE gENERALISATION #-}
 gENERALISATION :: Bool
