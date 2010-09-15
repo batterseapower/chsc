@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections, PatternGuards, ExistentialQuantification, DeriveFunctor,
+{-# LANGUAGE TupleSections, PatternGuards, ExistentialQuantification, DeriveFunctor, DeriveFoldable,
              TypeSynonymInstances, FlexibleInstances, IncoherentInstances, OverlappingInstances, TypeOperators #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Utilities (
@@ -145,6 +145,9 @@ instance (Pretty1 f, Pretty1 g) => Pretty1 (f :.: g) where
 instance (Functor f, Functor g) => Functor (f :.: g) where
     fmap f (Comp x) = Comp (fmap (fmap f) x)
 
+instance (Foldable.Foldable f, Foldable.Foldable g) => Foldable.Foldable (f :.: g) where
+    foldMap f = Foldable.foldMap (Foldable.foldMap f) . unComp
+
 
 newtype Down a = Down { unDown :: a }
 
@@ -161,6 +164,7 @@ injectTag :: Int -> Tag -> Tag
 injectTag cls tg = cls * tg
 
 data Tagged a = Tagged { tag :: !Tag, tagee :: !a }
+              deriving (Functor, Foldable.Foldable)
 
 instance Show1 Tagged where
     showsPrec1 prec (Tagged tg x) = showParen (prec >= appPrec) (showString "Tagged" . showsPrec appPrec tg . showsPrec appPrec x)
@@ -176,9 +180,6 @@ instance NFData1 Tagged where
 
 instance Pretty1 Tagged where
     pPrintPrec1 level prec (Tagged tg x) = braces (pPrint tg) <+> pPrintPrec level prec x
-
-instance Functor Tagged where
-    fmap f (Tagged tg x) = Tagged tg (f x)
 
 
 instance Show IdSupply where

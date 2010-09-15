@@ -1,4 +1,4 @@
-{-# LANGUAGE Rank2Types, TypeOperators, FlexibleInstances #-}
+{-# LANGUAGE Rank2Types, TypeOperators, FlexibleInstances, DeriveFunctor, DeriveFoldable #-}
 module Core.FreeVars where
 
 import Core.Syntax
@@ -6,6 +6,7 @@ import Core.Syntax
 import Utilities
 
 import qualified Data.Set as S
+import qualified Data.Foldable as Foldable
 
 
 type FreeVars = S.Set Var
@@ -60,6 +61,7 @@ altConFreeVars (DefaultAlt mb_x) = maybe id S.delete mb_x
 
 
 data FVed a = FVed { freeVars :: !FreeVars, fvee :: !a }
+            deriving (Functor, Foldable.Foldable)
 
 instance Show1 FVed where
     showsPrec1 prec (FVed fvs x) = showParen (prec >= appPrec) (showString "FVed" . showsPrec appPrec fvs . showsPrec appPrec x)
@@ -75,9 +77,6 @@ instance NFData1 FVed where
 
 instance Pretty1 FVed where
     pPrintPrec1 level prec (FVed _ x) = pPrintPrec level prec x
-
-instance Functor FVed where
-    fmap f (FVed fvs x) = FVed fvs (f x)
 
 
 type FVedTerm = FVed (TermF FVed)
