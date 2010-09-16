@@ -78,7 +78,8 @@ split :: MonadStatics m
       -> ((Deeds, State) -> m (Deeds, Out FVedTerm))
       -> (Deeds, State)
       -> m (Deeds, Out FVedTerm)
-split growing opt (deeds, s) = uncurry3 (optimiseSplit opt) (simplify growing (deeds, s))
+split growing opt (deeds, s) = optimiseSplit opt gen_xs deeds' bracketeds_heap bracketed_focus
+  where (gen_xs, (deeds', bracketeds_heap, bracketed_focus)) = simplify growing (deeds, s)
 
 
 -- Non-expansive simplification that we can safely do just before splitting to make the splitter a bit simpler
@@ -89,15 +90,15 @@ data QA = Question Var
 {-# INLINE simplify #-}
 simplify :: (Tag -> Bool)
          -> (Deeds, State)
-         -> (Deeds, M.Map (Out Var) (Bracketed State), Bracketed State)
+         -> (S.Set (Out Var), (Deeds, M.Map (Out Var) (Bracketed State), Bracketed State))
 simplify growing = go
   where
     go (deeds, s@(Heap h ids, k, (rn, e)))
          -- We can't step past a variable or value, because if we do so I can't prove that simplify terminates and the sc recursion has finite depth
          -- If the termination criteria has not hit, we
-        | Just qa <- toQA (annee e),                   (ids1, ids2)    <- splitIdSupply ids = splitt bottom     (deeds, (Heap h ids1, named_k, (case qa of Question x -> [rename rn x]; Answer _ -> [], splitQA ids2 (rn, qa))))
+        | Just qa <- toQA (annee e),                   (ids1, ids2)    <- splitIdSupply ids = (S.empty,        splitt bottom     (deeds, (Heap h ids1, named_k, (case qa of Question x -> [rename rn x]; Answer _ -> [], splitQA ids2 (rn, qa)))))
          -- If we can find some fraction of the stack or heap to drop that looks like it will be admissable, just residualise those parts and continue
-        | Just split_from <- seekAdmissable h named_k, (ids', ctxt_id) <- stepIdSupply ids  = splitt split_from (deeds, (Heap h ids', named_k, ([],                                                     oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], (rn, e))))))
+        | Just split_from <- seekAdmissable h named_k, (ids', ctxt_id) <- stepIdSupply ids  = (snd split_from, splitt split_from (deeds, (Heap h ids', named_k, ([],                                                     oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], (rn, e)))))))
          -- Otherwise, keep dropping stuff until one of the two conditions above holds
         | Just (_, deeds', s') <- step (const id) S.empty (emptyLosers, deeds, s)   = traceRender "simplify: dropping piece :(" go (deeds', s')
          -- Even if we can never find some admissable fragment of the input, we *must* eventually reach a variable or value
@@ -305,11 +306,12 @@ transformWholeList f xs yss = (xs', yss')
 
 optimiseSplit :: MonadStatics m
               => ((Deeds, State) -> m (Deeds, Out FVedTerm))
+              -> S.Set (Out Var)
               -> Deeds
               -> M.Map (Out Var) (Bracketed State)
               -> Bracketed State
               -> m (Deeds, Out FVedTerm)
-optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
+optimiseSplit opt gen_xs deeds bracketeds_heap bracketed_focus = do
     -- 0) The "process tree" splits at this point. We can choose to distribute the deeds between the children in a number of ways
     let stateSize (h, k, in_e) = heapSize h + stackSize k + termSize (snd in_e)
           where heapSize (Heap h _) = sum (map (termSize . snd) (M.elems h))
@@ -332,8 +334,10 @@ optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
         bracketeds_deeded_heap = M.fromList (heap_xs `zip` zipWith (\deeds_heap -> modifyFillers (deeds_heap `zip`)) deedss_heap bracketeds_heap_elts)
     
     -- 1) Recursively drive the focus itself
+    -- NB: it is *very important* that we do not mark generalised variables as static! If we do, we defeat the whole point of
+    -- generalisation because our specialisations do not truly become more "general", and simple things like foldl specialisation break.
     let statics = M.keysSet bracketeds_heap
-    (hes, (leftover_deeds, e_focus)) <- withStatics statics $ optimiseBracketed opt (deeds_initial, modifyFillers (deeds_focus `zip`) bracketed_focus)
+    (hes, (leftover_deeds, e_focus)) <- withStatics (statics S.\\ gen_xs) $ optimiseBracketed opt (deeds_initial, modifyFillers (deeds_focus `zip`) bracketed_focus)
     
     -- 2) We now need to think about how we are going to residualise the letrec. In fact, we need to loop adding
     -- stuff to the letrec because it might be the case that:
@@ -351,7 +355,7 @@ optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
     -- TODO: investigate the possibility of just fusing in the optimiseLetBinds loop with this one
     go hes statics leftover_deeds bracketeds_deeded_heap xes fvs = do
         let statics' = statics `S.union` S.fromList (map fst hes) -- NB: the statics already include all the binders from bracketeds_deeded_heap, so no need to add xes stuff
-        (hes', (leftover_deeds, bracketeds_deeded_heap, fvs, xes')) <- withStatics statics' $ optimiseLetBinds opt leftover_deeds bracketeds_deeded_heap (fvs `S.union` S.unions (map (fvedTermFreeVars . snd) hes)) -- TODO: no need to get FVs in this way (they are in Promise)
+        (hes', (leftover_deeds, bracketeds_deeded_heap, fvs, xes')) <- withStatics (statics' S.\\ gen_xs) $ optimiseLetBinds opt leftover_deeds bracketeds_deeded_heap (fvs `S.union` S.unions (map (fvedTermFreeVars . snd) hes)) -- TODO: no need to get FVs in this way (they are in Promise)
         (if null hes' then (\a b c d -> return (a,b,c,d)) else go hes' statics') leftover_deeds bracketeds_deeded_heap (xes ++ hes ++ xes') fvs
 
 
