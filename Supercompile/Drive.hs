@@ -258,7 +258,15 @@ memo opt (deeds, state) = do
           -- Check that all of the things that were dynamic last time are dynamic this time.
           -- This is an issue of *performance* and *typeability*. If we omit this check, the generated code may
           -- be harder for GHC to chew on because we will apply static variables to dynamic positions in the tieback.
-          -- FIXME: rejecting tieback on this basis leads to crappy code generation (since we immediately whistle).
+          --
+          -- FIXME: rejecting tieback on this basis can lead to crappy supercompilation (since we immediately whistle).
+          -- For an example, see AccumulatingParam-Peano: with split-point generalisation, we *would* be building an optimal
+          -- loop, but this check rejects it (tieback at h15 to h6 rejected because "n" would be converted from static to dynamic).
+          -- We should probably do something like this:
+          --  * Record whether a variable is static or dynamic in the tag collections
+          --  * "Generalise away" a variables staticness if this check fails so that:
+          --     a) The termination criteria does not immediately fire
+          --     b) We have a chance to build a loop where that variable is dynamic
          , (\res -> if res then True else traceRender ("memo: rejected by dynamics", statics, tb_dynamic_vs) False) $
            all (`S.notMember` statics) tb_dynamic_vs
           -- Check that all of the things that were static last time are static this time *and refer to exactly the same thing*.
