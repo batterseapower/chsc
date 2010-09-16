@@ -23,17 +23,20 @@ data TagGraph = TagGraph { vertices :: IM.IntMap Int, edges :: IM.IntMap IS.IntS
                deriving (Eq)
 
 instance Pretty TagGraph where
-    pPrint tr = braces $ hsep $ punctuate (text ",") [pPrint tg <+> text "*" <+> pPrint count <+> parens (pPrint (maybe 0 IS.size (IM.lookup tg (edges tr))) <+> text "edge(s)") | (tg, count) <- IM.toList (vertices tr)]
+    pPrint tr = braces $ hsep $ punctuate (text ",") [pPrint tg <+> text "*" <+> pPrint count <+> pPrint (fromMaybe IS.empty (IM.lookup tg (edges tr))) | (tg, count) <- IM.toList (vertices tr)]
 
 instance TagCollection TagGraph where
     tr1 <| tr2 = tr1 `setEqual` tr2 && cardinality tr1 <= cardinality tr2
     
     growingTags tr1 tr2 = IM.keysSet (IM.filter (/= 0) (IM.mapMaybe id (combineIntMaps (const Nothing) Just (\i1 i2 -> Just (i2 - i1)) (vertices tr1) (vertices tr2))))
     
-    stateTags (Heap h _, k, in_e@(_, e)) = pureHeapTagGraph h
-                                             `plusTagGraph` stackTagGraph [focusedTermTag' e] k
-                                             `plusTagGraph` mkTermTagGraph (focusedTermTag' e) in_e
+    stateTags (Heap h _, k, in_e@(_, e)) = traceRender ("stateTags (TagGraph)", graph) $
+                                           graph
       where
+        graph = pureHeapTagGraph h  
+                 `plusTagGraph` stackTagGraph [focusedTermTag' e] k
+                 `plusTagGraph` mkTermTagGraph (focusedTermTag' e) in_e
+        
         pureHeapTagGraph :: PureHeap -> TagGraph
         pureHeapTagGraph h = plusTagGraphs [mkTagGraph [pureHeapBindingTag' e] (inFreeVars annedTermFreeVars in_e) | in_e@(_, e) <- M.elems h]
         

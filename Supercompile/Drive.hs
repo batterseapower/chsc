@@ -239,8 +239,9 @@ sc' tc hist (deeds, state) = (check . Just . RB) `catchScpM` \(gtgs, hist') -> s
     check mb_rb = case terminate hist (stateTags state `asTypeOf` tc) of
                     Continue mk_hist -> continue (mk_hist mb_rb)
                     Stop gtgs mb_rb  -> maybe (stop gtgs hist) (`rollbackWith` (gtgs, hist)) $ guard sC_ROLLBACK >> mb_rb
-    stop gtgs hist = trace "sc-stop" $ split (traceRender ("gtgs", gtgs) $ (gtgs `isTagGrowing`)) (sc tc hist)         (deeds, state)
-    continue  hist =                   split (const False)         (sc tc hist) (reduce tc (deeds, state)) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
+    stop gtgs hist = trace "sc-stop" $ split (traceRender ("gtgs", gtgs) $ (gtgs `isTagGrowing`)) (sc tc hist)            (deeds, state)
+    continue  hist =                   split (const False)                                        (sc tc hist) ((\res@(_, state') -> traceRender ("reduce end", residualiseState state') res) $
+                                                                                                                reduce tc (deeds, state)) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
 
 memo :: ((Deeds, State) -> ScpM (Deeds, Out FVedTerm))
      ->  (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
@@ -249,14 +250,22 @@ memo opt (deeds, state) = do
     ps <- getPromises
     case [ (fun p, (releaseStateDeed deeds state, fun p `varApps` tb_dynamic_vs))
          | p <- ps
-         , Just rn_lr <- [match (meaning p) state]
+         , Just rn_lr <- [-- (\res -> if isNothing res then traceRender ("no match:", fun p) res else res) $
+                           match (meaning p) state]
          , let rn_fvs = map (safeRename ("tieback: FVs " ++ pPrintRender (fun p)) rn_lr) -- NB: If tb contains a dead PureHeap binding (hopefully impossible) then it may have a free variable that I can't rename, so "rename" will cause an error. Not observed in practice yet.
                tb_dynamic_vs = rn_fvs (abstracted p)
                tb_static_vs  = rn_fvs (lexical p)
-          -- Check that all of the things that were dynamic last time are dynamic this time
-         , all (`S.notMember` statics) tb_dynamic_vs
-          -- Check that all of the things that were static last time are static this time *and refer to exactly the same thing*
-         , and $ zipWith (\x x' -> x' == x && x' `S.member` statics) (lexical p) tb_static_vs
+          -- Check that all of the things that were dynamic last time are dynamic this time.
+          -- This is an issue of *performance* and *typeability*. If we omit this check, the generated code may
+          -- be harder for GHC to chew on because we will apply static variables to dynamic positions in the tieback.
+          -- FIXME: rejecting tieback on this basis leads to crappy code generation (since we immediately whistle).
+         , (\res -> if res then True else traceRender ("memo: rejected by dynamics", statics, tb_dynamic_vs) False) $
+           all (`S.notMember` statics) tb_dynamic_vs
+          -- Check that all of the things that were static last time are static this time *and refer to exactly the same thing*.
+          -- This is an issue of *correctness*. If we omit this check, we may tie back to a version of the function where a FV
+          -- actually referred to a different let binding than that which we intend to refer tos.
+         , (\res -> if res then True else traceRender ("memo: rejected by statics", lexical p, tb_static_vs) False) $
+           and $ zipWith (\x x' -> x' == x && x' `S.member` statics) (lexical p) tb_static_vs
          , traceRender ("memo'", statics, stateFreeVars state, rn_lr, (fun p, lexical p, abstracted p)) True
          ] of
       (_x, res):_ -> {- traceRender ("tieback", residualiseState state, fst res) $ -} do
