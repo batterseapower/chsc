@@ -1,0 +1,31 @@
+-- Example from Section 5 of "Shortcut Fusion for Accumulating Parameters & Zip-like Functions", converted to Peano.
+-- Optimal output should be isomorphic to:
+--
+--  root c n a b = foldDU n a
+--    where
+--      foldDU n a = if a `peanoGt` b
+--                   then n
+--                   else foldlDU (c n a) (S a)
+--
+-- In the course of supercompilation, we get here:
+--
+--    D[root c n a b]
+--  ==>
+--    if a > b
+--    then n
+--    else D[foldl c (c n a) (enumFromTo (S a) b)]
+--
+-- If we generalise away the (c n a) and (S a) then we'll get a nice tieback to what we started
+-- with that and hence build something equivalent to the input code.
+enumFromTo from to = if from `peanoGt` to
+                     then []
+                     else from : enumFromTo (S from) to
+
+foldl c n xs = case xs of []     -> n
+                          (y:ys) -> foldl c (c n y) ys
+
+root c n a b = foldl c n (enumFromTo a b)
+
+tests = [
+    (root peanoPlus Z (S Z) (fromInt 10), fromInt 55)
+  ]
