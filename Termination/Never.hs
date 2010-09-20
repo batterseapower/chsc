@@ -14,8 +14,6 @@ instance Pretty Never where
     pPrint Never = text "{never terminate}"
 
 instance TagCollection Never where
-    Never <| Never = False
-    
-    growingTags _ _ = error "growingTags: Never"
+    Never <| Never = Nothing
     
     stateTags _ = Never

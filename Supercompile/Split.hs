@@ -1,7 +1,7 @@
 {-# LANGUAGE PatternGuards, ViewPatterns, TupleSections, DeriveFunctor, DeriveFoldable, DeriveTraversable,
              MultiParamTypeClasses, FlexibleInstances #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
-module Supercompile.Split (Statics, MonadStatics(..), split, pureHeapBindingTag', stackFrameTags', focusedTermTag') where
+module Supercompile.Split (Statics, MonadStatics(..), split) where
 
 --import Supercompile.Residualise
 
@@ -15,7 +15,7 @@ import Evaluator.Syntax
 
 import Size.Deeds
 
-import Termination.TagBag (pureHeapBindingTag', stackFrameTags', focusedTermTag')
+import Termination.Terminate (Generaliser(..))
 
 import Algebra.Lattice
 import Name
@@ -75,12 +75,12 @@ mkEnteredEnv = setToMap
 
 {-# INLINE split #-}
 split :: MonadStatics m
-      => (Tag -> Bool)
+      => Generaliser
       -> ((Deeds, State) -> m (Deeds, Out FVedTerm))
       -> (Deeds, State)
       -> m (Deeds, Out FVedTerm)
-split growing opt (deeds, s) = optimiseSplit opt gen_xs deeds' bracketeds_heap bracketed_focus
-  where (gen_xs, (deeds', bracketeds_heap, bracketed_focus)) = simplify growing (deeds, s)
+split gen opt (deeds, s) = optimiseSplit opt gen_xs deeds' bracketeds_heap bracketed_focus
+  where (gen_xs, (deeds', bracketeds_heap, bracketed_focus)) = simplify gen (deeds, s)
 
 
 -- Non-expansive simplification that we can safely do just before splitting to make the splitter a bit simpler
@@ -89,10 +89,10 @@ data QA = Question Var
 
 
 {-# INLINE simplify #-}
-simplify :: (Tag -> Bool)
+simplify :: Generaliser
          -> (Deeds, State)
          -> (S.Set (Out Var), (Deeds, M.Map (Out Var) (Bracketed State), Bracketed State))
-simplify growing = go
+simplify gen = go
   where
     go (deeds, s@(Heap h ids, k, (rn, e)))
          -- We can't step past a variable or value, because if we do so I can't prove that simplify terminates and the sc recursion has finite depth
@@ -112,8 +112,8 @@ simplify growing = go
     
     seekAdmissable :: PureHeap -> NamedStack -> Maybe (IS.IntSet, S.Set (Out Var))
     seekAdmissable h named_k = traceRender ("gen_kfs", gen_kfs, "gen_xs'", gen_xs') $ guard (not (IS.null gen_kfs) || not (S.null gen_xs')) >> Just (traceRender ("seekAdmissable", gen_kfs, gen_xs') (gen_kfs, gen_xs'))
-      where gen_kfs = IS.fromList [i  | (i, kf) <- named_k, any growing (stackFrameTags' kf)]
-            gen_xs' = S.fromList  [x' | (x', (_, e)) <- M.toList h, growing (pureHeapBindingTag' e)]
+      where gen_kfs = IS.fromList [i  | (i, kf) <- named_k, generaliseStackFrame gen kf]
+            gen_xs' = S.fromList  [x' | (x', in_e) <- M.toList h, generaliseHeapBinding gen x' in_e]
 
 
 -- Discard dead bindings:

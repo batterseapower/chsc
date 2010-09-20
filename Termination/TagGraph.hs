@@ -1,11 +1,8 @@
 module Termination.TagGraph (
         -- * The TagGraph type
         TagGraph
-        
-        -- FIXME: the splitter will be broken with this type :(. Probably.
     ) where
 
-import Termination.TagBag
 import Termination.Terminate
 
 import Evaluator.FreeVars
@@ -26,9 +23,13 @@ instance Pretty TagGraph where
     pPrint tr = braces $ hsep $ punctuate (text ",") [pPrint tg <+> text "*" <+> pPrint count <+> pPrint (fromMaybe IS.empty (IM.lookup tg (edges tr))) | (tg, count) <- IM.toList (vertices tr)]
 
 instance TagCollection TagGraph where
-    tr1 <| tr2 = tr1 `setEqual` tr2 && cardinality tr1 <= cardinality tr2
-    
-    growingTags tr1 tr2 = IM.keysSet (IM.filter (/= 0) (IM.mapMaybe id (combineIntMaps (const Nothing) Just (\i1 i2 -> Just (i2 - i1)) (vertices tr1) (vertices tr2))))
+    tr1 <| tr2 = do
+        guard $ tr1 `setEqual` tr2 && cardinality tr1 <= cardinality tr2
+        let growing = IM.keysSet (IM.filter (/= 0) (IM.mapMaybe id (combineIntMaps (const Nothing) Just (\i1 i2 -> Just (i2 - i1)) (vertices tr1) (vertices tr2))))
+        return $ Generaliser {
+            generaliseStackFrame  = \kf       -> any (`IS.member` growing) (stackFrameTags' kf),
+            generaliseHeapBinding = \_ (_, e) -> pureHeapBindingTag' e `IS.member` growing
+          }
     
     stateTags (Heap h _, k, in_e@(_, e)) = traceRender ("stateTags (TagGraph)", graph) $
                                            graph
@@ -58,6 +59,16 @@ instance TagCollection TagGraph where
         
         mkTermTagGraph e_tg in_e = mkTagGraph [e_tg] (inFreeVars annedTermFreeVars in_e)
         mkTagGraph e_tgs fvs = TagGraph { vertices = IM.unionsWith (+) [IM.singleton e_tg 1 | e_tg <- e_tgs], edges = referrerEdges e_tgs fvs }
+
+
+pureHeapBindingTag' :: AnnedTerm -> Tag
+pureHeapBindingTag' = injectTag 5 . annedTag
+
+stackFrameTags' :: StackFrame -> [Tag]
+stackFrameTags' = map (injectTag 3) . stackFrameTags
+
+focusedTermTag' :: AnnedTerm -> Tag
+focusedTermTag' = injectTag 2 . annedTag
 
 
 emptyTagGraph :: TagGraph

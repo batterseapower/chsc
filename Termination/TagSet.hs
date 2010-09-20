@@ -3,7 +3,6 @@ module Termination.TagSet (
         TagSet
     ) where
 
-import Termination.TagBag
 import Termination.Terminate
 
 import Evaluator.Syntax
@@ -15,15 +14,12 @@ import qualified Data.Map as M
 
 
 newtype TagSet = TagSet { unTagSet :: IS.IntSet }
-               deriving (Eq)
 
 instance Pretty TagSet where
     pPrint (TagSet m) = braces $ hsep $ punctuate (text ",") [pPrint tg | tg <- IS.toList m]
 
 instance TagCollection TagSet where
-    (<|) = (==)
-    
-    growingTags _ _ = IS.empty
+    ts1 <| ts2 = guard (unTagSet ts1 == unTagSet ts2) >> return generaliseNothing
     
     stateTags (Heap h _, k, (_, e)) = traceRender ("stateTags (TagSet)", M.map (pureHeapBindingTag' . snd) h, map stackFrameTags' k, focusedTermTag' e) $
                                       TagSet $ pureHeapTagSet h `IS.union` stackTagSet k `IS.union` tagTagSet (focusedTermTag' e)
@@ -36,3 +32,13 @@ instance TagCollection TagSet where
 
         tagTagSet :: Tag -> IS.IntSet
         tagTagSet = IS.singleton
+
+
+pureHeapBindingTag' :: AnnedTerm -> Tag
+pureHeapBindingTag' = injectTag 5 . annedTag
+
+stackFrameTags' :: StackFrame -> [Tag]
+stackFrameTags' = map (injectTag 3) . stackFrameTags
+
+focusedTermTag' :: AnnedTerm -> Tag
+focusedTermTag' = injectTag 2 . annedTag

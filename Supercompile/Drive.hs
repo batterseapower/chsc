@@ -239,20 +239,20 @@ catchScpM :: ((c -> ScpM b) -> ScpM a) -- ^ Action to try: supplies a function t
 catchScpM f_try f_abort = ScpM $ \e s k -> unScpM (f_try (\c -> ScpM $ \_ _ _ -> unScpM (f_abort c) e s k)) e s k
 
 
-newtype Rollback tc = RB { rollbackWith :: (GrowingTags, History tc (Maybe (Rollback tc))) -> ScpM (Deeds, Out FVedTerm) }
+newtype Rollback tc = RB { rollbackWith :: (Generaliser, History tc (Maybe (Rollback tc))) -> ScpM (Deeds, Out FVedTerm) }
 
 {-# SPECIALISE sc' :: TagBag   -> History TagBag   (Maybe (Rollback TagBag))   -> (Deeds, State) -> ScpM (Deeds, Out FVedTerm) #-}
 {-# SPECIALISE sc' :: TagGraph -> History TagGraph (Maybe (Rollback TagGraph)) -> (Deeds, State) -> ScpM (Deeds, Out FVedTerm) #-}
 sc, sc' :: TagCollection tc => tc -> History tc (Maybe (Rollback tc)) -> (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
 sc  tc hist = memo (sc' tc hist)
-sc' tc hist (deeds, state) = (check . Just . RB) `catchScpM` \(gtgs, hist') -> stop gtgs (hist `forgetFutureHistory` hist') -- NB: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
+sc' tc hist (deeds, state) = (check . Just . RB) `catchScpM` \(gen, hist') -> stop gen (hist `forgetFutureHistory` hist') -- NB: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
   where
     check mb_rb = case terminate hist (stateTags state `asTypeOf` tc) of
                     Continue mk_hist -> continue (mk_hist mb_rb)
-                    Stop gtgs mb_rb  -> maybe (stop gtgs hist) (`rollbackWith` (gtgs, hist)) $ guard sC_ROLLBACK >> mb_rb
-    stop gtgs hist = trace "sc-stop" $ split (traceRender ("gtgs", gtgs) $ (gtgs `isTagGrowing`)) (sc tc hist)            (deeds, state)
-    continue  hist =                   split (const False)                                        (sc tc hist) ((\res@(_, state') -> traceRender ("reduce end", residualiseState state') res) $
-                                                                                                                reduce tc (deeds, state)) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
+                    Stop gen mb_rb   -> maybe (stop gen hist) (`rollbackWith` (gen, hist)) $ guard sC_ROLLBACK >> mb_rb
+    stop gen hist = trace "sc-stop" $ split gen               (sc tc hist) (deeds, state)
+    continue hist =                   split generaliseNothing (sc tc hist) ((\res@(_, state') -> traceRender ("reduce end", residualiseState state') res) $
+                                                                            reduce tc (deeds, state)) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
 
 memo :: ((Deeds, State) -> ScpM (Deeds, Out FVedTerm))
      ->  (Deeds, State) -> ScpM (Deeds, Out FVedTerm)

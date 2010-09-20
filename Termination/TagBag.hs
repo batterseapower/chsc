@@ -1,9 +1,6 @@
 module Termination.TagBag (
         -- * The TagBag type
-        TagBag,
-        
-        -- * Tag helpers (needed by the splitter)
-        pureHeapBindingTag', stackFrameTags', focusedTermTag'
+        TagBag
     ) where
 
 import Termination.Terminate
@@ -13,6 +10,7 @@ import Evaluator.Syntax
 import Utilities
 
 import qualified Data.IntMap as IM
+import qualified Data.IntSet as IS
 import qualified Data.Map as M
 
 
@@ -24,10 +22,14 @@ instance Pretty TagBag where
 
 instance TagCollection TagBag where
     -- NB: this is inverted compared to Neil's definitions (to make it a better match for w.q.o theory)
-    tb1 <| tb2 = -- traceRender ("<|", tb1, tb2, tb1 `setEqual` tb2, cardinality tb1, cardinality tb2) $
-                 tb1 `setEqual` tb2 && cardinality tb1 <= cardinality tb2
-    
-    growingTags (TagBag tb1) (TagBag tb2) = IM.keysSet (IM.filter (/= 0) (IM.mapMaybe id (combineIntMaps (const Nothing) Just (\i1 i2 -> Just (i2 - i1)) tb1 tb2)))
+    tb1 <| tb2 = do
+        -- traceRender ("<|", tb1, tb2, tb1 `setEqual` tb2, cardinality tb1, cardinality tb2) $
+        guard $ tb1 `setEqual` tb2 && cardinality tb1 <= cardinality tb2
+        let growing = IM.keysSet (IM.filter (/= 0) (IM.mapMaybe id (combineIntMaps (const Nothing) Just (\i1 i2 -> Just (i2 - i1)) (unTagBag tb1) (unTagBag tb2))))
+        return $ Generaliser {
+            generaliseStackFrame  = \kf       -> any (`IS.member` growing) (stackFrameTags' kf),
+            generaliseHeapBinding = \_ (_, e) -> pureHeapBindingTag' e `IS.member` growing
+          }
     
     stateTags (Heap h _, k, (_, e)) = traceRender ("stateTags (TagBag)", M.map (pureHeapBindingTag' . snd) h, map stackFrameTags' k, focusedTermTag' e) $
                                       pureHeapTagBag h `plusTagBag` stackTagBag k `plusTagBag` tagTagBag (focusedTermTag' e)
@@ -41,10 +43,6 @@ instance TagCollection TagBag where
         tagTagBag :: Tag -> TagBag
         tagTagBag = mkTagBag . return
 
-
--- FIXME: better encapsulation for this stuff:
--- FIXME: I only need to expose this stuff to work out whether components of the State are growing. A better idea might be
--- to just export a function that tells you directly which parts of a State are estimated to be growing.
 
 pureHeapBindingTag' :: AnnedTerm -> Tag
 pureHeapBindingTag' = injectTag 5 . annedTag
