@@ -15,7 +15,6 @@ module Termination.Terminate (
 
 import Evaluator.Syntax
 
-import StaticFlags
 import Utilities
 
 import qualified Data.IntSet as IS
@@ -50,8 +49,7 @@ isContinue _ = False
 terminate :: TagCollection tc => History tc a -> tc -> TermRes tc a
 terminate hist here
   -- | traceRender (length hist, tagBag here) && False = undefined
-  | tERMINATION_CHECK
-  , (prev, prev_extra):_ <- [(prev, prev_extra) | (prev, prev_extra) <- unHistory hist, if prev <| here then {- traceRender (hang (text "terminate") 2 (pPrint hist $$ pPrint here)) -} True else False]
+  | (prev, prev_extra):_ <- [(prev, prev_extra) | (prev, prev_extra) <- unHistory hist, if prev <| here then {- traceRender (hang (text "terminate") 2 (pPrint hist $$ pPrint here)) -} True else False]
   = Stop (prev `growingTags` here) prev_extra
   | otherwise
   = Continue (\here_extra -> History $ (here, here_extra) : unHistory hist)

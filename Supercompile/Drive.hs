@@ -17,8 +17,10 @@ import Evaluator.Syntax
 
 import Size.Deeds
 
+import Termination.Never
 import Termination.TagBag
 import Termination.TagGraph
+import Termination.TagSet
 import Termination.Terminate
 
 import Name
@@ -33,8 +35,14 @@ import Data.Tree
 
 
 supercompile :: Term -> Term
-supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ runScpM input_fvs $ fmap snd $ (case tAG_COLLECTION of TagBag -> sc (undefined :: TagBag) emptyHistory; TagGraph -> sc (undefined :: TagGraph) emptyHistory) (deeds, state)
-  where input_fvs = annedTermFreeVars anned_e
+supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ runScpM input_fvs $ fmap snd $ this_sc (deeds, state)
+  where this_sc
+          | not tERMINATION_CHECK                        = sc (undefined :: Never)    emptyHistory
+          | otherwise = case tAG_COLLECTION of TagBag   -> sc (undefined :: TagBag)   emptyHistory
+                                               TagGraph -> sc (undefined :: TagGraph) emptyHistory
+                                               TagSet   -> sc (undefined :: TagSet)   emptyHistory
+        
+        input_fvs = annedTermFreeVars anned_e
         state = (Heap M.empty reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, anned_e))
         anned_e = toAnnedTerm e
         
