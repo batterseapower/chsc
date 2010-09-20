@@ -132,10 +132,12 @@ matchHeapExact init_h_l init_h_r (bound_eqs, free_eqs) = do
 matchPureHeapExact :: IdSupply -> [(Var, Var)] -> [(Var, Var)] -> PureHeap -> PureHeap -> Maybe [(Var, Var)]
 matchPureHeapExact ids bound_eqs free_eqs init_h_l init_h_r = do
     -- 1) Find the initial matching by simply recursively matching used bindings from the Left
-    --    heap against those from the Right heap (if any)
+    --    heap against those from the Right heap (if any).
     eqs <- matchPureHeap ids bound_eqs free_eqs init_h_l init_h_r
     -- 2) The outgoing equalities should only relate x_l's that are not bound by init_h_l
-    --    because we don't the local bound variables I've generated from matchingIdSupply "leaking" upwards
+    --    because we don't want the local bound variables I've generated from matchingIdSupply "leaking" upwards.
+    --    (I think this reason is now redundant, but actually we still need to make sure that we only output equalities
+    --     on free variables of the two heaps).
     eqs <- return $ filter (\(x_l, _x_r) -> x_l `M.notMember` init_h_l) eqs
     -- 3) Now the problem is that there might be some bindings in the Right heap that are referred
     --    to by eqs. We want an exact match, so we can't allow that.

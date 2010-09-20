@@ -155,7 +155,7 @@ data Promise = P {
 --  memoising the FVs on the term structure itself.
 
 instance MonadStatics ScpM where
-    withStatics orig_xs mx = bindFloats (any (`S.member` xs) . lexical) $ ScpM $ \e s k -> unScpM mx (e { statics = statics e `S.union` xs }) s (\(!res) s -> traceRender ("withStatics", xs) $ k res s)
+    withStatics orig_xs gen_xs mx = bindFloats (any (\x -> x `S.member` xs && x `S.notMember` gen_xs) . lexical) $ ScpM $ \e s k -> unScpM mx (e { statics = (statics e `S.union` xs) S.\\ gen_xs }) s (\(!res) s -> traceRender ("withStatics", xs) $ k res s)
       where xs = if lOCAL_TIEBACKS then orig_xs else S.empty -- NB: it's important we still use bindFloats in (not lOCAL_TIEBACKS) because h functions are static
 
 -- NB: be careful of this subtle problem:
@@ -174,7 +174,10 @@ instance MonadStatics ScpM where
 -- that manner, but we still want to tie back to them if possible. The bindFloats function achieves this by carefully shuffling information between the
 -- fulfilments and promises parts of the monadic-carried state.
 bindFloats :: (Promise -> Bool) -> ScpM a -> ScpM (Out [(Var, FVedTerm)], a)
-bindFloats p mx = ScpM $ \e s k -> unScpM mx (e { promises = map fst (fulfilments s) ++ promises e }) (s { fulfilments = [] }) (\x _e (s'@(ScpState { fulfilments = (partition (p . fst) -> (fs_now, fs_later)) })) -> traceRender ("bindFloats", map (fun . fst) fs_now, map (fun . fst) fs_later) $ k (sortBy (comparing ((read :: String -> Int) . drop 1 . name_string . fst)) [(fun p, lambdas (abstracted p) e') | (p, e') <- fs_now], x) e (s' { fulfilments = fs_later ++ fulfilments s }))
+bindFloats p mx = ScpM $ \e s k -> unScpM mx (e { promises = map fst (fulfilments s) ++ promises e }) (s { fulfilments = [] })
+                                             (\x _e (s'@(ScpState { fulfilments = (partition (p . fst) -> (fs_now, fs_later)) })) -> traceRender ("bindFloats", [(fun p, lexical p, fvedTermFreeVars e) | (p, e) <- fs_now], [(fun p, lexical p, fvedTermFreeVars e) | (p, e) <- fs_later]) $
+                                                                                                                                     k (sortBy (comparing ((read :: String -> Int) . drop 1 . name_string . fst)) [(fun p, lambdas (abstracted p) e') | (p, e') <- fs_now], x)
+                                                                                                                                       e (s' { fulfilments = fs_later ++ fulfilments s }))
 
 getStatics :: ScpM FreeVars
 getStatics = ScpM $ \e s k -> k (statics e) e s
@@ -290,7 +293,3 @@ memo opt (deeds, state) = do
             res <- opt (deeds, state)
             traceRenderM ("<sc", x, residualiseState state, res)
             return res
-
-traceRenderM :: (Pretty a, Monad m) => a -> m ()
---traceRenderM x mx = fmap length history >>= \indent -> traceRender (nest indent (pPrint x)) mx
-traceRenderM x = traceRender (pPrint x) (return ())

@@ -314,6 +314,9 @@ traceRender :: Pretty a => a -> b -> b
 traceRender x | qUIET     = id
               | otherwise = trace (pPrintRender x)
 
+traceRenderM :: (Pretty a, Monad m) => a -> m ()
+traceRenderM x = traceRender x (return ())
+
 assertRender :: Pretty a => a -> Bool -> b -> b
 assertRender _ _ x | not aSSERTIONS = x
 assertRender _ True  x = x
