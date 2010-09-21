@@ -510,7 +510,7 @@ mapAccumM :: (Traversable.Traversable t, Monoid m) => (a -> (m, b)) -> t a -> (m
 mapAccumM f ta = Traversable.mapAccumL (\m a -> case f a of (m', b) -> (m `mappend` m', b)) mempty ta
 
 
-newtype Identity a = I { unI :: a } deriving (Functor)
+newtype Identity a = I { unI :: a } deriving (Functor, Foldable.Foldable)
 
 instance Show1 Identity where
     showsPrec1 prec (I x) = showParen (prec >= appPrec) (showString "Identity" . showsPrec appPrec x)

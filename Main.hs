@@ -28,6 +28,7 @@ import Numeric (showFFloat)
 main :: IO ()
 main = do
     (_flags, args) <- fmap (partition ("-" `isPrefixOf`)) getArgs
+    putStrLn $ intercalate " & " ["Filename", "SC time", "Compile time", "Run time", "Heap size", "Term size"] ++ " \\\\"
     mapM_ testOne args
 
 
@@ -50,7 +51,7 @@ splitModule xes = (letRecSmart (transitiveInline (S.singleton root)) (var root),
 
 testOne :: FilePath -> IO ()
 testOne file = do
-    hPutStrLn stderr file
+    hPutStrLn stderr $ "% " ++ file
     (wrapper, binds) <- parse file
     case splitModule binds of
       (_, Nothing) -> hPutStrLn stderr "Skipping: no tests"
@@ -87,7 +88,7 @@ testOne file = do
             dp2 x = showFFloat (Just 2) x ""
             ratio n m = fromIntegral n / fromIntegral m :: Double
             escape = concatMap (\c -> if c == '_' then "\\_" else [c])
-        putStrLn $ intercalate " & " [escape $ map toLower $ takeFileName $ dropExtension file, dp1 super_t ++ "s", dp2 (after_compile_t / before_compile_t), dp2 (after_run_t / before_run_t), dp2 (after_heap_size `ratio` before_heap_size)] ++ " \\\\"
+        putStrLn $ intercalate " & " [escape $ map toLower $ takeFileName $ dropExtension file, dp1 super_t ++ "s", dp2 (after_compile_t / before_compile_t), dp2 (after_run_t / before_run_t), dp2 (after_heap_size `ratio` before_heap_size), dp2 (termSize e' `ratio` termSize e)] ++ " \\\\"
 
 catchLeft :: Either String b -> IO b
 catchLeft (Left err)  = hPutStrLn stderr err >> exitWith (ExitFailure 1)
