@@ -1,0 +1,52 @@
+#include "../Prelude.core"
+
+-- !!! Wentworth's version of a program to generate
+-- !!! all the expansions of a generalised regular expression
+-- !!!
+--
+-- RJE: Modified so it only outputs the number of characters in the output, 
+-- rather that the output itself, thus avoiding having to generate such a 
+-- huge output file to get a reasonable execution time.
+
+root regexp = numchars (expand regexp)
+
+--numchars :: [String] -> Int
+numchars l = sum'Int $ map length l
+
+--expand :: String -> [String]
+expand re = case re of
+    []   -> [""]
+    x:xs -> case x of
+              '<' -> numericRule xs
+              '[' -> alphabeticRule xs
+              _   -> constantRule (x:xs)
+
+--constantRule :: String -> [String]
+constantRule re = case re of (c:rest) -> [ c:z | z <- expand rest ]
+
+--alphabeticRule :: String -> [String]
+alphabeticRule re0
+  = case re0 of
+      a:re1 -> case re1 of
+                 c1:re2 -> case c1 of
+                             '-' -> case re2 of
+                                      b:re3 -> case re3 of
+                                                 c2:rest -> case c2 of
+                                                              ']' -> if a `lte'Char` b
+                                                                     then [c:z | c <-          enumFromTo'Char a b,  z <- expand rest]
+                                                                     else [c:z | c <- reverse (enumFromTo'Char b a), z <- expand rest]
+
+--numericRule :: String -> [String]
+numericRule x
+  = [ pad (show i) ++ z
+    | i <- if u < v then [u..v] else [u,u-1..v]
+    , z <- expand s ]
+  where
+    (p,_:q) = span (`neq'Char` '-') x
+    (r,_:s) = span (`neq'Char` '>') q
+    (u,v)   = (mknum p, mknum r)
+    mknum s = foldl (\ u c -> u * 10 + (ord c - ord '0')) 0 s
+    pad s   = [ '0' | i <- [1 .. (width-(length s))]] ++ s
+    width   = max (length (show u)) (length (show v))
+
+tests = [(root "", 0)]
