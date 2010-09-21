@@ -31,6 +31,11 @@ fromIntegral'Int'Integer = Prelude.fromIntegral :: Int -> Integer
 fromIntegral'Int'Double = Prelude.fromIntegral :: Int -> Double
 
 round'Double'Int = Prelude.round :: Double -> Int
+ceiling'Double'Int = Prelude.ceiling :: Double -> Int
+
+div'Int = Prelude.div :: Int -> Int -> Int
+max'Int = Prelude.max :: Int -> Int -> Int
+odd'Int = Prelude.odd :: Int -> Bool
 
 gt'Integer = (Prelude.>) :: Integer -> Integer -> Bool
 add'Integer = (Prelude.+) :: Integer -> Integer -> Integer
@@ -43,6 +48,7 @@ lte'Double = (Prelude.<=) :: Double -> Double -> Bool
 add'Double = (Prelude.+) :: Double -> Double -> Double
 subtract'Double = (Prelude.-) :: Double -> Double -> Double
 multiply'Double = (Prelude.*) :: Double -> Double -> Double
+divide'Double = (Prelude./) :: Double -> Double -> Double
 negate'Double = Prelude.negate :: Double -> Double
 
 eq'Char = (Prelude.==) :: Char -> Char -> Bool

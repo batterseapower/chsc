@@ -88,6 +88,10 @@ buildWrappers ps
     dataConArity "Wheel2"  = 3 -- Wheel-Sieve2
     dataConArity "A"       = 0 -- KMP
     dataConArity "B"       = 0 -- KMP
+    dataConArity "H"       = 0 -- Paraffins
+    dataConArity "C"       = 3 -- Paraffins
+    dataConArity "BCP"     = 2 -- Paraffins
+    dataConArity "CCP"     = 4 -- Paraffins
     dataConArity s = panic "dataConArity" (text s)
 
 newtype ParseM a = ParseM { unParseM :: ParseState -> (ParseState, a) }

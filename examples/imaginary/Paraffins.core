@@ -1,0 +1,95 @@
+#include "../Prelude.core"
+
+{-
+ - Id Example Program
+ - Ensnaffled by SLPJ from MIT via
+ - RPaul <rpaul@juicy-juice.lcs.mit.edu> 93/08/26.
+ - Original author: Steve Heller
+ -}
+
+-- Generation of radicals
+
+--three_partitions :: Int -> [(Int,Int,Int)]
+three_partitions m =
+  [ (i,j,k) | i <- enumFromTo'Int 0 (div'Int m 3), j <- enumFromTo i (div'Int (m-i) 2), k <- [m - (i+j)]]
+
+--remainders :: [a] -> [[a]]
+remainders rs = case rs of
+  []     -> []
+  (r:rs) -> (r:rs) : (remainders rs)
+
+--radical_generator :: Int -> Array Int [Radical]
+radical_generator n =
+  radicals
+ where 
+  radicals =
+    array (0,n) ((0,[H]) : [(j,rads_of_size_n radicals j) | j <- [1..n]])
+
+--rads_of_size_n :: Array Int [Radical] -> Int -> [Radical]
+rads_of_size_n radicals n =
+  [ (C ri rj rk)
+  | (i,j,k)  <- (three_partitions (n-1)),
+    (ri:ris) <- (remainders (radicals `arrayLookup` i)),
+    (rj:rjs) <- (remainders (if (i==j) then (ri:ris) else radicals `arrayLookup` j)),
+    rk       <- (if (j==k) then (rj:rjs) else radicals `arrayLookup` k)]
+
+-- Generation of paraffins.
+
+--bcp_generator :: Array Int [Radical] -> Int -> [Paraffin]
+bcp_generator radicals n =
+  if (odd'Int n) then []
+  else
+    [ (BCP r1 r2) | (r1:r1s) <- (remainders (radicals `arrayLookup` (div'Int n 2))),
+                    r2       <- (r1:r1s) ]
+    
+--four_partitions :: Int -> [(Int,Int,Int,Int)]
+four_partitions m =
+  [ (i,j,k,l)
+  | i <- [0..(div'Int m 4)],
+    j <- [i..(div'Int (m-i) 3)],
+    k <- [(max'Int j (ceiling'Double'Int ((fromIntegral'Int'Double m) `divide'Double` (fromIntegral'Int'Double 2)) - i - j))..(div'Int (m-i-j) 2)],
+    l <- [(m - (i+j+k))]]
+
+--ccp_generator :: Array Int [Radical] -> Int -> [Paraffin]
+ccp_generator radicals n =
+  [ (CCP ri rj rk rl)
+  | (i,j,k,l) <- (four_partitions (n-1)),
+    (ri:ris)  <- (remainders (radicals `arrayLookup` i)),
+    (rj:rjs)  <- (remainders (if (i==j) then (ri:ris) else radicals `arrayLookup` j)),
+    (rk:rks)  <- (remainders (if (j==k) then (rj:rjs) else radicals `arrayLookup` k)),
+    rl        <- (if (k==l) then (rk:rks) else radicals `arrayLookup` l)]
+
+--bcp_until :: Int -> [Int]
+bcp_until n =
+  [length(bcp_generator radicals j) | j <- enumFromTo'Int 1 n]
+ where
+  radicals = radical_generator (div'Int n 2)
+
+--ccp_until :: Int -> [Int]
+ccp_until n =
+  [length(ccp_generator radicals j) | j <- enumFromTo'Int 1 n]
+ where
+  radicals = radical_generator (div'Int n 2)
+
+--paraffins_until :: Int -> [Int]
+paraffins_until n =
+  [length (bcp_generator radicals j) + length (ccp_generator radicals j)
+   | j <- enumFromTo'Int 1 n]
+ where
+  radicals = radical_generator (div'Int n 2)
+
+root num = ([length (rads `arrayLookup` i) | rads <- [(radical_generator num)], i <- enumFromTo'Int 0 num],
+            bcp_until num,
+            ccp_until num,
+            paraffins_until num)
+
+tests = [
+    (root 17, ([1,1,1,2,4,8,17,39,89,211,507,1238,3057,7639,19241,48865,124906,321198],
+               [0,1,0,1,0,3,0,10,0,36,0,153,0,780,0,4005,0],
+               [1,0,1,1,3,2,9,8,35,39,159,202,802,1078,4347,6354,24894],
+               [1,1,1,2,3,5,9,18,35,75,159,355,802,1858,4347,10359,24894])),
+    (root 19, ([1,1,1,2,4,8,17,39,89,211,507,1238,3057,7639,19241,48865,124906,321198,830219,2156010],
+               [0,1,0,1,0,3,0,10,0,36,0,153,0,780,0,4005,0,22366,0],
+               [1,0,1,1,3,2,9,8,35,39,159,202,802,1078,4347,6354,24894,38157,148284],
+               [1,1,1,2,3,5,9,18,35,75,159,355,802,1858,4347,10359,24894,60523,148284]))
+  ]
