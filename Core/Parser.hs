@@ -115,6 +115,9 @@ nameThem es f = mapM (freshFloatName "a") es >>= \(unzip -> (mb_es, xs)) -> fmap
 list :: [Term] -> ParseM Term
 list es = nameThem es $ \es_xs -> replicateM (length es) (freshName "list") >>= \cons_xs -> return $ uncurry bind $ foldr (\(cons_x, e_x) (floats, tl) -> ((cons_x, tl) : floats, cons e_x cons_x)) ([], nil) (cons_xs `zip` es_xs)
 
+appE :: Term -> Term -> ParseM Term
+appE e1 e2 = e2 `nameIt` \x2 -> return (e1 `app` x2)
+
 dataConWrapper :: DataCon -> ParseM Var
 dataConWrapper = grabWrapper dcWrappers (\s x -> s { dcWrappers = x })
 
@@ -166,7 +169,7 @@ expCore (LHE.Var qname) = qNameCore qname
 expCore (LHE.Con qname) = fmap var $ dataConWrapper $ qNameDataCon qname
 expCore (LHE.Lit lit) = literalCore lit
 expCore (LHE.NegApp e) = expCore $ LHE.App (LHE.Var (LHE.UnQual (LHE.Ident "negate"))) e
-expCore (LHE.App e1 e2) = expCore e2 >>= \e2 -> e2 `nameIt` \x2 -> fmap (`app` x2) $ expCore e1
+expCore (LHE.App e1 e2) = expCore e1 >>= \e1 -> expCore e2 >>= appE e1
 expCore (LHE.InfixApp e1 eop e2) = expCore e1 >>= \e1 -> e1 `nameIt` \x1 -> expCore e2 >>= \e2 -> e2 `nameIt` \x2 -> qopCore eop >>= \eop -> return $ apps eop [x1, x2]
 expCore (LHE.Let (LHE.BDecls binds) e) = do
     xes <- declsCore binds
@@ -180,6 +183,7 @@ expCore (LHE.Lambda _ ps e) = expCore e >>= \e -> return $ lambdas xs $ build e
   where (xs, _bound_xs, build) = patCores ps
 expCore (LHE.LeftSection e1 eop) = expCore e1 >>= \e1 -> e1 `nameIt` \x1 -> qopCore eop >>= \eop -> return (eop `app` x1) -- NB: careful about sharing if you add Right sections!
 expCore (LHE.EnumFromThen e1 e2) = expCore $ LHE.Var (LHE.UnQual (LHE.Ident "enumFromThen")) `LHE.App` e1 `LHE.App` e2
+expCore (LHE.ListComp e quals) = listCompCore e [case qual of LHE.QualStmt stmt -> stmt | qual <- quals]
 expCore e = panic "expCore" (text $ show e)
 
 qopCore :: LHE.QOp -> ParseM Term
@@ -210,6 +214,22 @@ altPatCore p = panic "altPatCore" (text $ show p)
 
 dataAlt :: DataCon -> ([Var], [Var], Term -> Term) -> (AltCon, Term -> Term)
 dataAlt dcon (names, _bound_ns, build) = (DataAlt dcon names, build)
+
+listCompCore :: LHE.Exp -> [LHE.Stmt] -> ParseM Term
+listCompCore e_inner stmts = go stmts
+  where
+    go [] = expCore e_inner >>= \e_inner -> list [e_inner]
+    go (stmt:stmts) = case stmt of
+        -- concatMap (\pat -> [[go stmts]]) e
+        LHE.Generator _loc pat e -> do
+            arg1 <- liftM (lambda x . build) (go stmts)
+            arg2 <- expCore e
+            var (name "concatMap") `appE` arg1 >>= (`appE` arg2)
+          where (x, _bound_xs, build) = patCore pat
+        -- if e then [[go stmts]] else []
+        LHE.Qualifier e -> liftM3 if_ (expCore e) (go stmts) (list [])
+        -- let [[binds]] in [[go stmts]]
+        LHE.LetStmt (LHE.BDecls binds) -> liftM2 bind (declsCore binds) (go stmts)
 
 
 specialConDataCon :: LHE.SpecialCon -> DataCon
