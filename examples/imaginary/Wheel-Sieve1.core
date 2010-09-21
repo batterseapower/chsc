@@ -14,7 +14,7 @@ sieve as ps qs = case as of
                       --[n' | o <- s:[s*2,s*3..(head ps-1)*s],
                       --      n <- ns,
                       --      n'<- [n+o], noFactor n'] 
-                      (concatMap (\o -> concatMap (\n -> concatMap (\n' -> if noFactor n' then [n'] else []) [n + o]) ns) (s:enumFromThenTo (s*2) (s*3) ((head ps-1)*s))) ++ sieve ws (tail ps) (tail qs)
+                      (concatMap (\o -> concatMap (\n -> concatMap (\n' -> if noFactor n' then [n'] else []) [n + o]) ns) (s:enumFromThenTo'Int (s*2) (s*3) ((head ps-1)*s))) ++ sieve ws (tail ps) (tail qs)
                      where
                       noFactor = if s<=2 then const True else notDivBy ps qs
 
@@ -36,7 +36,7 @@ nextSize w p = case w of
     --ns' = [n' | o <- [0,s..(p-1)*s],
     --            n <- ns,
     --            n' <- [n+o], n'`mod`p > 0]
-    ns' = concatMap (\o -> concatMap (\n -> concatMap (\n' -> if n' `mod` p > 0 then [n'] else []) [n + o]) ns) (enumFromThenTo 0 s ((p-1)*s))
+    ns' = concatMap (\o -> concatMap (\n -> concatMap (\n' -> if n' `mod` p > 0 then [n'] else []) [n + o]) ns) (enumFromThenTo'Int 0 s ((p-1)*s))
 
 root n = primes !! n
 

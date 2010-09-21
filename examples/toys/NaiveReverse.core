@@ -9,5 +9,5 @@ root xs = sillyReverse xs
 tests = [
     (root [], []),
     (root [1, 2, 3], [3, 2, 1]),
-    (root (enumFromTo 1 1000), (enumFromThenTo 1000 999 1))
+    (root (enumFromTo'Int 1 1000), (enumFromThenTo'Int 1000 999 1))
   ]

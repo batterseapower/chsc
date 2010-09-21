@@ -11,7 +11,7 @@ nsoln nq = length (gen nq)
 
     gen n = if n == 0
              then [[]]
-             else concatMap (\b -> concatMap (\q -> if safe q 1 b then [(q:b)] else []) (enumFromTo 1 nq)) (gen (n - 1))
+             else concatMap (\b -> concatMap (\q -> if safe q 1 b then [(q:b)] else []) (enumFromTo'Int 1 nq)) (gen (n - 1))
 
 root = nsoln
 

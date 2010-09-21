@@ -1,6 +1,6 @@
 #include "../Prelude.core"
 
-root arg = round'Double'Int (realPart'Double (sum'ComplexDouble $ map f (enumFromTo 1 arg)))
+root arg = round'Double'Int (realPart'Double (sum'ComplexDouble $ map f (enumFromTo'Int 1 arg)))
 
 sum'ComplexDouble xs = foldl' add'ComplexDouble lit0'ComplexDouble xs
 

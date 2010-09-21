@@ -1,5 +1,5 @@
-import Prelude hiding ((+), (-), (*), div, mod)
 import qualified Prelude
+import Prelude hiding ((+), (-), (*), div, mod)
 
 prelude_error = Prelude.error
 
@@ -45,3 +45,11 @@ subtract'Double = (Prelude.-) :: Double -> Double -> Double
 multiply'Double = (Prelude.*) :: Double -> Double -> Double
 negate'Double = Prelude.negate :: Double -> Double
 
+eq'Char = (Prelude.==) :: Char -> Char -> Bool
+neq'Char = (Prelude./=) :: Char -> Char -> Bool
+lte'Char = (Prelude.<=) :: Char -> Char -> Bool
+lt'Char = (Prelude.<) :: Char -> Char -> Bool
+gte'Char = (Prelude.>=) :: Char -> Char -> Bool
+gt'Char = (Prelude.>) :: Char -> Char -> Bool
+
+succ'Char = Prelude.succ :: Char -> Char

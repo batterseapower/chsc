@@ -30,7 +30,7 @@ bernoulli n = case n == 0 of
         False -> case odd n of
             True -> lit0'Rational
             False -> let ps = neg_powers !! (n - 1)
-                     in (lit_1'Integer `rational` lit2'Integer) `add'Rational` sum'Rational (zipWith (f ps) (enumFromTo 2 n) pascal)
+                     in (lit_1'Integer `rational` lit2'Integer) `add'Rational` sum'Rational (zipWith (f ps) (enumFromTo'Int 2 n) pascal)
 
 --f :: [Integer] -> Int -> [Integer] -> Rational
 f powers k combs = ((sum'Integer $ zipWith (multiply'Integer) powers (tail $ tail combs)) `subtract'Integer` fromIntegral'Int'Integer k) `rational` fromIntegral'Int'Integer (k + 1)

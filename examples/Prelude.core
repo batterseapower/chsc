@@ -42,15 +42,16 @@ dropWhile f xs = case xs of [] -> []; (y:ys) -> if f y then dropWhile f ys else 
 span f xs = case xs of [] -> ([], []); (y:ys) -> if f y then let msns = span f ys in (y : fst msns, snd msns) else ([], xs)
 reverse xs = reverseacc [] xs
   where reverseacc ys xs = case xs of [] -> ys; (x:xs) -> reverseacc (x:ys) xs
-enumFrom x = x : enumFrom (x + 1)
+enumFrom'Int x = x : enumFrom'Int (x + 1)
 enumFrom'Integer x = x : enumFrom'Integer (add'Integer x lit1'Integer)
-enumFromTo n m = if n > m then [] else n : enumFromTo (n + 1) m
+enumFromTo'Int n m = if n > m then [] else n : enumFromTo'Int (n + 1) m
 enumFromTo'Integer n m = if n `gt'Integer` m then [] else n : enumFromTo'Integer (add'Integer n lit1'Integer) m
-enumFromThenTo n m o = let step = m - n in if step >=0 then go_up step n o else go_down step n o
+enumFromTo'Char n m = if n `gt'Char` m then [] else n : enumFromTo'Char (succ'Char n) m
+enumFromThenTo'Int n m o = let step = m - n in if step >=0 then go_up step n o else go_down step n o
   where go_up   step n m = if n > m then [] else n : go_up step (n + step) m
         go_down step n m = if n < m then [] else n : go_down step (n + step) m
 iterate f x = x : iterate f (f x)
-sum xs = foldl' (\acc x -> acc + x) 0 xs
+sum'Int xs = foldl' (\acc x -> acc + x) 0 xs
 sum'Integer xs = foldl' add'Integer lit0'Integer xs
 zip x y = zipWith (,) x y
 zipWith f x y = case x of

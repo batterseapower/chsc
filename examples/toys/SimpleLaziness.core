@@ -2,7 +2,7 @@
 
 root = (take 5 (repeat 10),
         take 5 (repeat 20),
-        sum (take 10 (repeat 30)))
+        sum'Int (take 10 (repeat 30)))
 
 tests = [
     (root, ([10, 10, 10, 10, 10], [20, 20, 20, 20, 20], 300))
