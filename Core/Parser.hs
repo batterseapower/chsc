@@ -185,6 +185,7 @@ expCore (LHE.LeftSection e1 eop) = expCore e1 >>= \e1 -> e1 `nameIt` \x1 -> qopC
 expCore (LHE.RightSection eop e2) = expCore e2 >>= \e2 -> e2 `nameIt` \x2 -> qopCore eop >>= \eop -> eop `nameIt` \xop -> freshName "rsect" >>= \x1 -> return $ lambda x1 $ (var xop `app` x1) `app` x2  -- NB: careful about sharing!
 expCore (LHE.EnumFromTo e1 e2) = expCore $ LHE.Var (LHE.UnQual (LHE.Ident "enumFromTo")) `LHE.App` e1 `LHE.App` e2
 expCore (LHE.EnumFromThen e1 e2) = expCore $ LHE.Var (LHE.UnQual (LHE.Ident "enumFromThen")) `LHE.App` e1 `LHE.App` e2
+expCore (LHE.EnumFromThenTo e1 e2 e3) = expCore $ LHE.Var (LHE.UnQual (LHE.Ident "enumFromThenTo")) `LHE.App` e1 `LHE.App` e2 `LHE.App` e3
 expCore (LHE.ListComp e quals) = listCompCore e [case qual of LHE.QualStmt stmt -> stmt | qual <- quals]
 expCore e = panic "expCore" (text $ show e)
 
