@@ -181,7 +181,9 @@ expCore (LHE.Paren e) = expCore e
 expCore (LHE.List es) = mapM expCore es >>= list
 expCore (LHE.Lambda _ ps e) = expCore e >>= \e -> return $ lambdas xs $ build e
   where (xs, _bound_xs, build) = patCores ps
-expCore (LHE.LeftSection e1 eop) = expCore e1 >>= \e1 -> e1 `nameIt` \x1 -> qopCore eop >>= \eop -> return (eop `app` x1) -- NB: careful about sharing if you add Right sections!
+expCore (LHE.LeftSection e1 eop) = expCore e1 >>= \e1 -> e1 `nameIt` \x1 -> qopCore eop >>= \eop -> return (eop `app` x1)
+expCore (LHE.RightSection eop e2) = expCore e2 >>= \e2 -> e2 `nameIt` \x2 -> qopCore eop >>= \eop -> eop `nameIt` \xop -> freshName "rsect" >>= \x1 -> return $ lambda x1 $ (var xop `app` x1) `app` x2  -- NB: careful about sharing!
+expCore (LHE.EnumFromTo e1 e2) = expCore $ LHE.Var (LHE.UnQual (LHE.Ident "enumFromTo")) `LHE.App` e1 `LHE.App` e2
 expCore (LHE.EnumFromThen e1 e2) = expCore $ LHE.Var (LHE.UnQual (LHE.Ident "enumFromThen")) `LHE.App` e1 `LHE.App` e2
 expCore (LHE.ListComp e quals) = listCompCore e [case qual of LHE.QualStmt stmt -> stmt | qual <- quals]
 expCore e = panic "expCore" (text $ show e)

@@ -1,0 +1,3 @@
+root = ((`div` 1) 2, (4 `div`) 3)
+
+tests = [(root, (2, 1))]
