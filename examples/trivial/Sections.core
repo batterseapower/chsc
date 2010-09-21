@@ -1,3 +1,3 @@
-root = ((`div` 1) 2, (4 `div`) 3)
+root = ((`div'Int` 1) 2, (4 `div'Int`) 3)
 
 tests = [(root, (2, 1))]

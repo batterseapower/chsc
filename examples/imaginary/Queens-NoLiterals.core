@@ -7,7 +7,7 @@ nsoln nq = length (gen nq)
   where
     safe x d qs = case qs of
                     [] -> True
-                    (q:l) -> safer x d q {- x /= q && x /= q+d && x /= q-d -} && safe x (d `add'Int` lit1'Int) l
+                    (q:l) -> safer x d q {- x `neq'Int` q && x `neq'Int` q+d && x `neq'Int` q-d -} && safe x (d `add'Int` lit1'Int) l
 
     gen n = if n `eq'Int` lit0'Int
              then [[]]

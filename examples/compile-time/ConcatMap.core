@@ -9,32 +9,32 @@ concatMap f xs = case xs of
 root = f1 0
   where
     -- 0..1
-    f1 x = concatMap f2 [y, y + 1]
+    f1 x = concatMap f2 [y, y `add'Int` 1]
       where y = x
     -- 2..5
-    f2 x = concatMap f3 [y, y + 1]
-      where y = (x + 1) * 2
+    f2 x = concatMap f3 [y, y `add'Int` 1]
+      where y = (x `add'Int` 1) * 2
     -- 6..12
-    f3 x = concatMap f4 [y, y + 1]
-      where y = (x + 1) * 2
+    f3 x = concatMap f4 [y, y `add'Int` 1]
+      where y = (x `add'Int` 1) * 2
     -- 14..27
-    f4 x = concatMap f5 [y, y + 1]
-      where y = (x + 1) * 2
+    f4 x = concatMap f5 [y, y `add'Int` 1]
+      where y = (x `add'Int` 1) * 2
     -- 30..57
-    f5 x = concatMap f6 [y, y + 1]
-      where y = (x + 1) * 2
+    f5 x = concatMap f6 [y, y `add'Int` 1]
+      where y = (x `add'Int` 1) * 2
     -- 1.3s
     --f6 x = finish x
-    f6 x = concatMap f7 [y, y + 1]
-      where y = (x + 1) * 2
+    f6 x = concatMap f7 [y, y `add'Int` 1]
+      where y = (x `add'Int` 1) * 2
     -- 3.1s
     --f7 x = finish x
-    f7 x = concatMap f8 [y, y + 1]
-      where y = (x + 1) * 2
+    f7 x = concatMap f8 [y, y `add'Int` 1]
+      where y = (x `add'Int` 1) * 2
     -- 8.3s
     --f8 x = finish x
-    f8 x = concatMap f9 [y, y + 1]
-      where y = (x + 1) * 2
+    f8 x = concatMap f9 [y, y `add'Int` 1]
+      where y = (x `add'Int` 1) * 2
     -- 20.8s
     f9 x = finish x
 

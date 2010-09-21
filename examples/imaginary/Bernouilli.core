@@ -16,24 +16,24 @@ powers = enumFrom'Integer lit2'Integer : map (zipWith multiply'Integer (head pow
 -- type signature required for compilers lacking the monomorphism restriction
 --neg_powers :: [[Integer]]
 neg_powers = 
-  map (zipWith (\n x -> if n then x else negate'Integer x) (iterate not True)) powers
+  map (zipWith (\n x -> if n then x else negate'Int'Integer x) (iterate not True)) powers
 
 --pascal:: [[Integer]]
 pascal = [lit1'Integer, lit2'Integer, lit1'Integer] : map (\line -> zipWith add'Integer (line ++ [lit0'Integer]) (lit0'Integer:line)) pascal
 
 
 --bernoulli :: Int -> Rational
-bernoulli n = case n == 0 of
+bernoulli n = case n `eq'Int` 0 of
     True -> lit1'Integer `rational` lit1'Integer
-    False -> case n == 1 of
+    False -> case n `eq'Int` 1 of
         True -> lit_1'Integer `rational` lit2'Integer
-        False -> case odd n of
+        False -> case odd'Int n of
             True -> lit0'Rational
-            False -> let ps = neg_powers !! (n - 1)
+            False -> let ps = neg_powers !! (n `subtract'Int` 1)
                      in (lit_1'Integer `rational` lit2'Integer) `add'Rational` sum'Rational (zipWith (f ps) (enumFromTo'Int 2 n) pascal)
 
 --f :: [Integer] -> Int -> [Integer] -> Rational
-f powers k combs = ((sum'Integer $ zipWith (multiply'Integer) powers (tail $ tail combs)) `subtract'Integer` fromIntegral'Int'Integer k) `rational` fromIntegral'Int'Integer (k + 1)
+f powers k combs = ((sum'Integer $ zipWith (multiply'Integer) powers (tail $ tail combs)) `subtract'Integer` fromIntegral'Int'Integer k) `rational` fromIntegral'Int'Integer (k `add'Int` 1)
 
 --sum'Rational :: [Rational] -> Rational
 sum'Rational xs = foldr add'Rational lit0'Rational xs

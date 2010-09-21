@@ -1,4 +1,4 @@
-loop n = if n < 1000 then loop (n + 1) else True
+loop n = if n`lt'Int`1000 then loop (n `add'Int` 1) else True
 
 root = loop 0
 

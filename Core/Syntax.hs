@@ -63,14 +63,14 @@ instance NFData1 ann => NFData (ValueF ann) where
     rnf (Literal a) = rnf a
 
 instance Pretty PrimOp where
-    pPrint Add           = text "(+)"
-    pPrint Subtract      = text "(-)"
-    pPrint Multiply      = text "(*)"
-    pPrint Divide        = text "div"
-    pPrint Modulo        = text "mod"
-    pPrint Equal         = text "(==)"
-    pPrint LessThan      = text "(<)"
-    pPrint LessThanEqual = text "(<=)"
+    pPrint Add           = text "add'Int"
+    pPrint Subtract      = text "subtract'Int"
+    pPrint Multiply      = text "multiply'Int"
+    pPrint Divide        = text "div'Int"
+    pPrint Modulo        = text "mod'Int"
+    pPrint Equal         = text "eq'Int"
+    pPrint LessThan      = text "lt'Int"
+    pPrint LessThanEqual = text "lte'Int"
 
 instance Pretty AltCon where
     pPrintPrec level prec altcon = case altcon of

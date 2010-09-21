@@ -4,11 +4,11 @@ flip t = case t of
 
 sumtr t = case t of
     Leaf x -> x
-    Branch l r -> sumtr l `plus'Int` sumtr r
+    Branch l r -> sumtr l `opaque'add'Int` sumtr r
 
-buildTree n t = case n `eq'Int` 0 of
+buildTree n t = case n `opaque'eq'Int` 0 of
     True -> t
-    False -> buildTree (n`subtract'Int`1) (Branch t t)
+    False -> buildTree (n`opaque'subtract'Int`1) (Branch t t)
 
 --root :: Int -> Int
 root n = sumtr (flip (flip (buildTree n (Leaf 1))))

@@ -35,13 +35,13 @@
 -- works.
 
 carryPropagate base ds
-  = case ds of (d:ds) -> let carryguess = d `div` base
+  = case ds of (d:ds) -> let carryguess = d `div'Int` base
                              rerootder = d `mod` base
                              nextcarry:fraction = carryPropagate (base+1) ds
                              dCorrected = d + nextcarry
-                         in if carryguess == (d+9) `div` base 
+                         in if carryguess `eq'Int` (d+9) `div'Int` base 
                              then carryguess : (rerootder+nextcarry) : fraction
-                             else (dCorrected `div` base) : (dCorrected `mod` base) : fraction
+                             else (dCorrected `div'Int` base) : (dCorrected `mod` base) : fraction
 e = ("2."++) $ 
     tail . concat $
     map (show.head) $

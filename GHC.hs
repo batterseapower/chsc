@@ -29,21 +29,21 @@ testingModule :: String -> Term -> Term -> String
 testingModule wrapper e test_e = unlines $
     languageLine :
     "module Main(main) where" :
-    "import Control.DeepSeq" :
+    "import qualified Control.DeepSeq as DeepSeq" :
     "import Data.Time.Clock.POSIX (getPOSIXTime)" :
     [wrapper] ++
     "" :
-    "time_ :: IO a -> IO Double" :
-    "time_ act = do { start <- getTime; act; end <- getTime; return $! (Prelude.-) end start }" :
+    "time_ :: Prelude.IO a -> Prelude.IO Prelude.Double" :
+    "time_ act = do { start <- getTime; act; end <- getTime; Prelude.return Prelude.$! (Prelude.-) end start }" :
     "" :
-    "getTime :: IO Double" :
-    "getTime = (fromRational . toRational) `fmap` getPOSIXTime" :
+    "getTime :: Prelude.IO Prelude.Double" :
+    "getTime = (\\x -> Prelude.fromRational (Prelude.toRational x)) `Prelude.fmap` getPOSIXTime" :
     "" :
-    "main = do { t <- time_ (rnf results `seq` return ()); print t }" :
-    "  where results = map assertEq tests" :
+    "main = do { t <- time_ (DeepSeq.rnf results `Prelude.seq` Prelude.return ()); Prelude.print t }" :
+    "  where results = Prelude.map assertEq tests" :
     "" :
-    "assertEq :: (Show a, Eq a) => (a, a) -> ()" :
-    "assertEq (x, y) = if x == y then () else error (\"FAIL! \" ++ show x ++ \", \" ++ show y)" :
+    "assertEq :: (Prelude.Show a, Prelude.Eq a) => (a, a) -> ()" :
+    "assertEq (x, y) = if x Prelude.== y then () else Prelude.error (\"FAIL! \" Prelude.++ Prelude.show x Prelude.++ \", \" Prelude.++ Prelude.show y)" :
     "" :
     termToHaskellBinding "root" e ++
     termToHaskellBinding "tests" test_e
@@ -55,7 +55,7 @@ printingModule wrapper e = unlines $
     "import Text.Show.Functions" :
     [wrapper] ++
     "" :
-    "main = print root" :
+    "main = Prelude.print root" :
     "" :
     termToHaskellBinding "root" e
 

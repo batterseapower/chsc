@@ -3,5 +3,5 @@
 root xs ys zs = (xs ++ ys) ++ zs
 
 tests = [
-    let n = 10000000 in (length (root (replicate n 'x') (replicate n 'y') (replicate n 'z')), n * 3)
+    let n = 10000000 in (length (root (replicate n 'x') (replicate n 'y') (replicate n 'z')), n `multiply'Int` 3)
   ]

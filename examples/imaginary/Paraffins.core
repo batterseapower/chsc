@@ -1,17 +1,16 @@
 #include "../Prelude.core"
 
-{-
- - Id Example Program
- - Ensnaffled by SLPJ from MIT via
- - RPaul <rpaul@juicy-juice.lcs.mit.edu> 93/08/26.
- - Original author: Steve Heller
- -}
+--
+-- Id Example Program
+-- Ensnaffled by SLPJ from MIT via
+-- RPaul <rpaul@juicy-juice.lcs.mit.edu> 93/08/26.
+-- Original author: Steve Heller
 
 -- Generation of radicals
 
 --three_partitions :: Int -> [(Int,Int,Int)]
 three_partitions m =
-  [ (i,j,k) | i <- enumFromTo'Int 0 (div'Int m 3), j <- enumFromTo i (div'Int (m-i) 2), k <- [m - (i+j)]]
+  [ (i,j,k) | i <- enumFromTo'Int 0 (div'Int m 3), j <- enumFromTo i (div'Int (m-i) 2), k <- [m `subtract'Int` (i+j)]]
 
 --remainders :: [a] -> [[a]]
 remainders rs = case rs of
@@ -47,8 +46,8 @@ four_partitions m =
   [ (i,j,k,l)
   | i <- [0..(div'Int m 4)],
     j <- [i..(div'Int (m-i) 3)],
-    k <- [(max'Int j (ceiling'Double'Int ((fromIntegral'Int'Double m) `divide'Double` (fromIntegral'Int'Double 2)) - i - j))..(div'Int (m-i-j) 2)],
-    l <- [(m - (i+j+k))]]
+    k <- [(max'Int j (ceiling'Double'Int ((fromIntegral'Int'Double m) `divide'Double` (fromIntegral'Int'Double 2)) `subtract'Int` i `subtract'Int` j))..(div'Int (m-i-j) 2)],
+    l <- [(m `subtract'Int` (i+j+k))]]
 
 --ccp_generator :: Array Int [Radical] -> Int -> [Paraffin]
 ccp_generator radicals n =
@@ -73,7 +72,7 @@ ccp_until n =
 
 --paraffins_until :: Int -> [Int]
 paraffins_until n =
-  [length (bcp_generator radicals j) + length (ccp_generator radicals j)
+  [length (bcp_generator radicals j) `add'Int` length (ccp_generator radicals j)
    | j <- enumFromTo'Int 1 n]
  where
   radicals = radical_generator (div'Int n 2)

@@ -1,4 +1,4 @@
-root unk = case unk of [] -> 1; (x:xs) -> (1 + 2) + x
+root unk = case unk of [] -> 1; (x:xs) -> (1 `add'Int` 2) `add'Int` x
 
 tests = [
     (root [],  1),

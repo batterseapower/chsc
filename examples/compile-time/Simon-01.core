@@ -1,6 +1,6 @@
 root = f1 0
 
-f1 x = [x + 1]
+f1 x = [x `add'Int` 1]
 
 (++) xs ys = case xs of
     [] -> ys

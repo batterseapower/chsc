@@ -9,9 +9,9 @@ nsoln nq = length (gen nq)
                     [] -> True
                     (q:l) -> safer x d q && safe x (d+1) l
 
-    gen n = if n == 0
+    gen n = if n `eq'Int` 0
              then [[]]
-             else concatMap (\b -> concatMap (\q -> if safe q 1 b then [(q:b)] else []) (enumFromTo'Int 1 nq)) (gen (n - 1))
+             else concatMap (\b -> concatMap (\q -> if safe q 1 b then [(q:b)] else []) (enumFromTo'Int 1 nq)) (gen (n `subtract'Int` 1))
 
 root = nsoln
 

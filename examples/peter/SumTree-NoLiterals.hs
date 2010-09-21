@@ -2,7 +2,7 @@
 
 data Tree a = Leaf a | Branch (Tree a) (Tree a)
 
-eq'Int = (==) :: Int -> Int -> Bool
-plus'Int = (+) :: Int -> Int -> Int
-subtract'Int = (-) :: Int -> Int -> Int
-multiply'Int = (*) :: Int -> Int -> Int
+opaque'eq'Int = (Prelude.==) :: Int -> Int -> Bool
+opaque'add'Int = (Prelude.+) :: Int -> Int -> Int
+opaque'subtract'Int = (Prelude.-) :: Int -> Int -> Int
+opaque'multiply'Int = (Prelude.*) :: Int -> Int -> Int

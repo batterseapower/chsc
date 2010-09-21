@@ -1,12 +1,12 @@
 root = f1 0
 
-f1 x = concatMap f2 [y, y + 1]
-  where y = (x + 1) * 2
-f2 x = concatMap f3 [y, y + 1]
-  where y = (x + 1) * 2
-f3 x = concatMap f4 [y, y + 1]
-  where y = (x + 1) * 2
-f4 x = [x + 1]
+f1 x = concatMap f2 [y, y `add'Int` 1]
+  where y = (x `add'Int` 1) * 2
+f2 x = concatMap f3 [y, y `add'Int` 1]
+  where y = (x `add'Int` 1) * 2
+f3 x = concatMap f4 [y, y `add'Int` 1]
+  where y = (x `add'Int` 1) * 2
+f4 x = [x `add'Int` 1]
 
 (++) xs ys = case xs of
     [] -> ys

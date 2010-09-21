@@ -1,7 +1,7 @@
 #include "../Prelude.core"
 
 --f :: Int -> Int
-f n = sum'Int [ k * m | k <- enumFromTo'Int 1 n, m <- enumFromTo'Int 1 k ]
+f n = sum'Int [ k `multiply'Int` m | k <- enumFromTo'Int 1 n, m <- enumFromTo'Int 1 k ]
 
 root x = f x
 

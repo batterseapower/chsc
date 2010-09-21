@@ -1,9 +1,9 @@
 #include "../Prelude.core"
 
 example1 = let ones = 1 : ones
-           in map (\x -> x + 1) ones
+           in map (\x -> x `add'Int` 1) ones
 
-example2 = map (\x -> x + 1) (repeat 1)
+example2 = map (\x -> x `add'Int` 1) (repeat 1)
 
 root = (example1, example2)
 

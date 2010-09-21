@@ -31,7 +31,7 @@ wheels = Wheel2 1 [1] [] :
 nextSize w p q = case w of
     Wheel2 s ms ns -> Wheel2 (s*p) ms' ns'
       where
-        xsns' = span (\x -> x<=q) (foldr turn0 (roll (p-1) s) ns)
+        xsns' = span (\x -> x`lte'Int`q) (foldr turn0 (roll (p-1) s) ns)
         ns' = snd xsns'
         xs = fst xsns'
         ms' = foldr turn0 xs ms

@@ -5,7 +5,7 @@ root nq = gen nq
   where
     gen n = case n of
       0 -> [[]]
-      _ -> concatMap (\b -> concatMap (\q -> [(q:b)]) (enumFromTo'Int 1 nq)) (gen (n-1))
+      _ -> concatMap (\b -> concatMap (\q -> [(q:b)]) (enumFromTo'Int 1 nq)) (gen (n `subtract'Int` 1))
 
 tests = [
     (root 0, [[]]),

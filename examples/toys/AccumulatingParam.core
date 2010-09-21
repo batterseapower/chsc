@@ -5,22 +5,22 @@
 --
 --  root c n a b = foldDU n a
 --    where
---      foldDU n a = if a > b
+--      foldDU n a = if a `gt'Int` b
 --                   then n
---                   else foldlDU (c n a) (a + 1)
+--                   else foldlDU (c n a) (a `add'Int` 1)
 --
 -- In the course of supercompilation, we get here:
 --
 --    D[root c n a b]
 --  ==>
---    if a > b
+--    if a `gt'Int` b
 --    then n
---    else D[foldl c (c n a) (enumFromTo'Int (a + 1) b)]
+--    else D[foldl c (c n a) (enumFromTo'Int (a `add'Int` 1) b)]
 --
--- If we generalise away the (c n a) and (a + 1) then we'll get a nice tieback to what we started
+-- If we generalise away the (c n a) and (a `add'Int` 1) then we'll get a nice tieback to what we started
 -- with that and hence build something equivalent to the input code.
 root c n a b = foldl c n (enumFromTo'Int a b)
 
 tests = [
-    (root (+) 0 1 10, 55)
+    (root add'Int 0 1 10, 55)
   ]

@@ -9,12 +9,12 @@ multiply'Nat x y = case y of
     Z   -> Z
     S y -> (x `multiply'Nat` y) `add'Nat` x
 
-fromInteger'Nat x = if x < 1 then Z else S (fromInteger'Nat (x-1))
+fromInteger'Nat x = if x`lt'Int`1 then Z else S (fromInteger'Nat (x-1))
 
 -- partain:sig
 --int :: Nat -> Int
 int n = case n of Z   -> 0
-                  S x -> 1 + int x
+                  S x -> 1 `add'Int` int x
 
 (^^^) x y = case y of Z   -> S Z
                       S y -> x `multiply'Nat` (x ^^^ y)

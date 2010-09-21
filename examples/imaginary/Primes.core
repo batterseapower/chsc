@@ -1,10 +1,10 @@
 #include "../Prelude.core"
 
 --suCC :: Int -> Int
-suCC x = x + 1
+suCC x = x `add'Int` 1
 
 --isdivs :: Int  -> Int -> Bool
-isdivs n x = mod x n /= 0
+isdivs n x = mod'Int x n `neq'Int` 0
 
 --the_filter :: [Int] -> [Int]
 the_filter (n:ns) = filter (isdivs n) ns

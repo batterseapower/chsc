@@ -1,12 +1,5 @@
-(/=) n m = not (n == m)
-(>=) n m = (<=) m n
-(>) n m = (<) m n
-negate n = 0 - n
-signum n = if n < 0 then -1 else if n > 0 then 1 else 0
-abs n = if n < 0 then negate n else n
-
 show n = case n of 0 -> "0"; _ -> showDigits n
-showDigits n = case n of 0 -> ""; _ -> showDigits (n `div` 10) ++ [showDigit (n `mod` 10)]
+showDigits n = case n of 0 -> ""; _ -> showDigits (n `div'Int` 10) ++ [showDigit (n `mod` 10)]
 showDigit n = case n of 0 -> '0'; 1 -> '1'; 2 -> '2'; 3 -> '3'; 4 -> '4';
                         5 -> '5'; 6 -> '6'; 7 -> '7'; 8 -> '8'; 9 -> '9'
 
@@ -22,37 +15,37 @@ not b = if b then False else True
 head xs = case xs of [] -> error "head"; (x:_) -> x
 tail xs = case xs of [] -> error "tail"; (_:xs) -> xs
 
-odd x = x `mod` 2 == 1
-even x = x `mod` 2 == 0
+fst xy = case xy of (x, _) -> x
+snd xy = case xy of (_, y) -> y
 
-length xs = foldl' (\len _ -> len + 1) 0 xs
+length xs = foldl' (\len _ -> len `add'Int` 1) 0 xs
 map f xs = case xs of [] -> []; (x:xs) -> f x : map f xs
 concatMap f xs = concat (map f xs)
 foldr c n xs = case xs of [] -> n; (x:xs) -> c x (foldr c n xs)
 foldl c n xs = case xs of [] -> n; (x:xs) -> foldl c (c n x) xs
 foldl' c n xs = case xs of [] -> n; (x:xs) -> let n' = c n x in case n' of _ -> foldl' c n' xs
-take n xs = if n <= 0 then [] else case xs of [] -> []; (x:xs) -> x : take (n - 1) xs
+take n xs = if n `lte'Int` 0 then [] else case xs of [] -> []; (x:xs) -> x : take (n `subtract'Int` 1) xs
 (++) xs ys = case xs of [] -> ys; (x:xs) -> x : (xs ++ ys)
 concat xs = foldr (++) [] xs
 repeat x = let xs = x : xs in xs
-replicate n x = if n <= 0 then [] else x : replicate (n - 1) x
+replicate n x = if n `lte'Int` 0 then [] else x : replicate (n `subtract'Int` 1) x
 dropWhile f xs = case xs of [] -> []; (y:ys) -> if f y then dropWhile f ys else xs
 --span f ys = spanacc f [] ys
 --  where spanacc f xs ys = case ys of [] -> (reverse xs, []); (y:ys) -> if f y then spanacc f (y:xs) ys else (reverse xs, y:ys)
 span f xs = case xs of [] -> ([], []); (y:ys) -> if f y then let msns = span f ys in (y : fst msns, snd msns) else ([], xs)
 reverse xs = reverseacc [] xs
   where reverseacc ys xs = case xs of [] -> ys; (x:xs) -> reverseacc (x:ys) xs
-enumFrom'Int x = x : enumFrom'Int (x + 1)
+enumFrom'Int x = x : enumFrom'Int (x `add'Int` 1)
 enumFrom'Integer x = x : enumFrom'Integer (x `add'Integer` lit1'Integer)
 enumFrom'Double x = x : enumFrom'Double (x `add'Double` lit1'Double)
-enumFromTo'Int n m = if n > m then [] else n : enumFromTo'Int (n + 1) m
+enumFromTo'Int n m = if n `gt'Int` m then [] else n : enumFromTo'Int (n `add'Int` 1) m
 enumFromTo'Integer n m = if n `gt'Integer` m then [] else n : enumFromTo'Integer (add'Integer n lit1'Integer) m
 enumFromTo'Char n m = if n `gt'Char` m then [] else n : enumFromTo'Char (succ'Char n) m
-enumFromThenTo'Int n m o = let step = m - n in if step >=0 then go_up step n o else go_down step n o
-  where go_up   step n m = if n > m then [] else n : go_up step (n + step) m
-        go_down step n m = if n < m then [] else n : go_down step (n + step) m
+enumFromThenTo'Int n m o = let step = m `subtract'Int` n in if step `gte'Int` 0 then go_up step n o else go_down step n o
+  where go_up   step n m = if n `gt'Int` m then [] else n : go_up step (n `add'Int` step) m
+        go_down step n m = if n`lt'Int`m then [] else n : go_down step (n `add'Int` step) m
 iterate f x = x : iterate f (f x)
-sum'Int xs = foldl' (\acc x -> acc + x) 0 xs
+sum'Int xs = foldl' (\acc x -> acc `add'Int` x) 0 xs
 sum'Integer xs = foldl' add'Integer lit0'Integer xs
 sum'Double xs = foldl' add'Double lit0'Double xs
 zip x y = zipWith (,) x y
@@ -68,4 +61,13 @@ zipWith3 f x y z = case x of
         y:ys -> case z of
             [] -> []
             z:zs -> f x y z : zipWith3 f xs ys zs
-(!!) xs y = case xs of [] -> error "(!!)"; x:xs -> if y == 0 then x else xs !! (y - 1)
+(!!) xs y = case xs of [] -> error "(!!)"; x:xs -> if y `eq'Int` 0 then x else xs !! (y `subtract'Int` 1)
+
+n `neq'Int` m = not (n `eq'Int` m)
+n `gtEq'Int` m = m `ltEq'Int` n
+n `gt'Int` m = m `lt'Int` n
+negate'Int n = 0 `subtract'Int` n
+signum'Int n = if n`lt'Int`0 then -1 else if n `gt'Int` 0 then 1 else 0
+abs'Int n = if n`lt'Int`0 then negate'Int n else n
+odd'Int x = x `mod'Int` 2 `eq'Int` 1
+even'Int x = x `mod'Int` 2 `eq'Int` 0

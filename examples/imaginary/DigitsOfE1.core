@@ -20,11 +20,11 @@ eContFrac = 2:aux 2 where aux n = 1:n:1:aux (n+2)
 -- ratTrans (a,b,c,d) x: compute (a + bx)/(c+dx) as a continued fraction 
 -- Output a digit if we can
 ratTrans (a,b,c,d) xs
- = if ((signum c == signum d) || (abs c < abs d)) && -- No pole in range
-      (c+d)*q <= a+b && (c+d)*q + (c+d) > a+b        -- Next digit is determined
+ = if ((signum'Int c `eq'Int` signum'Int d) || (abs'Int c`lt'Int`abs'Int d)) && -- No pole in range
+      (c+d)*q `lte'Int` a+b && (c+d)*q `add'Int` (c+d) `gt'Int` a+b        -- Next digit is determined
     then q:ratTrans (c,d,a-q*c,b-q*d) xs
     else case xs of (x:xs) -> ratTrans (b,a+x*b,d,c+x*d) xs
-  where q = b `div` d
+  where q = b `div'Int` d
 
 --Finally, we convert a continued fraction to digits by repeatedly multiplying by 10.
 

@@ -39,13 +39,13 @@ alphabeticRule re0
 --numericRule :: String -> [String]
 numericRule x
   = [ pad (show i) ++ z
-    | i <- if u < v then [u..v] else [u,u-1..v]
+    | i <- if u`lt'Int`v then [u..v] else [u,u-1..v]
     , z <- expand s ]
   where
     (p,_:q) = span (`neq'Char` '-') x
     (r,_:s) = span (`neq'Char` '>') q
     (u,v)   = (mknum p, mknum r)
-    mknum s = foldl (\ u c -> u * 10 + (ord c - ord '0')) 0 s
+    mknum s = foldl (\ u c -> u * 10 `add'Int` (ord c `subtract'Int` ord '0')) 0 s
     pad s   = [ '0' | i <- [1 .. (width-(length s))]] ++ s
     width   = max (length (show u)) (length (show v))
 

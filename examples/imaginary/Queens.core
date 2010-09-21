@@ -7,11 +7,11 @@ nsoln nq = length (gen nq)
   where
     safe x d qs = case qs of
                     [] -> True
-                    (q:l) -> x /= q && x /= q+d && x /= q-d && safe x (d+1) l
+                    (q:l) -> x `neq'Int` q && x `neq'Int` q+d && x `neq'Int` q-d && safe x (d+1) l
 
-    gen n = if n == 0
+    gen n = if n `eq'Int` 0
              then [[]]
-             else concatMap (\b -> concatMap (\q -> if safe q 1 b then [(q:b)] else []) (enumFromTo'Int 1 nq)) (gen (n - 1))
+             else concatMap (\b -> concatMap (\q -> if safe q 1 b then [(q:b)] else []) (enumFromTo'Int 1 nq)) (gen (n `subtract'Int` 1))
 
 root = nsoln
 

@@ -7,7 +7,7 @@ listEq xs ys = case xs of
   []       -> case ys of []       -> True
                          (y':ys') -> False
   (x':xs') -> case ys of []       -> False
-                         (y':ys') -> if x' == y' then listEq xs' ys' else False
+                         (y':ys') -> if x' `eq'Int` y' then listEq xs' ys' else False
 
 root xs = xs `listEq` rev (rev xs)
 

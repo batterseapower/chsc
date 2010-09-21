@@ -252,15 +252,15 @@ nameString (LHE.Symbol s) = s
 
 qNameCore :: LHE.QName -> ParseM Term
 qNameCore (LHE.UnQual n) = fmap var $ case nameString n of
-    "+"   -> primWrapper Add
-    "-"   -> primWrapper Subtract
-    "*"   -> primWrapper Multiply
-    "div" -> primWrapper Divide
-    "mod" -> primWrapper Modulo
-    "=="  -> primWrapper Equal
-    "<"   -> primWrapper LessThan
-    "<="  -> primWrapper LessThanEqual
-    s -> return (name s)
+    "add'Int"      -> primWrapper Add
+    "subtract'Int" -> primWrapper Subtract
+    "multiply'Int" -> primWrapper Multiply
+    "div'Int"      -> primWrapper Divide
+    "mod'Int"      -> primWrapper Modulo
+    "eq'Int"       -> primWrapper Equal
+    "lt'Int"       -> primWrapper LessThan
+    "lte'Int"      -> primWrapper LessThanEqual
+    s              -> return (name s)
 qNameCore (LHE.Special sc) = fmap var $ dataConWrapper $ specialConDataCon sc
 qNameCore qn = panic "qNameCore" (text $ show qn)
 

@@ -12,7 +12,7 @@ build n = [
     "root = f1 0",
     ""
   ] ++ concatMap f [1..n-1] ++ [
-    "f" ++ show n ++ " x = [x + 1]",
+    "f" ++ show n ++ " x = [x `add'Int` 1]",
     "",
     "(++) xs ys = case xs of",
     "    [] -> ys",
@@ -27,6 +27,6 @@ build n = [
 
 f :: Int -> [String]
 f n = [
-    "f" ++ show n ++ " x = f" ++ show (n + 1) ++ " y ++ f"  ++ show (n + 1) ++ " (y + 1)",
-    "  where y = (x + 1) * 2"
+    "f" ++ show n ++ " x = f" ++ show (n `add'Int` 1) ++ " y ++ f"  ++ show (n `add'Int` 1) ++ " (y `add'Int` 1)",
+    "  where y = (x `add'Int` 1) * 2"
   ]

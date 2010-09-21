@@ -1,6 +1,6 @@
 #include "../Prelude.core"
 
-root xs ys = sum'Int (zipWith (*) xs ys)
+root xs ys = sum'Int (zipWith multiply'Int xs ys)
 
 tests = [
     let n = 32000000 in (root (replicate n 1) (replicate n 2), 64000000)

@@ -1,7 +1,6 @@
-foldl c n xs = case xs of []     -> n
-                          (y:ys) -> foldl c (c n y) ys
+#include "../Prelude.core"
 
-root xs = foldl (+) 0 xs
+root xs = foldl add'Int 0 xs
 
 tests = [
     (root [], 0),
