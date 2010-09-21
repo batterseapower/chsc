@@ -71,14 +71,7 @@ testOne file = do
         (after_code, after_res) <- runCompiled wrapper e' test_e
     
         -- Save a copy of the supercompiled code somewhere so I can consult it at my leisure
-        let output_dir = foldl1 (</>) [ "output"
-                                      , if eVALUATE_PRIMOPS then "primops"  else "no-primops"
-                                      , if dEEDS            then "deeds"    else "no-deeds"
-                                      , if gENERALISATION   then "gen"      else "no-gen"
-                                      , if sPECULATION      then "spec"     else "no-spec"
-                                      , if rEDUCE_ROLLBACK  then "reducerb" else "no-reducerb"
-                                      , if sC_ROLLBACK      then "scrb"     else "no-scrb"
-                                      ]
+        let output_dir = "output" </> cODE_IDENTIFIER </> rUN_IDENTIFIER
         createDirectoryIfMissing True (takeDirectory $ output_dir </> file)
         writeFile (output_dir </> replaceExtension file ".hs") after_code
         

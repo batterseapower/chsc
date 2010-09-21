@@ -2,10 +2,20 @@ module StaticFlags where
 
 import Data.Char (toLower)
 import Data.Maybe
-import Data.List (stripPrefix)
+import Data.List (intercalate, stripPrefix)
 
 import System.Environment
 import System.IO.Unsafe
+import System.Process
+
+
+{-# NOINLINE cODE_IDENTIFIER #-}
+cODE_IDENTIFIER :: String
+cODE_IDENTIFIER = head $ lines $ unsafePerformIO (readProcess "git" ["log", "--format=%H", "-1"] "")
+
+{-# NOINLINE rUN_IDENTIFIER #-}
+rUN_IDENTIFIER :: String
+rUN_IDENTIFIER = intercalate " " [filter (/= '-') arg | '-':'-':arg <- unsafePerformIO getArgs]
 
 
 {-# NOINLINE aSSERTIONS #-}
