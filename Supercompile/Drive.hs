@@ -1,4 +1,4 @@
-{-# LANGUAGE ViewPatterns, TupleSections, PatternGuards, BangPatterns, Rank2Types #-}
+{-# LANGUAGE ViewPatterns, TupleSections, PatternGuards, BangPatterns, RankNTypes #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 module Supercompile.Drive (supercompile) where
 
@@ -233,9 +233,9 @@ runScpM input_fvs me = unScpM (bindFloats (\_ -> True) me) init_e init_s (\(xes'
     init_e = ScpEnv { statics = input_fvs, promises = [] }
     init_s = ScpState { names = map (\i -> name $ 'h' : show (i :: Int)) [0..], fulfilments = [] }
 
-catchScpM :: ((c -> ScpM b) -> ScpM a) -- ^ Action to try: supplies a function than can be called to "raise an exception". Raising an exception restores the original ScpEnv and ScpState
-          -> (c -> ScpM a)             -- ^ Handler deferred to if an exception is raised
-          -> ScpM a                    -- ^ Result from either the main action or the handler
+catchScpM :: ((forall b. c -> ScpM b) -> ScpM a) -- ^ Action to try: supplies a function than can be called to "raise an exception". Raising an exception restores the original ScpEnv and ScpState
+          -> (c -> ScpM a)                       -- ^ Handler deferred to if an exception is raised
+          -> ScpM a                              -- ^ Result from either the main action or the handler
 catchScpM f_try f_abort = ScpM $ \e s k -> unScpM (f_try (\c -> ScpM $ \_ _ _ -> unScpM (f_abort c) e s k)) e s k
 
 
@@ -245,7 +245,7 @@ newtype Rollback tc = RB { rollbackWith :: (Generaliser, History tc (Maybe (Roll
 {-# SPECIALISE sc' :: TagGraph -> History TagGraph (Maybe (Rollback TagGraph)) -> (Deeds, State) -> ScpM (Deeds, Out FVedTerm) #-}
 sc, sc' :: TagCollection tc => tc -> History tc (Maybe (Rollback tc)) -> (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
 sc  tc hist = memo (sc' tc hist)
-sc' tc hist (deeds, state) = (check . Just . RB) `catchScpM` \(gen, hist') -> stop gen (hist `forgetFutureHistory` hist') -- NB: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
+sc' tc hist (deeds, state) = (\raise -> check (Just (RB raise))) `catchScpM` \(gen, hist') -> stop gen (hist `forgetFutureHistory` hist') -- NB: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
   where
     check mb_rb = case terminate hist (stateTags state `asTypeOf` tc) of
                     Continue mk_hist -> continue (mk_hist mb_rb)
