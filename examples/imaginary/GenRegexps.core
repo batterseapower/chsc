@@ -49,4 +49,6 @@ numericRule x
     pad s   = [ '0' | i <- [1 .. (width-(length s))]] ++ s
     width   = max (length (show u)) (length (show v))
 
-tests = [(root "", 0)]
+tests = [(root "", 0),
+         (root "[a-j][a-j][a-j]abcdefghijklmnopqrstuvwxyz", 29000),
+         (root "[a-j][a-j][a-j][a-j][a-j][a-j][a-d]abcdefghijklmnopqrstuvwxyz", 132000000)]
