@@ -212,6 +212,7 @@ altPatCore (LHE.PTuple [pat1, pat2])       = dataAlt pairDataCon (patCores [pat1
 altPatCore (LHE.PParen pat)                = altPatCore pat
 altPatCore (LHE.PList [])                  = dataAlt nilDataCon ([], [], id)
 altPatCore (LHE.PLit (LHE.Int i))          = (LiteralAlt (Int i), id)
+altPatCore (LHE.PLit (LHE.Char c))         = (LiteralAlt (Char c), id)
 altPatCore LHE.PWildCard                   = (DefaultAlt Nothing, id)
 altPatCore p = panic "altPatCore" (text $ show p)
 
