@@ -163,23 +163,23 @@ type Tag = Int
 injectTag :: Int -> Tag -> Tag
 injectTag cls tg = cls * tg
 
-data Tagged a = Tagged { tag :: !Tag, tagee :: !a }
+data Tagged a = Tagged { tags :: [Tag], tagee :: !a }
               deriving (Functor, Foldable.Foldable)
 
 instance Show1 Tagged where
-    showsPrec1 prec (Tagged tg x) = showParen (prec >= appPrec) (showString "Tagged" . showsPrec appPrec tg . showsPrec appPrec x)
+    showsPrec1 prec (Tagged tgs x) = showParen (prec >= appPrec) (showString "Tagged" . showsPrec appPrec tgs . showsPrec appPrec x)
 
 instance Eq1 Tagged where
-    eq1 (Tagged tg1 x1) (Tagged tg2 x2) = tg1 == tg2 && x1 == x2
+    eq1 (Tagged tgs1 x1) (Tagged tgs2 x2) = tgs1 == tgs2 && x1 == x2
 
 instance Ord1 Tagged where
-    compare1 (Tagged tg1 x1) (Tagged tg2 x2) = (tg1, x1) `compare` (tg2, x2)
+    compare1 (Tagged tgs1 x1) (Tagged tgs2 x2) = (tgs1, x1) `compare` (tgs2, x2)
 
 instance NFData1 Tagged where
     rnf1 (Tagged a b) = rnf a `seq` rnf b
 
 instance Pretty1 Tagged where
-    pPrintPrec1 level prec (Tagged tg x) = braces (pPrint tg) <+> pPrintPrec level prec x
+    pPrintPrec1 level prec (Tagged tgs x) = braces (hsep $ punctuate (text ",") [pPrint tg | tg <- tgs]) <+> pPrintPrec level prec x
 
 
 instance Show IdSupply where

@@ -8,10 +8,10 @@ import Core.Syntax
 
 
 tagTerm :: Term -> TaggedTerm
-tagTerm = mkTag (\i f (I e) -> Tagged (hashedId i) (f e))
+tagTerm = mkTag (\i f (I e) -> Tagged [hashedId i] (f e))
 
 tagFVedTerm :: FVedTerm -> TaggedFVedTerm
-tagFVedTerm = mkTag (\i f (FVed fvs e) -> Comp (Tagged (hashedId i) (FVed fvs (f e))))
+tagFVedTerm = mkTag (\i f (FVed fvs e) -> Comp (Tagged [hashedId i] (FVed fvs (f e))))
 
 
 {-# INLINE mkTag #-}

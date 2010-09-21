@@ -27,19 +27,19 @@ instance TagCollection TagGraph where
         guard $ tr1 `setEqual` tr2 && cardinality tr1 <= cardinality tr2
         let growing = IM.keysSet (IM.filter (/= 0) (IM.mapMaybe id (combineIntMaps (const Nothing) Just (\i1 i2 -> Just (i2 - i1)) (vertices tr1) (vertices tr2))))
         return $ Generaliser {
-            generaliseStackFrame  = \kf       -> any (`IS.member` growing) (stackFrameTags' kf),
-            generaliseHeapBinding = \_ (_, e) -> pureHeapBindingTag' e `IS.member` growing
+            generaliseStackFrame  = \kf       -> all (`IS.member` growing) (stackFrameTags' kf),
+            generaliseHeapBinding = \_ (_, e) -> all (`IS.member` growing) (pureHeapBindingTags' e)
           }
     
     stateTags (Heap h _, k, in_e@(_, e)) = traceRender ("stateTags (TagGraph)", graph) $
                                            graph
       where
         graph = pureHeapTagGraph h  
-                 `plusTagGraph` stackTagGraph [focusedTermTag' e] k
-                 `plusTagGraph` mkTermTagGraph (focusedTermTag' e) in_e
+                 `plusTagGraph` stackTagGraph (focusedTermTags' e) k
+                 `plusTagGraph` mkTermTagGraph (focusedTermTags' e) in_e
         
         pureHeapTagGraph :: PureHeap -> TagGraph
-        pureHeapTagGraph h = plusTagGraphs [mkTagGraph [pureHeapBindingTag' e] (inFreeVars annedTermFreeVars in_e) | in_e@(_, e) <- M.elems h]
+        pureHeapTagGraph h = plusTagGraphs [mkTagGraph (pureHeapBindingTags' e) (inFreeVars annedTermFreeVars in_e) | in_e@(_, e) <- M.elems h]
         
         stackTagGraph :: [Tag] -> Stack -> TagGraph
         stackTagGraph _         []     = emptyTagGraph
@@ -49,7 +49,7 @@ instance TagCollection TagGraph where
           where kf_tgs = stackFrameTags' kf
         
         -- Stores the tags associated with any bound name
-        referants = M.map (\(_, e) -> IS.singleton (pureHeapBindingTag' e)) h `M.union` M.fromList [(annee x', IS.fromList (stackFrameTags' kf)) | kf@(Update x') <- k]
+        referants = M.map (\(_, e) -> IS.fromList (pureHeapBindingTags' e)) h `M.union` M.fromList [(annee x', IS.fromList (stackFrameTags' kf)) | kf@(Update x') <- k]
         
         -- Find the *tags* referred to from the *names* referred to
         referrerEdges referrer_tgs fvs = M.foldWithKey go IM.empty referants
@@ -57,18 +57,18 @@ instance TagCollection TagGraph where
                   | x `S.notMember` fvs = edges
                   | otherwise           = foldr (\referrer_tg edges -> IM.insertWith IS.union referrer_tg referant_tgs edges) edges referrer_tgs
         
-        mkTermTagGraph e_tg in_e = mkTagGraph [e_tg] (inFreeVars annedTermFreeVars in_e)
+        mkTermTagGraph e_tgs in_e = mkTagGraph e_tgs (inFreeVars annedTermFreeVars in_e)
         mkTagGraph e_tgs fvs = TagGraph { vertices = IM.unionsWith (+) [IM.singleton e_tg 1 | e_tg <- e_tgs], edges = referrerEdges e_tgs fvs }
 
 
-pureHeapBindingTag' :: AnnedTerm -> Tag
-pureHeapBindingTag' = injectTag 5 . annedTag
+pureHeapBindingTags' :: AnnedTerm -> [Tag]
+pureHeapBindingTags' = map (injectTag 5) . annedTags
 
 stackFrameTags' :: StackFrame -> [Tag]
 stackFrameTags' = map (injectTag 3) . stackFrameTags
 
-focusedTermTag' :: AnnedTerm -> Tag
-focusedTermTag' = injectTag 2 . annedTag
+focusedTermTags' :: AnnedTerm -> [Tag]
+focusedTermTags' = map (injectTag 2) . annedTags
 
 
 emptyTagGraph :: TagGraph

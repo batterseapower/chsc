@@ -441,7 +441,7 @@ splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (sp
         --
         -- The equivalent process is done for the stack in splitStack itself: we just subtract 1 from the number of deeds we need to
         -- claim when duplicating a stack frame.
-        deeds0 = M.fold (\(_, e) deeds -> releaseDeedDeep deeds (annedTag e)) deeds0_unreleased h_not_residualised
+        deeds0 = M.fold (\(_, e) deeds -> foldl' releaseDeedDeep deeds (annedTags e)) deeds0_unreleased h_not_residualised
         
         -- 3b) Work out which part of the heap is admissable for inlining
         -- We are allowed to inline anything which is duplicatable or is not residualised right here and now
@@ -568,7 +568,7 @@ transitiveInline deeds h_inlineable (ent, (Heap h ids, k, in_e))
             --
             -- NB: we rely here on the fact that the original h contains "optional" bindings in the sense that they are shadowed
             -- by something bound above.
-            consider_inlining x' in_e@(_, e) (deeds, h_inline, h_not_inlined) = case claimDeed deeds (annedTag e) of
+            consider_inlining x' in_e@(_, e) (deeds, h_inline, h_not_inlined) = case foldM claimDeed deeds (annedTags e) of
                 Nothing    -> traceRender ("transitiveInline: deed claim failure", x') (deeds,                  h_inline, M.insert x' in_e h_not_inlined)
                 Just deeds ->                                                          (deeds, M.insert x' in_e h_inline,                  h_not_inlined)
             (deeds', h_inline, h_not_inlined) = M.foldWithKey consider_inlining (deeds, M.empty, M.empty) h_inline_candidates
@@ -586,8 +586,8 @@ cheapifyHeap (deeds, Heap h (splitIdSupply -> (ids, ids'))) = (deeds', Heap (M.f
     
     -- TODO: make cheapification more powerful (i.e. deal with case bindings)
     cheapify :: Deeds -> IdSupply -> In AnnedTerm -> (Deeds, IdSupply, [(Out Var, In AnnedTerm)], In AnnedTerm)
-    cheapify deeds0 ids0 (rn, annedTag &&& annee -> (tg, LetRec xes e)) = (deeds3, ids3, zip in_xs in_es' ++ floats0 ++ floats1, in_e')
-      where deeds1 = releaseDeedDescend_ deeds0 tg
+    cheapify deeds0 ids0 (rn, annedTags &&& annee -> (tgs, LetRec xes e)) = (deeds3, ids3, zip in_xs in_es' ++ floats0 ++ floats1, in_e')
+      where deeds1 = foldl' releaseDeedDescend_ deeds0 tgs
             (        ids1, rn', unzip -> (in_xs, in_es)) = renameBounds (\_ x' -> x') ids0 rn xes
             (deeds2, ids2, floats0, in_es') = cheapifyMany deeds1 ids1 in_es
             (deeds3, ids3, floats1, in_e')  = cheapify deeds2 ids2 (rn', e)
@@ -658,7 +658,7 @@ splitStackFrame ids kf scruts bracketed_hole
             -- ===>
             --  case x of C -> let unk = C; z = C in ...
             alt_in_es = alt_rns `zip` alt_es
-            alt_hs = zipWith3 (\alt_rn alt_con alt_tg -> M.fromList $ do { Just scrut_v <- [altConToValue alt_con]; scrut <- scruts; return (scrut, (alt_rn, annedTerm alt_tg (Value scrut_v))) }) alt_rns alt_cons (map annedTag alt_es)
+            alt_hs = zipWith3 (\alt_rn alt_con alt_tgs -> M.fromList $ do { Just scrut_v <- [altConToValue alt_con]; scrut <- scruts; return (scrut, (alt_rn, annedTerm alt_tgs (Value scrut_v))) }) alt_rns alt_cons (map annedTags alt_es)
             alt_bvss = map (\alt_con' -> fst $ altConOpenFreeVars alt_con' (S.empty, S.empty)) alt_cons'
             bracketed_alts = zipWith (\alt_h alt_in_e -> oneBracketed (Once ctxt_id, \ids -> (Heap alt_h ids, [], alt_in_e))) alt_hs alt_in_es
     PrimApply pop in_vs in_es -> zipBracketeds (primOp pop) S.unions S.unions (\_ -> Nothing) (bracketed_vs ++ bracketed_hole : bracketed_es)

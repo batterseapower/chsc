@@ -25,8 +25,8 @@ annee = fvee . tagee . unComp
 annedFreeVars :: Anned a -> FreeVars
 annedFreeVars = freeVars . tagee . unComp
 
-annedTag :: Anned a -> Tag
-annedTag = tag . unComp
+annedTags :: Anned a -> [Tag]
+annedTags = tags . unComp
 
 
 annedVarFreeVars' = taggedFVedVarFreeVars'
@@ -49,14 +49,14 @@ detagAnnedValue' = taggedFVedValue'ToFVedValue'
 detagAnnedAlts = taggedFVedAltsToFVedAlts
 
 
-annedVar :: Tag -> Var -> Anned Var
-annedVar   tg x = Comp (Tagged tg (FVed (annedVarFreeVars' x)  x))
+annedVar :: [Tag] -> Var -> Anned Var
+annedVar   tgs x = Comp (Tagged tgs (FVed (annedVarFreeVars' x)  x))
 
-annedTerm :: Tag -> TermF Anned -> AnnedTerm
-annedTerm  tg e = Comp (Tagged tg (FVed (annedTermFreeVars' e)  e))
+annedTerm :: [Tag] -> TermF Anned -> AnnedTerm
+annedTerm  tgs e = Comp (Tagged tgs (FVed (annedTermFreeVars' e)  e))
 
-annedValue :: Tag -> ValueF Anned -> Anned AnnedValue
-annedValue tg v = Comp (Tagged tg (FVed (annedValueFreeVars' v) v))
+annedValue :: [Tag] -> ValueF Anned -> Anned AnnedValue
+annedValue tgs v = Comp (Tagged tgs (FVed (annedValueFreeVars' v) v))
 
 
 toAnnedTerm :: Term -> AnnedTerm
@@ -95,15 +95,15 @@ instance Pretty StackFrame where
 
 stackFrameTags :: StackFrame -> [Tag]
 stackFrameTags kf = case kf of
-    Apply x'                -> [annedTag x']
-    Scrutinise in_alts      -> map (annedTag . snd) (snd in_alts)
-    PrimApply _ in_vs in_es -> map (annedTag . snd) in_vs ++ map (annedTag . snd) in_es
-    Update x'               -> [annedTag x']
+    Apply x'                -> annedTags x'
+    Scrutinise in_alts      -> concatMap (annedTags . snd) (snd in_alts)
+    PrimApply _ in_vs in_es -> concatMap (annedTags . snd) in_vs ++ concatMap (annedTags . snd) in_es
+    Update x'               -> annedTags x'
 
 releaseStateDeed :: Deeds -> State -> Deeds
 releaseStateDeed deeds (Heap h _, k, (_, e))
   = foldl' (\deeds kf -> foldl' releaseDeedDeep deeds (stackFrameTags kf))
-           (foldl' (\deeds (_, e) -> releaseDeedDeep deeds (annedTag e))
-                   (releaseDeedDeep deeds (annedTag e))
+           (foldl' (\deeds (_, e) -> foldl' releaseDeedDeep deeds (annedTags e))
+                   (foldl' releaseDeedDeep deeds (annedTags e))
                    (M.elems h))
            k

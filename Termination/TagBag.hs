@@ -27,31 +27,28 @@ instance TagCollection TagBag where
         guard $ tb1 `setEqual` tb2 && cardinality tb1 <= cardinality tb2
         let growing = IM.keysSet (IM.filter (/= 0) (IM.mapMaybe id (combineIntMaps (const Nothing) Just (\i1 i2 -> Just (i2 - i1)) (unTagBag tb1) (unTagBag tb2))))
         return $ Generaliser {
-            generaliseStackFrame  = \kf       -> any (`IS.member` growing) (stackFrameTags' kf),
-            generaliseHeapBinding = \_ (_, e) -> pureHeapBindingTag' e `IS.member` growing
+            generaliseStackFrame  = \kf       -> all (`IS.member` growing) (stackFrameTags' kf),
+            generaliseHeapBinding = \_ (_, e) -> all (`IS.member` growing) (pureHeapBindingTags' e)
           }
     
-    stateTags (Heap h _, k, (_, e)) = traceRender ("stateTags (TagBag)", M.map (pureHeapBindingTag' . snd) h, map stackFrameTags' k, focusedTermTag' e) $
-                                      pureHeapTagBag h `plusTagBag` stackTagBag k `plusTagBag` tagTagBag (focusedTermTag' e)
+    stateTags (Heap h _, k, (_, e)) = traceRender ("stateTags (TagBag)", M.map (pureHeapBindingTags' . snd) h, map stackFrameTags' k, focusedTermTags' e) $
+                                      pureHeapTagBag h `plusTagBag` stackTagBag k `plusTagBag` mkTagBag (focusedTermTags' e)
       where
         pureHeapTagBag :: PureHeap -> TagBag
-        pureHeapTagBag = plusTagBags . map (tagTagBag . pureHeapBindingTag' . snd) . M.elems
+        pureHeapTagBag = plusTagBags . map (mkTagBag . pureHeapBindingTags' . snd) . M.elems
 
         stackTagBag :: Stack -> TagBag
         stackTagBag = mkTagBag . concatMap stackFrameTags'
 
-        tagTagBag :: Tag -> TagBag
-        tagTagBag = mkTagBag . return
 
-
-pureHeapBindingTag' :: AnnedTerm -> Tag
-pureHeapBindingTag' = injectTag 5 . annedTag
+pureHeapBindingTags' :: AnnedTerm -> [Tag]
+pureHeapBindingTags' = map (injectTag 5) . annedTags
 
 stackFrameTags' :: StackFrame -> [Tag]
 stackFrameTags' = map (injectTag 3) . stackFrameTags
 
-focusedTermTag' :: AnnedTerm -> Tag
-focusedTermTag' = injectTag 2 . annedTag
+focusedTermTags' :: AnnedTerm -> [Tag]
+focusedTermTags' = map (injectTag 2) . annedTags
 
 
 mkTagBag :: [Tag] -> TagBag

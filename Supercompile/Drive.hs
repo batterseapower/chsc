@@ -49,7 +49,7 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ run
         deeds = mkDeeds (bLOAT_FACTOR - 1) (t, pPrint . rb)
         
         (t, rb) = extractDeeds (\f e -> let (ts, rb) = f (annee e)
-                                        in (Node (annedTag e) ts, \(Node unc ts') -> Counted unc (rb ts'))) anned_e
+                                        in (Node (case annedTags e of [tg] -> tg) ts, \(Node unc ts') -> Counted unc (rb ts'))) anned_e
         
         extractDeeds :: (forall a b.    (a        -> ([Tree Tag], [Tree Int] -> b))
                                      -> Anned a   -> (Tree Tag,   Tree Int   -> Counted b))
