@@ -43,7 +43,8 @@ span f xs = case xs of [] -> ([], []); (y:ys) -> if f y then let msns = span f y
 reverse xs = reverseacc [] xs
   where reverseacc ys xs = case xs of [] -> ys; (x:xs) -> reverseacc (x:ys) xs
 enumFrom'Int x = x : enumFrom'Int (x + 1)
-enumFrom'Integer x = x : enumFrom'Integer (add'Integer x lit1'Integer)
+enumFrom'Integer x = x : enumFrom'Integer (x `add'Integer` lit1'Integer)
+enumFrom'Double x = x : enumFrom'Double (x `add'Double` lit1'Double)
 enumFromTo'Int n m = if n > m then [] else n : enumFromTo'Int (n + 1) m
 enumFromTo'Integer n m = if n `gt'Integer` m then [] else n : enumFromTo'Integer (add'Integer n lit1'Integer) m
 enumFromTo'Char n m = if n `gt'Char` m then [] else n : enumFromTo'Char (succ'Char n) m
@@ -53,6 +54,7 @@ enumFromThenTo'Int n m o = let step = m - n in if step >=0 then go_up step n o e
 iterate f x = x : iterate f (f x)
 sum'Int xs = foldl' (\acc x -> acc + x) 0 xs
 sum'Integer xs = foldl' add'Integer lit0'Integer xs
+sum'Double xs = foldl' add'Double lit0'Double xs
 zip x y = zipWith (,) x y
 zipWith f x y = case x of
     [] -> []

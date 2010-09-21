@@ -30,6 +30,8 @@ read'Double = read :: String -> Double
 fromIntegral'Int'Integer = Prelude.fromIntegral :: Int -> Integer
 fromIntegral'Int'Double = Prelude.fromIntegral :: Int -> Double
 
+ipow'Double'Int = (Prelude.^) :: Double -> Int -> Double
+
 round'Double'Int = Prelude.round :: Double -> Int
 ceiling'Double'Int = Prelude.ceiling :: Double -> Int
 

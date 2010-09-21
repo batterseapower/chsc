@@ -1,0 +1,42 @@
+#include "../Prelude.core"
+
+--integrate1D :: Double -> Double -> (Double->Double) -> Double
+integrate1D l u f =
+  let  d = (u`subtract'Double`l) `divide'Double` fromIntegral'Int'Double 8 in
+     d `multiply'Double` sum'Double 
+      [ (f l) `multiply'Double` (lit1'Double `divide'Double` lit2'Double),
+        f (l`add'Double`d),
+        f (l`add'Double`(lit2'Double `multiply'Double` d)),
+        f (l`add'Double`(fromIntegral'Int'Double 3 `multiply'Double` d)),
+        f (l`add'Double`(fromIntegral'Int'Double 4 `multiply'Double` d)),
+        f (u`subtract'Double`(fromIntegral'Int'Double 3 `multiply'Double` d)),
+        f (u`subtract'Double`(lit2'Double `multiply'Double` d)),
+        f (u`subtract'Double`d),
+        (f u) `multiply'Double` (lit1'Double `divide'Double` lit2'Double)]
+
+integrate2D l1 u1 l2 u2 f = integrate1D l2 u2 
+				    (\y->integrate1D l1 u1 
+						  (\x->f x y))
+
+zark u v = integrate2D lit0'Double u lit0'Double v (\x->(\y->x`multiply'Double`y))
+
+-- type signature required for compilers lacking the monomorphism restriction
+ints = enumFrom'Double lit1'Double
+zarks = zipWith zark ints (map (lit2'Double `multiply'Double`) ints)
+rtotals = head zarks : zipWith add'Double (tail zarks) rtotals
+rtotal n = rtotals!!n
+
+is = map (`ipow'Double'Int` 4) ints
+itotals = head is : zipWith add'Double (tail is) itotals
+itotal n = itotals!!n
+
+es = map (`ipow'Double'Int` 2) (zipWith subtract'Double rtotals itotals)
+etotal n = sum'Double (take n es)
+
+-- The (analytical) result should be zero
+root range = etotal range
+
+tests = [
+    (root 50000,  lit0'Double),
+    (root 100000, lit0'Double)
+  ]
