@@ -1,0 +1,9 @@
+foldl' c n xs = case xs of []     -> n
+                           (y:ys) -> let n' = c n y in case n' of _ -> foldl' c n' ys
+
+root xs = foldl' (+) 0 xs
+
+tests = [
+    (root [], 0),
+    (root [1, 2, 3], 6)
+  ]
