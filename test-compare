@@ -4,7 +4,7 @@ def zipwith_dict(f, left, right):
     thekeys = left.keys()
     assert(thekeys == right.keys())
     
-    return dict[(key, f(key, left[key], right[key])) for key in thekeys]
+    return dict([(key, f(key, left[key], right[key])) for key in thekeys])
 
 def readfile(filename):
     f = open(filename, 'r')
@@ -15,33 +15,62 @@ def readfile(filename):
 
 
 class Results(object):
-    def __init__(self, contents):
-        lines = contents.split(" \\\\\n")
+    def __init__(self, *args):
+        if len(args) == 1:
+            contents = args[0]
+            
+            lines = contents.split("\n")
     
-        self.description = lines[0]
+            self.description, lines = lines[0], [line.rstrip(" \\\\") for line in lines[1:] if line.strip() != ""]
     
-        (headers, valuess) = (lines[1].split(" & "), [line.split(" & ") for line in lines[2:]])
-        
-        def makeresult(values):
-            everything = dict(zip(headers, values))
-            filename = everything.pop("Filename")
-            return (filename, everything)
-        self.results = dict([makeresult(values) for values in valuess])
-
-    def __init__(self, description, results):
-        self.description = description
-        self.results = results
+            headers, valuess = (lines[0].split(" & "), [line.split(" & ") for line in lines[1:]])
+            
+            def makeresult(values):
+                everything = dict(zip(headers, values))
+                filename = everything.pop("Filename")
+                return (filename, everything)
+            self.results = dict([makeresult(values) for values in valuess])
+            
+            del headers[headers.index("Filename")]
+            self.headers = headers
+        elif len(args) == 3:
+            description, headers, results = args[0], args[1], args[2]
+            
+            self.description = description
+            self.headers = headers
+            self.results = results
+        else:
+            assert False
 
     @classmethod
     def zipresults(cls, zip_descriptions, zip_values, left, right):
-        combine_files = lambda _filename, left_values, right_values: zipwith_dict(f, left_values, right_values)
-        return Results(zip_descriptions(left.description, right.description), zipwith_dict(combine_files, left.results, right.results))
+        theheaders = left.headers
+        assert theheaders == right.headers
+        
+        combine_files = lambda _filename, left_values, right_values: zipwith_dict(zip_values, left_values, right_values)
+        return Results(zip_descriptions(left.description, right.description), left.headers, zipwith_dict(combine_files, left.results, right.results))
+    
+    def __str__(self):
+        comparing = lambda f: lambda x, y, f=f: cmp(f(x), f(y))
+        return "\n".join([self.description, format_latex_table([["Filename"] + self.headers] + [[filename] + [values[header] for header in self.headers] for filename, values in sorted(self.results.items(), comparing(lambda x: x[0]))])])
+
+
+def format_latex_table(rows):
+    if True:
+        col_width = {}
+        for row in rows:
+            for col_i, cell in enumerate(row):
+                col_width[col_i] = max(col_width.get(col_i, 0), len(cell))
+        
+        rows = [[cell.ljust(col_width[col_i]) for col_i, cell in enumerate(row)] for row in rows]
+    
+    return "\n".join([" & ".join(row) + " \\\\" for row in rows])
 
 
 import sys
 
-results_a = readfile(sys.argv[1])
-results_b = readfile(sys.argv[2])
+results_a = Results(readfile(sys.argv[1]))
+results_b = Results(readfile(sys.argv[2]))
 
 def zip_values(header, left, right):
     if header == "SC time" and left.strip() == "":
@@ -49,6 +78,6 @@ def zip_values(header, left, right):
         return right
     else:
         # Result a dimensionless number representing the "right" quantity as a fraction of the "left" quantity
-        return right / left
+        return str(round(float(right) / float(left), 2))
 
-Results.zipresults(lambda a b: a + " vs. " + b, zip_values, results_a, results_b)
+print Results.zipresults(lambda a, b: "'" + b + "' as a fraction of '" + a + "'", zip_values, results_a, results_b)

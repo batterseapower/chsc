@@ -1,4 +1,4 @@
-{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE ViewPatterns, TupleSections #-}
 module Main (main) where
 
 import Core.FreeVars
@@ -30,6 +30,7 @@ type Ways = (Bool, Bool)
 -- The Cambridge Haskell Supercompiler (CHSC)
 main :: IO ()
 main = do
+    hPutStrLn stderr $ "Welcome to the Cool Cambridge Haskell Supercompiler (" ++ cODE_IDENTIFIER ++ ")"
     (flags, args) <- fmap (partition ("-" `isPrefixOf`)) getArgs
     putStrLn $ intercalate " " flags
     case args of
@@ -103,8 +104,8 @@ testOne (ghc_way, sc_way) file = do
           (Just ((_before_size, before_compile_t, before_heap_size, before_run_t), before_term_size, Nothing),
            Just ((_after_size,  after_compile_t,  after_heap_size,  after_run_t),  after_term_size,  Just after_super_t))
             -> putStrLn $ intercalate " & " [benchmark, dp1 after_super_t ++ "s", dp2 (after_compile_t / before_compile_t), dp2 (after_run_t / before_run_t), dp2 (after_heap_size `ratio` before_heap_size), dp2 (after_term_size `ratio` before_term_size)] ++ " \\\\"
-          _ -> case mb_before `mplus` mb_after of Just ((size, compile_t, heap_size, run_t), term_size, mb_super_t) ->
-                 putStrLn $ intercalate " & " [benchmark, maybe "" show mb_super_t, show compile_t, show run_t, show heap_size, show term_size] ++ " \\\\"
+          _ -> case mb_before `mplus` mb_after of
+                 Just ((_size, compile_t, heap_size, run_t), term_size, mb_super_t) -> putStrLn $ intercalate " & " [benchmark, maybe "" show mb_super_t, show compile_t, show run_t, show heap_size, show term_size] ++ " \\\\"
 
 catchLeft :: Either String b -> IO b
 catchLeft (Left err)  = hPutStrLn stderr err >> exitWith (ExitFailure 1)
