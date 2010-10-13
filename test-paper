@@ -11,3 +11,9 @@ VANILLA_OPTS="raw --no-primops --no-deeds --tag-collection=bags --no-generalisat
 ./test-all ${VANILLA_OPTS/--no-reduce-rollback/} | tee results-reduce-rollback.tex
 ./test-all ${VANILLA_OPTS/--no-sc-rollback/} | tee results-sc-rollback.tex
 ./test-all ${VANILLA_OPTS/--no-reduce-rollback --no-sc-rollback/} | tee results-rollback.tex
+
+./test-all ${VANILLA_OPTS/=bags/=sets} | tee results-tagsets.tex
+./test-all ${VANILLA_OPTS/=bags/=graphs} | tee results-taggraphs.tex
+
+# FIXME: divergence?
+# ./test-all ${VANILLA_OPTS/--no-local-tiebacks/} | tee results-local-tiebacks.tex
