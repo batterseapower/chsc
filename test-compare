@@ -1,0 +1,54 @@
+#!/usr/bin/env python
+
+def zipwith_dict(f, left, right):
+    thekeys = left.keys()
+    assert(thekeys == right.keys())
+    
+    return dict[(key, f(key, left[key], right[key])) for key in thekeys]
+
+def readfile(filename):
+    f = open(filename, 'r')
+    result = f.read()
+    f.close()
+    
+    return result
+
+
+class Results(object):
+    def __init__(self, contents):
+        lines = contents.split(" \\\\\n")
+    
+        self.description = lines[0]
+    
+        (headers, valuess) = (lines[1].split(" & "), [line.split(" & ") for line in lines[2:]])
+        
+        def makeresult(values):
+            everything = dict(zip(headers, values))
+            filename = everything.pop("Filename")
+            return (filename, everything)
+        self.results = dict([makeresult(values) for values in valuess])
+
+    def __init__(self, description, results):
+        self.description = description
+        self.results = results
+
+    @classmethod
+    def zipresults(cls, zip_descriptions, zip_values, left, right):
+        combine_files = lambda _filename, left_values, right_values: zipwith_dict(f, left_values, right_values)
+        return Results(zip_descriptions(left.description, right.description), zipwith_dict(combine_files, left.results, right.results))
+
+
+import sys
+
+results_a = readfile(sys.argv[1])
+results_b = readfile(sys.argv[2])
+
+def zip_values(header, left, right):
+    if header == "SC time" and left.strip() == "":
+        # Supercompilation time is special because it will be missing for GHC runs
+        return right
+    else:
+        # Result a dimensionless number representing the "right" quantity as a fraction of the "left" quantity
+        return right / left
+
+Results.zipresults(lambda a b: a + " vs. " + b, zip_values, results_a, results_b)
