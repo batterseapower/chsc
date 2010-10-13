@@ -15,7 +15,7 @@ import Evaluator.Syntax
 
 import Size.Deeds
 
-import Termination.Terminate (Generaliser(..))
+import Termination.Generaliser (Generaliser(..))
 
 import Algebra.Lattice
 import Name

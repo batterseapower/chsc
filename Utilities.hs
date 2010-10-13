@@ -55,6 +55,22 @@ instance Copointed ((,) a) where
     extract = snd
 
 
+class Functor z => Zippable z where
+    -- Naturality:
+    --  fmap (first f)  (zip_ as bs) == zip_ (fmap f as) bs
+    --  fmap (second f) (zip_ as bs) == zip_ as (fmap f bs)
+    --
+    -- Information preservation:
+    --  fmap fst (zip_ as bs) == as
+    --  fmap snd (zip_ as bs) == bs
+
+    zip_ :: z a -> z b -> z (a, b)
+    zip_ = zipWith_ (,)
+
+    zipWith_ :: (a -> b -> c) -> z a -> z b -> z c
+    zipWith_ f as bs = fmap (uncurry f) (zip_ as bs)
+
+
 instance Monad (Either a) where
     return = Right
     

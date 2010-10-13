@@ -1,37 +1,33 @@
+{-# LANGUAGE ViewPatterns #-}
 module Termination.TagGraph (
-        -- * The TagGraph type
-        TagGraph
+        embedWithTagGraphs
     ) where
 
 import Termination.Terminate
+import Termination.Generaliser
 
 import Evaluator.FreeVars
 import Evaluator.Syntax
 
 import Utilities
 
+import qualified Data.Foldable as Foldable
 import qualified Data.IntMap as IM
 import qualified Data.IntSet as IS
 import qualified Data.Map as M
 import qualified Data.Set as S
 
 
-data TagGraph = TagGraph { vertices :: IM.IntMap Int, edges :: IM.IntMap IS.IntSet }
-               deriving (Eq)
+type TagGraph = TagMap (TagSet, Count)
 
-instance Pretty TagGraph where
-    pPrint tr = braces $ hsep $ punctuate (text ",") [pPrint tg <+> text "*" <+> pPrint count <+> pPrint (fromMaybe IS.empty (IM.lookup tg (edges tr))) | (tg, count) <- IM.toList (vertices tr)]
 
-instance TagCollection TagGraph where
-    tr1 <| tr2 = do
-        guard $ tr1 `setEqual` tr2 && cardinality tr1 <= cardinality tr2
-        let growing = IM.keysSet (IM.filter (/= 0) (IM.mapMaybe id (combineIntMaps (const Nothing) Just (\i1 i2 -> Just (i2 - i1)) (vertices tr1) (vertices tr2))))
-        return $ Generaliser {
-            generaliseStackFrame  = \kf       -> any (`IS.member` growing) (stackFrameTags' kf),
-            generaliseHeapBinding = \_ (_, e) -> pureHeapBindingTag' e `IS.member` growing
-          }
+embedWithTagGraphs :: Embedding State Generaliser
+embedWithTagGraphs = comapEmbedding stateTags generaliserFromGrowing $ refineByTags (comapEmbedding consolidate snd (refineChainTags alwaysEmbedded embedTagCounts))
+  where
+    consolidate :: (Functor f, Foldable.Foldable f) => f (TagSet, Count) -> (TagSet, f Count)
+    consolidate (fmap fst &&& fmap snd -> (ims, counts)) = (Foldable.foldr (IM.unionWith (\() () -> ())) IM.empty ims, counts)
     
-    stateTags (Heap h _, k, in_e@(_, e)) = traceRender ("stateTags (TagGraph)", graph) $
+    stateTags (Heap h _, k, in_e@(_, e)) = -- traceRender ("stateTags (TagGraph)", graph) $
                                            graph
       where
         graph = pureHeapTagGraph h  
@@ -57,8 +53,18 @@ instance TagCollection TagGraph where
                   | x `S.notMember` fvs = edges
                   | otherwise           = foldr (\referrer_tg edges -> IM.insertWith IS.union referrer_tg referant_tgs edges) edges referrer_tgs
         
+        referrerEdges' referrer_tgs fvs = S.fold go IM.empty fvs
+          where go x edges = case M.lookup x referants of
+                                Nothing           -> edges
+                                Just referant_tgs -> foldr (\referrer_tg edges -> IM.insertWith IS.union referrer_tg referant_tgs edges) edges referrer_tgs
+        
         mkTermTagGraph e_tg in_e = mkTagGraph [e_tg] (inFreeVars annedTermFreeVars in_e)
-        mkTagGraph e_tgs fvs = TagGraph { vertices = IM.unionsWith (+) [IM.singleton e_tg 1 | e_tg <- e_tgs], edges = referrerEdges e_tgs fvs }
+        mkTagGraph e_tgs fvs = IM.fromList  TagGraph { vertices = IM.unionsWith (+) [IM.singleton e_tg 1 | e_tg <- e_tgs], edges = referrerEdges e_tgs fvs }
+    
+    generaliserFromGrowing growing = Generaliser {
+        generaliseStackFrame  = \kf       -> any (`IS.member` growing) (stackFrameTags' kf),
+        generaliseHeapBinding = \_ (_, e) -> pureHeapBindingTag' e `IS.member` growing
+      }
 
 
 pureHeapBindingTag' :: AnnedTerm -> Tag
@@ -72,16 +78,10 @@ focusedTermTag' = injectTag 2 . annedTag
 
 
 emptyTagGraph :: TagGraph
-emptyTagGraph = TagGraph { vertices = IM.empty, edges = IM.empty }
+emptyTagGraph = IM.empty
 
 plusTagGraph :: TagGraph -> TagGraph -> TagGraph
-plusTagGraph tr1 tr2 = TagGraph { vertices = IM.unionWith (+) (vertices tr1) (vertices tr2), edges = IM.unionWith IS.union (edges tr1) (edges tr2) }
+plusTagGraph = IM.unionWith (\(ts1, count1) (ts2, count2) -> (IM.unionWith (\() () -> ()) ts1 ts1, count1 + count2))
 
 plusTagGraphs :: [TagGraph] -> TagGraph
-plusTagGraphs trs = TagGraph { vertices = IM.unionsWith (+) (map vertices trs), edges = IM.unionsWith IS.union (map edges trs) }
-
-cardinality :: TagGraph -> Int
-cardinality = IM.fold (+) 0 . vertices
-
-setEqual :: TagGraph -> TagGraph -> Bool
-setEqual tr1 tr2 = IM.keysSet (vertices tr1) == IM.keysSet (vertices tr2) && edges tr1 == edges tr2
+plusTagGraphs = foldr plusTagGraphs emptyTagGraph
