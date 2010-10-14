@@ -238,17 +238,17 @@ embedPairAS :: forall a b whya whyb. WQO a whya -> Antistream b whyb -> Antistre
 embedPairAS (WQO (prepare :: a -> arepr) embed) (Antistream (initialise :: state) consume)
   = Antistream [] go
   where
-    go :: [([arepr], state)] -> (a, b) -> TermRes [([arepr], state)] (whya, whyb)
+    go :: [(arepr, state)] -> (a, b) -> TermRes [(arepr, state)] (whya, whyb)
     go seen (prepare -> arepr, b) = consider_seen [] seen
       where
-        consider_seen saw [] = Continue (([arepr], initialise) : saw)
-        consider_seen saw ((seen_areprs@(most_recent_arepr:_), seen_state):seen)
+        consider_seen saw [] = Continue ((arepr, initialise) : saw)
+        consider_seen saw ((most_recent_arepr, seen_state):seen)
           | Just whya <- most_recent_arepr `embed` arepr
           = case consume seen_state b of
               Stop whyb         -> Stop (whya, whyb)
-              Continue mk_state -> consider_seen ((arepr : seen_areprs, mk_state) : saw) seen
+              Continue mk_state -> consider_seen ((arepr, mk_state) : saw) seen
           | otherwise
-          = consider_seen ((seen_areprs, seen_state) : saw) seen
+          = consider_seen ((most_recent_arepr, seen_state) : saw) seen
 
 {-# INLINE comapAntistream #-}
 comapAntistream :: (b -> a) -> (whya -> whyb) -> Antistream a whya -> Antistream b whyb
