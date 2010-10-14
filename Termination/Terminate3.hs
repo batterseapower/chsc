@@ -261,44 +261,80 @@ embedEitherAS (Antistream initialise_a consume_a) (Antistream initialise_b consu
        go (state_a, state_b) (Right b) = fmap1 (state_a,) $ fmap2 Right $ consume_b state_b b
 
 {-# INLINE embedPairASWeak #-}
-embedPairASWeak :: Antistream a why1 -> Antistream b why2 -> Antistream (a, b) (Either why1 why2)
-embedPairASWeak (Antistream initialise_a consume_a) (Antistream initialise_b consume_b) = Antistream (initialise_a, initialise_b) go
-  where go (state_a, state_b) (a, b) = case consume_a state_a a of
-                                         Stop why_a          -> Stop (Left why_a)
-                                         Continue mk_state_a -> case consume_b state_b b of
-                                                                            Stop why_b          -> Stop (Right why_b)
-                                                                            Continue mk_state_b -> Continue (mk_state_a, mk_state_b)
+embedPairASWeak :: Antistream a why1 -> Antistream b why2 -> Antistream (a, b) (why1, why2)
+embedPairASWeak (Antistream initialise_a consume_a) (Antistream initialise_b consume_b) = Antistream (Continue initialise_a, Continue initialise_b) go
+  where go (tr_a, tr_b) (a, b) = case (step tr_a consume_a a, step tr_b consume_b b) of
+                                   (Stop why_a, Stop why_b) -> Stop (why_a, why_b)
+                                   one_continue             -> Continue one_continue
+        
+        step (Stop why)       _       _ = Stop why
+        step (Continue state) consume a = consume state a
+
+
+-- | A skolemised version of Antistream
+newtype History test why = History { terminate :: test -> TermRes (History test why) why }
+
+antistreamToHistory :: Antistream test why -> History test why
+antistreamToHistory (Antistream initialise consume) = History (fmap1 (\state -> antistreamToHistory (Antistream state consume)) . consume initialise)
 
 
 type Timestamp = [Int]
 
+-- | The initial time. Occurs before every other time.
+--  1) For all t. tsBigBang `tsBefore` t
 tsBigBang :: Timestamp
 tsBigBang = []
 
+-- | Tests the chronological order of timestamps. If 'a `tsBefore` b' then:
+--   1) There exists a history (uninterrupted by rollback) that passed from "a" to "b" (possibly in 0 steps)
+--   2) We say that "a" is in the effective history of "b"
+--   3) This relation is transitive, antisymmetric and reflexive
 tsBefore :: Timestamp -> Timestamp -> Bool
 tsBefore = isSuffixOf
+
+-- | Returns the unique timestamp that is just before the supplied timestamp. If `predeccesor a == b` then:
+--   1) b `tsBefore` a
+--   2) b /= a
+--   3) There does not exist c. c `tsBefore` a and b `tsBefore` c
+--
+-- FIXME: what about the big bang? This function is partial!
+--predecessor ::
+
+-- | Returns a timestamp with the segment of the effective history between the two
+-- supplied timestamps removed from the new effective history. If 'from `rollbackTo` to == rb' then:
+--   1) not (rb `tsBefore` from) and not (from `tsBefore` rb) -- i.e. the "from" and "rb" live in different "branches" of history
+--   2) not (rb `tsBefore` to)   and not (to `tsBefore` rb)   -- i.e. the "to" and "rb" live in different "branches" of history
+--   3) predecessor rb `tsBefore` from and predecessor rb `tsBefore` to
+--   4) There does not exist rb'. with this property such that rb `tsBefore` rb'
+rollbackTo :: Timestamp -> Timestamp -> Timestamp
+rollbackTo from to = go (reverse from) (reverse to) 0 []
+  where
+    -- Strip the common prefix of both timestamps
+    go (x:xs) (y:ys) n res | x == y = go xs ys x (n : res)
+    go _      _      n res = n + 1 : res -- The original timestamps were exactly equal, or one was longer
+
 
 data Timestamped a = TimestampIt { storedAt :: Timestamp, storedWhat :: a }
 
 accessTimestamped :: Timestamped a -> Timestamp -> Maybe a
 accessTimestamped tsed ts = guard (storedAt tsed `tsBefore` ts) >> return (storedWhat tsed)
 
-rollbackTo :: Timestamp -> Timestamp -> Timestamp
-rollbackTo from to = error "TODO"
 
+newtype RBAS a whyf = RBAS { unRBAS :: Antistream a (whyf (RBAS a whyf)) }
 
-timestampAS :: Antistream (a, Timestamp) (why, Timestamp) -> Antistream a (Bool, why)
-timestampAS (Antistream initialise consume) = Antistream (initialise, tsBigBang) go
+-- timestampAS :: Antistream (a, Timestamp) (why, Timestamp) -> Antistream a (Bool, why)
+-- timestampAS (Antistream initialise consume) = Antistream (initialise, tsBigBang) go
+--   where
+--     go (state, ts) a = case consume state (a, ts) of
+--                           Stop (why, why_ts) -> Stop (why_ts `tsBefore` ts, why) -- rollback state: (state, 0 : ts `rollbackTo` why_ts)
+--                           Continue state'    -> Continue (state', 0 : ts)
+
+timestampAS :: Antistream (a, Timestamp) (why, Timestamp) -> RBAS a ((,,) Bool why)
+timestampAS (Antistream initialise consume) = RBAS $ Antistream (initialise, tsBigBang) go
   where
     go (state, ts) a = case consume state (a, ts) of
-                          Stop (why, why_ts) -> Stop (why_ts `tsBefore` ts, why) -- rollback state: (state, 0 : ts `rollbackTo` why_ts)
+                          Stop (why, why_ts) -> Stop (why_ts `tsBefore` ts, why, RBAS $ Antistream (state, 0 : ts `rollbackTo` why_ts) go)
                           Continue state'    -> Continue (state', 0 : ts)
-
-
-newtype History test why = History { terminate :: test -> TermRes (History test why) why }
-
-antistreamToHistory :: Antistream test why -> History test why
-antistreamToHistory (Antistream initialise consume) = History (fmap1 (\state -> antistreamToHistory (Antistream state consume)) . consume initialise)
 
 
 -- FIXME: make less ugly
