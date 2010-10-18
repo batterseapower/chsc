@@ -245,6 +245,7 @@ refineCollection :: (HasDomain f, Finite (Domain f),                 -- Only wor
                  -> WQO (f a) why                                    -- The result is a safe WQO by construction
 refineCollection wqo = postcomp (\((), why) -> why) $ precomp (\x -> (domain x, UnsafeCertifyDomainEq x)) $ prod equal (wqo unUCDE)
 
+-- | An embedding on containers full of natural numbers. Not particularly great, but I need it in order to match Mitchell's tag bags.
 natsWeak :: (Foldable.Foldable f, Zippable f) => WQO (f Nat) (f Bool)
 natsWeak = postcomp (\((smallas, bigas), _sumgrowing) -> zipWith_ (\smalla biga -> (biga - smalla) > 0) smallas bigas) $ what (precomp Foldable.sum nat)
 
