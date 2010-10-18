@@ -1,67 +1,63 @@
-{-# LANGUAGE PatternGuards, ViewPatterns, Rank2Types, TupleSections, GADTs, DeriveFunctor, DeriveFoldable, ScopedTypeVariables, TypeSynonymInstances #-}
-module Termination.Terminate (
-        -- * Tag collection combinators
-        Embedding, comapEmbedding, alwaysEmbedded, unsafeNeverEmbedded,
-        Count, embedCounts, embedTagCounts,
-        TheseTagsMap, refineChainTags, refineByTags,
-        
-        -- * The termination criterion
-        History(..), TermRes(..), emptyHistory, isContinue,
-        
-        -- * Hack for rollback
-        MaybeEvidence(..)
-    ) where
+{-# LANGUAGE PatternGuards, ViewPatterns, Rank2Types, TupleSections, GADTs, DeriveFunctor, DeriveFoldable, ScopedTypeVariables, TypeSynonymInstances, GeneralizedNewtypeDeriving, TypeFamilies, FlexibleContexts, RankNTypes #-}
+module Termination.Terminate where
 
 import Utilities
 
 import qualified Data.Foldable as Foldable
-import qualified Data.IntMap as IM
-import qualified Data.IntSet as IS
+import qualified Data.Traversable as Traversable
+import Data.Monoid
 
--- | Predicate that states that there a finite number of values distinguishable by (==) for the given type
+import qualified Data.IntSet as IS
+import qualified Data.IntMap as IM
+import qualified Data.Map as M
+import qualified Data.Set as S
+import qualified Data.Tree as T
+
+import Unsafe.Coerce
+
+
+-- | Predicate that states that there exists a finite number of values distinguishable by (==) for the given type
 class Eq a => Finite a where
 
 instance Finite Tag
-instance Finite a => Finite (IM.IntMap a)
-instance Finite IS.IntSet
+instance Finite TagSet
+instance Finite v => Finite (TagMap v)
+
+instance Finite v => Finite (S.Set v)
+instance (Finite k, Finite v) => Finite (M.Map k v)
 
 
-newtype IntMapWithDomain dom a = IMWD { unIMWD :: IM.IntMap a }
-                             deriving (Functor, Foldable.Foldable)
+-- | A class for objects that are both cofunctorial and functorial, in different type parameters.
+-- Instances must satisfy the following laws:
+--
+-- > precomp id == id
+-- > precomp f . precomp g == precomp (g . f)
+--
+-- > postcomp id == id
+-- > postcomp f . postcomp g == precomp (f . g)
+class Prearrow r where
+    precomp  :: (a -> b) -> r b c -> r a c
+    postcomp :: (b -> c) -> r a b -> r a c
 
-instance Zippable (IntMapWithDomain dom) where
-    -- The domain equality witnessed by d proves that we are not throwing away any information
-    zipWith_ f (IMWD as) (IMWD bs) = IMWD (IM.intersectionWith f as bs)
+instance Prearrow (->) where
+    precomp  f g = g . f
+    postcomp f g = f . g
 
 
-{-
-freshDomain :: IM.IntMap a -> (forall dom. IntMapWithDomain dom a -> res) -> res
-freshDomain im k = k (IMWD im)
-
-testDomainEquality :: IntMapWithDomain dom a -> IM.IntMap b -> Maybe (IntMapWithDomain dom b)
-testDomainEquality (IMWD im1) im2 = guard (IM.keysSet im1 == IM.keysSet im2) >> return (IMWD im2)
-
-
-proveDomainEquality :: IM.IntMap a -> IM.IntMap b -> (forall dom. IntMapWithDomain dom a -> IntMapWithDomain dom b -> res) -> res -> res
-proveDomainEquality im1 im2 k_eq k_neq = freshDomain im1 (\im1 -> case testDomainEquality im1 im2 of Nothing  -> k_neq
-                                                                                                     Just im2 -> k_eq im1 im2)
--}
-
--- | Type of correct-by-construction embedding operators
+-- | Type of correct-by-construction WQO operators
 --
 -- Invariant: for all chains a_1, a_2, ...
 -- There exists i, j such that both:
 --   1. i < j
 --   2. t_i <| t_j
 --
--- NB: this is weaker than a WQO because we do not insist on transitivity. I don't think we need it.
--- Nonetheless, all of the definitions below are actually transitive.
--- However, every embedding is necessarily reflexive (consider the infinite chain of equal elements).
+-- This means that every embedding is necessarily reflexive (consider the infinite chain of equal elements).
+-- Furthermore, we insist that <| is transitive.
 --
--- By a Ramsey argument (http://en.wikipedia.org/wiki/Well-quasi-ordering#Properties_of_wqos) this implies
+-- By a Ramsey argument (http://en.wikipedia.org/wiki/Well-quasi-ordering#Properties_of_wqos) we have
 -- that for any chain, there exists a suffix of the chain where every element in the chain participates
 -- in at least one infinite ascending sequence of chain elements related pairwise by <|.
-data Embedding a why = forall repr. Embedding {
+data WQO a why = forall repr. WQO {
     prepareElement :: a -> repr,
     embedElements :: repr -> repr -> Maybe why
   }
@@ -69,150 +65,210 @@ data Embedding a why = forall repr. Embedding {
 -- | Tests whether two elements are embedding according to the given embedding operator.
 --
 -- Not very useful in practice (especially because it throws away the "why" information), but useful
--- when defining the semantics of an 'Embedding'.
-(<|) :: Embedding a why -> a -> a -> Bool
-(<|) (Embedding prepare embed) x y = isJust (prepare x `embed` prepare y)
+-- when defining the semantics of an 'WQO'.
+(<|) :: WQO a why -> a -> a -> Bool
+(<|) (WQO prepare embed) x y = isJust (prepare x `embed` prepare y)
 
--- | Build an embedding for a product from embeddings for the components. This is much stronger than
--- 'embedPair' but also unsafe unless some side conditions hold.
 --
--- Thus 'unsafeEmbedPair ea eb' is safe exactly when:
---   For all chains (a_1, b_1), (a_2, b_2), ...
---   There exists i, j such that all of the following hold:
---     1. i < j
---     2. a_i <|_ea a_j
---     2. b_i <|_eb b_j
---
--- A sufficient condition for the safety of 'unsafeEmbedPair ea eb' is:
+-- Primitive termination combinators (must be proven to be correct)
 --
 
---  NOT SUFFICIENT: For all chains (a_1, b_1), (a_2, b_2), ..., each distinct a_i is only paired with finitely many
---                  distinct b_j (though there may be infinitely many distinct b_j overall)
---  WHY: might be infinitely many distinct a_i so no guarantee that the chain (a_i, b_j), (a_i, b_k), (a_i, b_l), ...
---       will ever be infinite, so can't rely on the properties of eb
-{-# INLINE unsafeEmbedPair#-}
-unsafeEmbedPair :: Embedding a whya -> Embedding b whyb -> Embedding (a, b) (whya, whyb)
-unsafeEmbedPair (Embedding prepare_a embed_a) (Embedding prepare_b embed_b) = Embedding (prepare_a *** prepare_b) go
-  where go (a1, b1) (a2, b2) = liftM2 (,) (a1 `embed_a` a2) (b1 `embed_b` b2)
+instance Prearrow WQO where
+    -- This defines a wqo because it just maps infinite chains to infinite chains.
+    {-# INLINE precomp #-}
+    precomp f (WQO prepare embed) = WQO (prepare . f) embed
 
--- | Construct an 'Embedding' on the basis of a previous one by elementwise operations on the chain.
---
--- Correct because it maps infinite chains to infinite chains
-{-# INLINE comapEmbedding #-}
-comapEmbedding :: (b -> a) -> (whya -> whyb) -> Embedding a whya -> Embedding b whyb
-comapEmbedding f f_why (Embedding prepare embed) = Embedding (prepare . f) $ \x y -> fmap f_why $ embed x y
+    -- This defines a wqo trivially - it only effects the 'why' information.
+    {-# INLINE postcomp #-}
+    postcomp f_why (WQO prepare embed) = WQO prepare $ \x y -> fmap f_why $ embed x y
+
+lazy :: forall a why. WQO a why -> WQO a why
+lazy wqo = WQO (case wqo of WQO prepare _ -> unsafeCoerce prepare :: a -> ()) (case wqo of WQO _ embed -> unsafeCoerce embed)
 
 -- | Trivial embedding that claims that the elements are always embedded.
 --
--- Trivially correct
-{-# INLINE alwaysEmbedded #-}
-alwaysEmbedded :: Embedding a ()
-alwaysEmbedded = Embedding (const ()) $ \_ _ -> Just ()
+-- Trivially correct.
+{-# INLINE always #-}
+always :: WQO a ()
+always = WQO (const ()) $ \_ _ -> Just ()
 
 -- | Trivial embedding that claims that the elements are never embedded.
 --
 -- Trivially incorrect, but useful for debugging the supercompiler!
-{-# INLINE unsafeNeverEmbedded #-}
-unsafeNeverEmbedded :: Embedding a ()
-unsafeNeverEmbedded = Embedding (const ()) $ \_ _ -> Nothing
+{-# INLINE unsafeNever #-}
+unsafeNever :: WQO a ()
+unsafeNever = WQO (const ()) $ \_ _ -> Nothing
 
--- | Non-negative count of some quantity
-type Count = Int
-
--- | Embedding relationship on chains of 'Count's within a container.
+-- | Embedding that insists on exact equality.
 --
--- Correct by pigeonhole principle (relies on the fact that counts are natural numbers)
-{-# INLINE embedCounts #-}
-embedCounts :: (Zippable t, Foldable.Foldable t) => Embedding (t Count) (t Bool)
-embedCounts = Embedding id $ \is1 is2 -> guard (Foldable.sum is1 <= Foldable.sum is2) >> return (fmap (> 0) (zipWith_ (-) is2 is1))
+-- Correctness ensured by the type class context that ensures that there only a finite
+-- number of distinct elements that can actually appear in the chain.
+{-# INLINE equal #-}
+equal :: Finite a => WQO a ()
+equal = WQO id $ \x y -> guard (x == y) >> return ()
 
-type TheseTagsMap tags = IntMapWithDomain tags
+-- | Natural numbers on the cheap (for efficiency reasons)
+type Nat = Int
 
--- | Embedding relationship on 'Count's associated with 'Tag's.
+-- | Embedding on natural numbers: the 'why' information records whether we were strictly growing (True) or just equal (False).
 --
--- Correct by construction
-{-# INLINE embedTagCounts #-}
-embedTagCounts :: Embedding (IntMapWithDomain tags Count) (TagMap ())
-embedTagCounts = comapEmbedding id (IM.map (const ()) . IM.filter id . unIMWD) embedCounts
-  
+-- Correct by pigeonhole principle (relies on the fact that natural numbers have a lower bound).
+{-# INLINE nat #-}
+nat :: WQO Nat Bool
+nat = WQO id $ \x y -> guard (x <= y) >> return (x < y)
+
 -- | Build an embedding for a coproduct from embeddings for the components.
 --
--- NB: not currently used.
---
--- Correct because it refines the input chain into two sparser chains
-embedEither :: Embedding a why1 -> Embedding b why2 -> Embedding (Either a b) (Either why1 why2)
-embedEither (Embedding prepare_a embed_a) (Embedding prepare_b embed_b) = Embedding (either (Left . prepare_a) (Right . prepare_b)) go
+-- Correct because it refines the input chain into two sparser chains. This is also a special case of the Finite
+-- Union Lemma in "Well-Quasi-Ordering, The Tree Theorem, and Vazsonyi's Conjecture" (Kruskal, 1960).
+{-# INLINE coprod #-}
+coprod :: WQO a whya -> WQO b whyb -> WQO (Either a b) (Either whya whyb)
+coprod (WQO prepare_a embed_a) (WQO prepare_b embed_b) = WQO (either (Left . prepare_a) (Right . prepare_b)) go
   where go (Left a1)  (Left a2)  = fmap Left  (a1 `embed_a` a2)
         go (Right b1) (Right b2) = fmap Right (b1 `embed_b` b2)
         go _          _          = Nothing
 
--- | Build an embedding for a product from embeddings for the components. You almost always don't want to use
--- this because it is always weaker than using any one of the component embeddings by itself.
+-- | Build an embedding for a product from embeddings for the components.
 --
--- NB: not currently used.
---
--- Correct because it refines the input chain into two sparser chains
-embedPair :: Embedding a why1 -> Embedding b why2 -> Embedding (a, b) (Either why1 why2)
-embedPair (Embedding prepare_a embed_a) (Embedding prepare_b embed_b) = Embedding (prepare_a *** prepare_b) go
-  where go (a1, b1) (a2, b2) = fmap Left (a1 `embed_a` a2) `mplus` fmap Right (b1 `embed_b` b2)
+-- To see why this is defines a wqo, consider a violating chain of (a, b) pairs. Since a is wqo, by a Ramsey argument, we
+-- must have an infinite chain of just a elements where each one is pairwise embedded (and hence all embedded into the
+-- first element of the chain, by transitivity). Now consider the infinite chain of associated b elements. Since b is wqo
+-- this chain must be finite - a contradiction. A special case of the Finite Cartesian Product Lemma in "Well-Quasi-Ordering,
+-- The Tree Theorem, and Vazsonyi's Conjecture" (Kruskal, 1960).
+{-# INLINE prod #-}
+prod :: WQO a whya -> WQO b whyb -> WQO (a, b) (whya, whyb)
+prod (WQO prepare_a embed_a) (WQO prepare_b embed_b) = WQO (prepare_a *** prepare_b) go
+  where go (a1, b1) (a2, b2) = liftM2 (,) (a1 `embed_a` a2) (b1 `embed_b` b2)
 
--- | The big hammer: constructs an embedding from two elements of a Cartesian product in a safe way.
+-- | Embedding on sets of things, derived from an embedding on the elements.
 --
--- Correct because it effectively refines the input chain into a sparser one per tag-set
-refine :: (Finite a) => Embedding b why -> Embedding (a, b) why
-refine (Embedding prepare embed) = Embedding (second prepare) $ \(a1, b1) (a2, b2) -> guard (a1 == a2) >> b1 `embed` b2
+-- Correctness proved as a lemma in e.g. "On well-quasi-ordering finite trees" (Nash-Williams, 1963)
+{-# INLINE set #-}
+set :: Ord a => WQO a why -> WQO (S.Set a) [why]
+set (WQO prepare embed) = WQO (map prepare . S.toList) $ \xs ys -> Foldable.foldrM (\xrepr whys -> fmap (: whys) $ getFirst (Foldable.foldMap (\yrepr -> First (xrepr `embed` yrepr)) ys)) [] xs
 
--- | The big hammer: constructs an embedding from two elements of a Cartesian product, with types
--- appropriately restricted so that this is actually safe.
+-- | Embedding on finite sequences of things, derived from an ordering on the elemnts.
 --
--- Correct because it effectively refines the larger input chain into a smaller one per tag-set
-{-# INLINE refineChainTags #-}
-{-# DEPRECATED refineChainTags "Unsafe :(" #-}
-refineChainTags :: (forall tags. Embedding (TheseTagsMap tags a) why1) -> Embedding b why2 -> Embedding (TagMap a, b) (why1, why2)
-refineChainTags embedding_vals embedding_rest = unsafeRefineChainTags embedding_vals' embedding_rest
+-- Correctness proved by the Finite Sequence Theorem in "Well-Quasi-Ordering, The Tree Theorem, and Vazsonyi's Conjecture" (Kruskal, 1960).
+{-# INLINE list #-}
+list :: WQO a why -> WQO [a] [why]
+list (WQO prepare embed) = WQO (map prepare) $ go []
   where
-    -- NB: this is safe because although we fake the tag domain information in the IntMapWithDomain, we check that our lie was
-    -- actually correct before we compute the embedding.
-    embedding_vals' = case embedding_vals of Embedding prepare_vals embed_vals -> Embedding (\im -> (IM.keysSet im, prepare_vals (IMWD im))) (\(im_keys1, im1) (im_keys2, im2) -> guard (im_keys1 == im_keys2) >> embed_vals im1 im2)
-          
-    unsafeRefineChainTags :: Embedding (TagMap a) why1 -> Embedding b why2 -> Embedding (TagMap a, b) (why1, why2)
-    unsafeRefineChainTags (Embedding prepare_vals embed_vals) (Embedding prepare_rest embed_rest) = Embedding (prepare_vals *** prepare_rest) $ \(im1, b1) (im2, b2) -> liftM2 (,) (embed_vals im1 im2) (embed_rest b1 b2)
+    -- Kruskal sez: "Intuitively, one sequence is less than another if some subsequence of the greater sequence majorizes the smaller sequence term by term"
+    -- But he is misleading you. If you parse his actual definitions, xs <| ys iff there is way to map the elements of xs onto some (possibly non-consecutive)
+    -- subsequence of ys such that for each resulting pair, we have that x <| y.
+    go res (xrepr:xs) (yrepr:ys)
+      | Just why <- xrepr `embed` yrepr = go (why : res) xs ys
+      | otherwise                       = go res (xrepr:xs) ys
+    go _   (_:_)  []     = Nothing
+    go res []     _      = Just (reverse res)
 
--- | Specialisation of the big hammer for the situation where we want to refine by the domain of a map.
--- Certifies that after we test for equality all maps that are embedded will actually have the same domain.
+-- | Embedding on things with exactly corresponding "shapes", derived from an embedding on the elements.
 --
--- Correct by construction
-{-# INLINE refineByTags #-}
-refineByTags :: (forall tags. Embedding (TheseTagsMap tags a) why) -> Embedding (TagMap a) why
---refineByTags embed_vals = comapEmbedding (,()) fst $ refineChainTags embed_vals alwaysEmbedded
-refineByTags embed_vals = comapEmbedding (\im -> (IM.keysSet im, IMWD im)) id $ refine embed_vals
+-- Correct (for finite "shapes") because it can be implemented by mapping the elements of the container to a fixed length
+-- tuple and then iterating the 'product' lemma.
+{-# INLINE zippable #-}
+zippable :: (Zippable t, Traversable.Traversable t) => WQO a why -> WQO (t a) (t why)
+zippable (WQO prepare embed) = WQO (fmap prepare) $ \xs ys -> Traversable.sequenceA (zipWith_ embed xs ys)
+
+-- | Augments the why information with the pair of things that actually embedded into each other.
+--
+-- Trivially correct.
+{-# INLINE what #-}
+what :: WQO a why -> WQO a ((a, a), why)
+what (WQO prepare embed) = WQO (prepare &&& id) (\(xrepr, x) (yrepr, y) -> fmap (\why -> ((x, y), why)) $ embed xrepr yrepr)
 
 
-newtype History test why extra = History { terminate :: test -> TermRes test why extra }
+--
+-- Derived termination combinators (correct by construction)
+--
 
-data TermRes test why extra = Stop why extra (MaybeEvidence extra -> History test why extra) | Continue (extra -> History test why extra)
+-- | Attach extra (wqo-irrelevant) information to the well-quasi-order purely for the purposes of finding out why
+-- we were forced to terminate.
+extra :: WQO a why -> WQO (a, extra) (why, extra)
+extra wqo = postcomp (\(((_small, smallextra), (_big, _bigextra)), why) -> (why, smallextra)) $ what (precomp fst $ wqo)
 
-isContinue :: TermRes test why extra -> Bool
+-- | Embedding on sequences of trees given an embedding on the vertex labellings.
+--
+-- Correctness proved by the Tree Therom in "Well-Quasi-Ordering, The Tree Theorem, and Vazsonyi's Conjecture" (Kruskal, 1960),
+-- but just a correct-by-construction combinator here, in the style of "On well-quasi-ordering finite trees" (Nash-Williams, 1963).
+{-# INLINE tree #-}
+tree :: forall a why. WQO a why -> WQO (T.Tree a) (T.Tree why)
+tree wqo = wqo_tree
+  where
+    wqo_tree :: WQO (T.Tree a) (T.Tree why)
+    wqo_tree = lazy $ precomp (\(T.Node x txs) -> (x, txs)) (postcomp (\(why, twhys) -> T.Node why twhys) wqo_treeish)
+    
+    wqo_treeish :: WQO (a, [T.Tree a]) (why, [T.Tree why])
+    wqo_treeish = prod wqo (list wqo_tree)
+
+-- | Embedding on sequences of trees whose vertices are labelled by elements of a finite set
+{-# INLINE tree_equal #-}
+tree_equal :: Finite a => WQO (T.Tree a) ()
+tree_equal = postcomp (const ()) $ tree equal
+
+
+class HasDomain f where
+    type Domain f :: *
+    
+    -- | Extract the domain of the object.
+    --  > domain x == domain y ==> zipWith_ f x y == unsafeZipWith_ f x y obeys the properties of Zippable
+    domain :: f a -> Domain f
+    
+    -- | Conditionally safe zipping operation: safe if both sides of the zip have the same 'domain'
+    unsafeZipWith_ :: (a -> b -> c) -> f a -> f b -> f c
+
+instance HasDomain [] where
+    type Domain [] = Int
+    domain = length
+    unsafeZipWith_ = zipWith
+
+instance HasDomain IM.IntMap where
+    type Domain IM.IntMap = IS.IntSet
+    domain = IM.keysSet
+    unsafeZipWith_ = IM.intersectionWith
+
+newtype CertifyDomainEq dom f a = UnsafeCertifyDomainEq { unUCDE :: f a }
+                                deriving (Functor, Foldable.Foldable, Traversable.Traversable)
+
+instance (Functor f, HasDomain f) => Zippable (CertifyDomainEq dom f) where
+    -- The domain equality witnessed by dom proves that we are not throwing away any information
+    zipWith_ f x y = UnsafeCertifyDomainEq (unsafeZipWith_ f (unUCDE x) (unUCDE y))
+
+
+-- | Convenience combinator allowing refining a chain of collections with varying domains into several subchains with uniform domains
+refineCollection :: (HasDomain f, Finite (Domain f),                 -- Only works for things with finite domains
+                     Foldable.Foldable f, Traversable.Traversable f) -- We insist that the things are Traversable (and hence Functor) so we can actually do some structure-preserving operations on the versions with domain equality evidence
+                 => (forall g. (Foldable.Foldable g, Traversable.Traversable g, Zippable g) -- We promise to provide a version of the collection that you can use zipWith_ on
+                            => (forall b. g b -> f b)                                       -- We also provide a way to discard the equality evidence
+                            -> WQO (g a) why)                                               -- Then it's up to you as to how to embed those things (though presumably you want to use 'zippable' immediately)
+                 -> WQO (f a) why                                    -- The result is a safe WQO by construction
+refineCollection wqo = postcomp (\((), why) -> why) $ precomp (\x -> (domain x, UnsafeCertifyDomainEq x)) $ prod equal (wqo unUCDE)
+
+natsWeak :: (Foldable.Foldable f, Zippable f) => WQO (f Nat) (f Bool)
+natsWeak = postcomp (\((smallas, bigas), _sumgrowing) -> zipWith_ (\smalla biga -> (biga - smalla) > 0) smallas bigas) $ what (precomp Foldable.sum nat)
+
+
+--
+-- History data type: how we actually use the termination test in the supercompiler
+--
+
+newtype History a why = History { terminate :: a -> TermRes a why }
+
+data TermRes a why = Stop why | Continue (History a why)
+
+isContinue :: TermRes a why -> Bool
 isContinue (Continue _) = True
 isContinue _ = False
 
-{-# INLINE emptyHistory #-}
-emptyHistory :: forall test why extra. Embedding test why -> History test why extra
-emptyHistory (Embedding (prepare :: test -> repr) embed) = History $ go []
+{-# INLINE mkHistory #-}
+mkHistory :: forall a why. WQO a why -> History a why
+mkHistory (WQO (prepare :: a -> repr) embed) = History $ go []
   where
-    go :: [(repr, extra)] -> test -> TermRes test why extra
+    go :: [repr] -> a -> TermRes a why
     go seen (prepare -> here)
       -- | traceRender (length seen, tagBag here) && False = undefined
-      | (why, prev_seen, prev_extra):_ <- [(why, prev_seen, prev_extra) | (prev, prev_extra):prev_seen <- tails (reverse seen), Just why <- [prev `embed` here]]
-      , let forget :: MaybeEvidence extra -> History test why extra
-            forget MaybeEvidence = History $ go (prev_seen `forgetFutureHistory` seen)
-      = Stop why prev_extra forget
+      | why:_ <- [why | prev <- seen, Just why <- [prev `embed` here]]
+      = Stop why
       | otherwise
-      = Continue (\here_extra -> History $ go ((here, here_extra) : seen))
-
--- FIXME: make less ugly
-data MaybeEvidence extra where
-    MaybeEvidence :: MaybeEvidence (Maybe a)
-
-forgetFutureHistory :: [(test, Maybe a)] -> [(test, Maybe a)] -> [(test, Maybe a)]
-forgetFutureHistory short long = short ++ fmap (second (const Nothing)) (short `dropBy` long)
+      = Continue $ History $ go (here : seen)
