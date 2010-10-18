@@ -21,7 +21,7 @@ import Termination.TagBag
 import Termination.TagGraph
 import Termination.TagSet
 import Termination.Terminate
-import Termination.Terminate3
+import Termination.Terminate4
 
 import Name
 import Renaming

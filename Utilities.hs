@@ -175,6 +175,8 @@ instance Ord a => Ord (Down a) where
 
 
 type Tag = Int
+type TagSet = IS.IntSet
+type TagMap = IM.IntMap
 
 injectTag :: Int -> Tag -> Tag
 injectTag cls tg = cls * tg

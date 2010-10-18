@@ -6,7 +6,7 @@ module Termination.Terminate3 (
         TagSet, TagMap, TheseTagsMap, refineChainTags, refineByTags,
         
         -- * The termination criterion
-        History(..), TermRes(..), emptyHistory, isContinue,
+        History(..), TermRes(..), isContinue,
         
         -- * Hack for rollback
         MaybeEvidence(..)
@@ -14,9 +14,11 @@ module Termination.Terminate3 (
 
 import Utilities
 
+import Data.Either (partitionEithers)
 import qualified Data.Foldable as Foldable
 import qualified Data.IntMap as IM
 import qualified Data.IntSet as IS
+import qualified Data.Map as M
 
 -- | Predicate that states that there a finite number of values distinguishable by (==) for the given type
 class Eq a => Finite a where
@@ -131,7 +133,7 @@ type Count = Int
 -- Correct by pigeonhole principle (relies on the fact that counts are natural numbers)
 {-# INLINE embedCounts #-}
 embedCounts :: (Zippable t, Foldable.Foldable t) => WQO (t Count) (t Bool)
-embedCounts = WQO id $ \is1 is2 -> guard (Foldable.sum is1 <= Foldable.sum is2) >> return (fmap (> 0) (zipWith_ (-) is2 is1))
+embedCounts = WQO (Foldable.sum &&& id) $ \(sum_is1, is1) (sum_is2, is2) -> guard (sum_is1 <= sum_is2) >> return (fmap (> 0) (zipWith_ (-) is2 is1))
 
 type TagMap = IM.IntMap
 type TagSet = IM.IntMap ()
@@ -220,6 +222,7 @@ liftEmbedWho (WQO prepare embed) = WQO (\a -> (a, prepare a)) (\(a, aprep) (_b, 
 attachExtras :: WQO a why -> WQO (a, extra) (why, extra)
 attachExtras wqo = comapWQO id (\((_a, extra), why) -> (why, extra)) $ liftEmbedWho $ comapWQO fst id wqo
 
+-- fmap1 (\a -> (a, ())) (fmap2 (\(why, ()) -> why) (embedPairAS wqo (wqoToAntistream alwaysEmbedded))) == wqoToAntistream wqo
 {-# INLINE wqoToAntistream #-}
 wqoToAntistream :: forall test why. WQO test why -> Antistream test why
 wqoToAntistream (WQO (prepare :: test -> repr) embed) = Antistream [] go
@@ -232,23 +235,51 @@ wqoToAntistream (WQO (prepare :: test -> repr) embed) = Antistream [] go
       | otherwise
       = Continue (here : seen)
 
--- TODO: can have a more efficient version of this using maps when the first WQO is an embedEqual
+-- fmap2 (\((), why) -> why) (embedPairAS embedEqual (wqoToAntistream wqo)) == wqoToAntistream (refine wqo)
 {-# INLINE embedPairAS #-}
 embedPairAS :: forall a b whya whyb. WQO a whya -> Antistream b whyb -> Antistream (a, b) (whya, whyb)
 embedPairAS (WQO (prepare :: a -> arepr) embed) (Antistream (initialise :: state) consume)
   = Antistream [] go
   where
+    -- There are several ways to write this function:
+    --  1) Store several states for each arepr and Stop when stepping any of them stops
+    --     - but this does not give TagSet behaviour when applied to embedEqual (it is a bit more eager to stop)
+    --     - we can get this variant with an allConsume that throws away Continue instead of Stop
+    --  2) Store one state for each arepr, but choose a Continuing state from those you embed in to when stepping (if one exists)
+    --     - this gives TagSet behaviour exactly
+    --  3) Store several states for each arepr and Stop when all of them do (this feels wrong, but I'm pretty sure it's OK!)
+    --     - this gives TagSet behaviour exactly, but can be stronger than 2) (for some choices of WQOs)
     go :: [(arepr, state)] -> (a, b) -> TermRes [(arepr, state)] (whya, whyb)
-    go seen (prepare -> arepr, b) = consider_seen [] seen
+    go seens (prepare -> arepr, b)
+      -- NB: when adding an element of "b" for the very first time, for compability with TagBag semantics we would like to
+      -- consume that element of "b" here and now
+      | null seens_embedded  = case consume initialise b of Stop whyb            -> Stop (case arepr `embed` arepr of Just whya -> whya; Nothing -> error "Impossible: non-reflexive WQO!", whyb)
+                                                            Continue seen_state' -> Continue ((arepr, seen_state') : seens_others)
+      -- Uncomment (and additionally cons on (arepr, initialise) in the last branch) to get variant 1):
+      -- | whyb:_ <- whybs      = Stop (whya, whyb)
+      | null seens_embedded' = Stop (head whys) -- TODO: could return all reasons? NB: list guaranteed to be non empty!
+      -- Uncomment to get variant 2):
+      -- | otherwise            = Continue (head seens_embedded' : seens_others)
+      | otherwise            = Continue (seens_embedded' ++ seens_others) -- NB: In variant 3), I don't think it's safe to cons (arepr, initialise) on to the state list here
       where
-        consider_seen saw [] = Continue ((arepr, initialise) : saw)
-        consider_seen saw ((most_recent_arepr, seen_state):seen)
-          | Just whya <- most_recent_arepr `embed` arepr
-          = case consume seen_state b of
-              Stop whyb         -> Stop (whya, whyb)
-              Continue mk_state -> consider_seen ((arepr, mk_state) : saw) seen
-          | otherwise
-          = consider_seen ((most_recent_arepr, seen_state) : saw) seen
+        (seens_others, seens_embedded) = partitionEithers [case seen_arepr `embed` arepr of Nothing   -> Left seen
+                                                                                            Just whya -> Right (whya, seen_state)
+                                                          | seen@(seen_arepr, seen_state) <- seens]
+        (whys, seens_embedded') = partitionEithers [case consume seen_state b of Stop whyb            -> Left (whya, whyb)
+                                                                                 Continue seen_state' -> Right (arepr, seen_state')
+                                                   | (whya, seen_state) <- seens_embedded]
+
+{- {-# RULES "embedPairAS/embedEqual" forall stream. embedPairAS embedEqual stream = embedPairASEqual stream #-} -}
+
+{-# INLINE embedPairASEqual #-}
+embedPairASEqual :: forall a b whyb. (Finite a, Ord a) => Antistream b whyb -> Antistream (a, b) ((), whyb)
+embedPairASEqual (Antistream (initialise :: state) consume)
+  = Antistream M.empty go
+  where
+    go :: M.Map a state -> (a, b) -> TermRes (M.Map a state) ((), whyb)
+    go seen (a, b) = case consume (M.lookup a seen `orElse` initialise) b of
+        Stop whyb            -> Stop ((), whyb)
+        Continue seen_state' -> Continue (M.insert a seen_state' seen)
 
 {-# INLINE comapAntistream #-}
 comapAntistream :: (b -> a) -> (whya -> whyb) -> Antistream a whya -> Antistream b whyb

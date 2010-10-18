@@ -3,7 +3,7 @@ module Termination.Terminate (
         -- * Tag collection combinators
         Embedding, comapEmbedding, alwaysEmbedded, unsafeNeverEmbedded,
         Count, embedCounts, embedTagCounts,
-        TagSet, TagMap, TheseTagsMap, refineChainTags, refineByTags,
+        TheseTagsMap, refineChainTags, refineByTags,
         
         -- * The termination criterion
         History(..), TermRes(..), emptyHistory, isContinue,
@@ -126,15 +126,13 @@ type Count = Int
 embedCounts :: (Zippable t, Foldable.Foldable t) => Embedding (t Count) (t Bool)
 embedCounts = Embedding id $ \is1 is2 -> guard (Foldable.sum is1 <= Foldable.sum is2) >> return (fmap (> 0) (zipWith_ (-) is2 is1))
 
-type TagMap = IM.IntMap
-type TagSet = IM.IntMap ()
 type TheseTagsMap tags = IntMapWithDomain tags
 
 -- | Embedding relationship on 'Count's associated with 'Tag's.
 --
 -- Correct by construction
 {-# INLINE embedTagCounts #-}
-embedTagCounts :: Embedding (IntMapWithDomain tags Count) TagSet
+embedTagCounts :: Embedding (IntMapWithDomain tags Count) (TagMap ())
 embedTagCounts = comapEmbedding id (IM.map (const ()) . IM.filter id . unIMWD) embedCounts
   
 -- | Build an embedding for a coproduct from embeddings for the components.
