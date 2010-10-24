@@ -34,7 +34,7 @@ instance (Finite k, Finite v) => Finite (M.Map k v)
 -- > precomp f . precomp g == precomp (g . f)
 --
 -- > postcomp id == id
--- > postcomp f . postcomp g == precomp (f . g)
+-- > postcomp f . postcomp g == postcomp (f . g)
 class Prearrow r where
     precomp  :: (a -> b) -> r b c -> r a c
     postcomp :: (b -> c) -> r a b -> r a c
@@ -76,11 +76,11 @@ data WQO a why = forall repr. WQO {
 instance Prearrow WQO where
     -- This defines a wqo because it just maps infinite chains to infinite chains.
     {-# INLINE precomp #-}
-    precomp f (WQO prepare embed) = WQO (prepare . f) embed
+    precomp f (lazy -> WQO prepare embed) = WQO (prepare . f) embed
 
     -- This defines a wqo trivially - it only effects the 'why' information.
     {-# INLINE postcomp #-}
-    postcomp f_why (WQO prepare embed) = WQO prepare $ \x y -> fmap f_why $ embed x y
+    postcomp f_why (lazy -> WQO prepare embed) = WQO prepare $ \x y -> fmap f_why $ embed x y
 
 lazy :: forall a why. WQO a why -> WQO a why
 lazy wqo = WQO (case wqo of WQO prepare _ -> unsafeCoerce prepare :: a -> ()) (case wqo of WQO _ embed -> unsafeCoerce embed)
@@ -123,7 +123,7 @@ nat = WQO id $ \x y -> guard (x <= y) >> return (x < y)
 -- Union Lemma in "Well-Quasi-Ordering, The Tree Theorem, and Vazsonyi's Conjecture" (Kruskal, 1960).
 {-# INLINE coprod #-}
 coprod :: WQO a whya -> WQO b whyb -> WQO (Either a b) (Either whya whyb)
-coprod (WQO prepare_a embed_a) (WQO prepare_b embed_b) = WQO (either (Left . prepare_a) (Right . prepare_b)) go
+coprod (lazy -> WQO prepare_a embed_a) (lazy -> WQO prepare_b embed_b) = WQO (either (Left . prepare_a) (Right . prepare_b)) go
   where go (Left a1)  (Left a2)  = fmap Left  (a1 `embed_a` a2)
         go (Right b1) (Right b2) = fmap Right (b1 `embed_b` b2)
         go _          _          = Nothing
@@ -137,7 +137,7 @@ coprod (WQO prepare_a embed_a) (WQO prepare_b embed_b) = WQO (either (Left . pre
 -- The Tree Theorem, and Vazsonyi's Conjecture" (Kruskal, 1960).
 {-# INLINE prod #-}
 prod :: WQO a whya -> WQO b whyb -> WQO (a, b) (whya, whyb)
-prod (WQO prepare_a embed_a) (WQO prepare_b embed_b) = WQO (prepare_a *** prepare_b) go
+prod (lazy -> WQO prepare_a embed_a) (WQO prepare_b embed_b) = WQO (prepare_a *** prepare_b) go
   where go (a1, b1) (a2, b2) = liftM2 (,) (a1 `embed_a` a2) (b1 `embed_b` b2)
 
 -- | Embedding on sets of things, derived from an embedding on the elements.
@@ -145,14 +145,14 @@ prod (WQO prepare_a embed_a) (WQO prepare_b embed_b) = WQO (prepare_a *** prepar
 -- Correctness proved as a lemma in e.g. "On well-quasi-ordering finite trees" (Nash-Williams, 1963)
 {-# INLINE set #-}
 set :: Ord a => WQO a why -> WQO (S.Set a) [why]
-set (WQO prepare embed) = WQO (map prepare . S.toList) $ \xs ys -> Foldable.foldrM (\xrepr whys -> fmap (: whys) $ getFirst (Foldable.foldMap (\yrepr -> First (xrepr `embed` yrepr)) ys)) [] xs
+set (lazy -> WQO prepare embed) = WQO (map prepare . S.toList) $ \xs ys -> Foldable.foldrM (\xrepr whys -> fmap (: whys) $ getFirst (Foldable.foldMap (\yrepr -> First (xrepr `embed` yrepr)) ys)) [] xs
 
 -- | Embedding on finite sequences of things, derived from an ordering on the elemnts.
 --
 -- Correctness proved by the Finite Sequence Theorem in "Well-Quasi-Ordering, The Tree Theorem, and Vazsonyi's Conjecture" (Kruskal, 1960).
 {-# INLINE list #-}
 list :: WQO a why -> WQO [a] [why]
-list (WQO prepare embed) = WQO (map prepare) $ go []
+list (lazy -> WQO prepare embed) = WQO (map prepare) $ go []
   where
     -- Kruskal sez: "Intuitively, one sequence is less than another if some subsequence of the greater sequence majorizes the smaller sequence term by term"
     -- But he is misleading you. If you parse his actual definitions, xs <| ys iff there is way to map the elements of xs onto some (possibly non-consecutive)
@@ -169,14 +169,14 @@ list (WQO prepare embed) = WQO (map prepare) $ go []
 -- tuple and then iterating the 'product' lemma.
 {-# INLINE zippable #-}
 zippable :: (Zippable t, Traversable.Traversable t) => WQO a why -> WQO (t a) (t why)
-zippable (WQO prepare embed) = WQO (fmap prepare) $ \xs ys -> Traversable.sequenceA (zipWith_ embed xs ys)
+zippable (lazy -> WQO prepare embed) = WQO (fmap prepare) $ \xs ys -> Traversable.sequenceA (zipWith_ embed xs ys)
 
 -- | Augments the why information with the pair of things that actually embedded into each other.
 --
 -- Trivially correct.
 {-# INLINE what #-}
 what :: WQO a why -> WQO a ((a, a), why)
-what (WQO prepare embed) = WQO (prepare &&& id) (\(xrepr, x) (yrepr, y) -> fmap (\why -> ((x, y), why)) $ embed xrepr yrepr)
+what (lazy -> WQO prepare embed) = WQO (prepare &&& id) (\(xrepr, x) (yrepr, y) -> fmap (\why -> ((x, y), why)) $ embed xrepr yrepr)
 
 
 --
@@ -185,6 +185,7 @@ what (WQO prepare embed) = WQO (prepare &&& id) (\(xrepr, x) (yrepr, y) -> fmap 
 
 -- | Attach extra (wqo-irrelevant) information to the well-quasi-order purely for the purposes of finding out why
 -- we were forced to terminate.
+{-# INLINE extra #-}
 extra :: WQO a why -> WQO (a, extra) (why, extra)
 extra wqo = postcomp (\(((_small, smallextra), (_big, _bigextra)), why) -> (why, smallextra)) $ what (precomp fst $ wqo)
 
@@ -197,7 +198,7 @@ tree :: forall a why. WQO a why -> WQO (T.Tree a) (T.Tree why)
 tree wqo = wqo_tree
   where
     wqo_tree :: WQO (T.Tree a) (T.Tree why)
-    wqo_tree = lazy $ precomp (\(T.Node x txs) -> (x, txs)) (postcomp (\(why, twhys) -> T.Node why twhys) wqo_treeish)
+    wqo_tree = precomp (\(T.Node x txs) -> (x, txs)) (postcomp (\(why, twhys) -> T.Node why twhys) wqo_treeish)
     
     wqo_treeish :: WQO (a, [T.Tree a]) (why, [T.Tree why])
     wqo_treeish = prod wqo (list wqo_tree)
@@ -228,6 +229,11 @@ instance HasDomain IM.IntMap where
     domain = IM.keysSet
     unsafeZipWith_ = IM.intersectionWith
 
+instance Ord k => HasDomain (M.Map k) where
+    type Domain (M.Map k) = S.Set k
+    domain = M.keysSet
+    unsafeZipWith_ = M.intersectionWith
+
 newtype CertifyDomainEq dom f a = UnsafeCertifyDomainEq { unUCDE :: f a }
                                 deriving (Functor, Foldable.Foldable, Traversable.Traversable)
 
@@ -237,6 +243,7 @@ instance (Functor f, HasDomain f) => Zippable (CertifyDomainEq dom f) where
 
 
 -- | Convenience combinator allowing refining a chain of collections with varying domains into several subchains with uniform domains
+{-# INLINE refineCollection #-}
 refineCollection :: (HasDomain f, Finite (Domain f),                 -- Only works for things with finite domains
                      Foldable.Foldable f, Traversable.Traversable f) -- We insist that the things are Traversable (and hence Functor) so we can actually do some structure-preserving operations on the versions with domain equality evidence
                  => (forall g. (Foldable.Foldable g, Traversable.Traversable g, Zippable g) -- We promise to provide a version of the collection that you can use zipWith_ on
@@ -246,6 +253,7 @@ refineCollection :: (HasDomain f, Finite (Domain f),                 -- Only wor
 refineCollection wqo = postcomp (\((), why) -> why) $ precomp (\x -> (domain x, UnsafeCertifyDomainEq x)) $ prod equal (wqo unUCDE)
 
 -- | An embedding on containers full of natural numbers. Not particularly great, but I need it in order to match Mitchell's tag bags.
+{-# INLINE natsWeak #-}
 natsWeak :: (Foldable.Foldable f, Zippable f) => WQO (f Nat) (f Bool)
 natsWeak = postcomp (\((smallas, bigas), _sumgrowing) -> zipWith_ (\smalla biga -> (biga - smalla) > 0) smallas bigas) $ what (precomp Foldable.sum nat)
 
