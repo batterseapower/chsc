@@ -158,7 +158,7 @@ list (lazy -> WQO prepare embed) = WQO (map prepare) $ go []
     -- But he is misleading you. If you parse his actual definitions, xs <| ys iff there is way to map the elements of xs onto some (possibly non-consecutive)
     -- subsequence of ys such that for each resulting pair, we have that x <| y.
     go res (xrepr:xs) (yrepr:ys)
-      | Just why <- xrepr `embed` yrepr = go (why : res) xs ys
+      | Just why <- xrepr `embed` yrepr = go (why:res) xs ys
       | otherwise                       = go res (xrepr:xs) ys
     go _   (_:_)  []     = Nothing
     go res []     _      = Just (reverse res)
@@ -220,7 +220,7 @@ class HasDomain f where
     unsafeZipWith_ :: (a -> b -> c) -> f a -> f b -> f c
 
 instance HasDomain [] where
-    type Domain [] = Int
+    type Domain [] = Nat
     domain = length
     unsafeZipWith_ = zipWith
 
