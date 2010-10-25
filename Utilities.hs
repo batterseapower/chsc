@@ -143,6 +143,9 @@ instance Functor Counted where
 
 newtype (f :.: g) a = Comp { unComp :: f (g a) }
 
+instance (Copointed f, Copointed g) => Copointed (f :.: g) where
+    extract = extract . extract . unComp
+
 instance (Show1 f, Show1 g) => Show1 (f :.: g) where
     showsPrec1 prec (Comp x) = showParen (prec >= appPrec) (showString "Comp" . showsPrec appPrec x)
 
@@ -183,6 +186,9 @@ injectTag cls tg = cls * tg
 
 data Tagged a = Tagged { tag :: !Tag, tagee :: !a }
               deriving (Functor, Foldable.Foldable)
+
+instance Copointed Tagged where
+    extract = tagee
 
 instance Show1 Tagged where
     showsPrec1 prec (Tagged tg x) = showParen (prec >= appPrec) (showString "Tagged" . showsPrec appPrec tg . showsPrec appPrec x)
@@ -230,6 +236,9 @@ instance Pretty a => Pretty (Tree a) where
 
 deleteList :: Ord a => [a] -> S.Set a -> S.Set a
 deleteList = flip $ foldr S.delete
+
+deleteListMap :: Ord k => [k] -> M.Map k v -> M.Map k v
+deleteListMap = flip $ foldr M.delete
 
 fmapSet :: (Ord a, Ord b) => (a -> b) -> S.Set a -> S.Set b
 fmapSet f = S.fromList . map f . S.toList
@@ -446,6 +455,9 @@ second4 f (a, b, c, d) = (a, f b, c, d)
 
 third4 :: (c -> e) -> (a, b, c, d) -> (a, b, e, d)
 third4 f (a, b, c, d) = (a, b, f c, d)
+
+fourth4 :: (d -> e) -> (a, b, c, d) -> (a, b, c, e)
+fourth4 f (a, b, c, d) = (a, b, c, f d)
 
 secondM :: Monad m => (b -> m c) -> (a, b) -> m (a, c)
 secondM f (a, b) = liftM (a,) $ f b
