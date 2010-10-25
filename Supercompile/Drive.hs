@@ -277,11 +277,11 @@ memo opt (deeds, statics, state) = do
           -- This is an issue of *performance* and *typeability*. If we omit this check, the generated code may
           -- be harder for GHC to chew on because we will apply static variables to dynamic positions in the tieback.
           --
-          -- FIXME: rejecting tieback on this basis can lead to crappy supercompilation (since we immediately whistle).
-          -- For an example, see AccumulatingParam-Peano: with split-point generalisation, we *would* be building an optimal
-          -- loop, but this check rejects it (tieback at h15 to h6 rejected because "n" would be converted from static to dynamic).
-          -- We should probably do something like this:
-          --  * Record whether a variable is static or dynamic in the tag collections
+          -- Rejecting tieback on this basis can lead to crappy supercompilation (since -- if we didn't incorporate the Statics set in
+          -- the wqo -- we would immediately whistle without making a tieback). For an example, see AccumulatingParam-Peano: with split
+          -- point generalisation, we *would* be building an optimal loop, but this check rejects it (tieback at h15 to h6 rejected
+          -- because "n" would be converted from static to dynamic). Instead, we do something like this:
+          --  * Record whether a variable is static or dynamic in the Statics set
           --  * "Generalise away" a variables staticness if this check fails so that:
           --     a) The termination criteria does not immediately fire
           --     b) We have a chance to build a loop where that variable is dynamic
