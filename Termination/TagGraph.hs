@@ -3,7 +3,7 @@ module Termination.TagGraph (
         embedWithTagGraphs
     ) where
 
-import Core.FreeVars (FreeVars)
+import Core.FreeVars (FreeVars, isFreeVar)
 import Core.Renaming (In, Out)
 import Core.Syntax (Var)
 
@@ -18,7 +18,6 @@ import Utilities
 import qualified Data.IntMap as IM
 import qualified Data.IntSet as IS
 import qualified Data.Map as M
-import qualified Data.Set as S
 
 
 type TagGraph = TagMap (TagSet, Nat)
@@ -55,8 +54,8 @@ embedWithTagGraphs = precomp stateTags $ postcomp generaliserFromGrowing $ refin
         referrerEdges :: [Tag] -> FreeVars -> TagGraph
         referrerEdges referrer_tgs fvs = M.foldWithKey go IM.empty referants
           where go x referant_tgs edges
-                  | x `S.notMember` fvs = edges
-                  | otherwise           = foldr (\referrer_tg edges -> IM.singleton referrer_tg (referant_tgs, 0) `plusTagGraph` edges) edges referrer_tgs
+                  | x `isFreeVar` fvs = edges
+                  | otherwise         = foldr (\referrer_tg edges -> IM.singleton referrer_tg (referant_tgs, 0) `plusTagGraph` edges) edges referrer_tgs
         
         mkTermTagGraph :: Tag -> In AnnedTerm -> TagGraph
         mkTermTagGraph e_tg in_e = mkTagGraph [e_tg] (inFreeVars annedTermFreeVars in_e)

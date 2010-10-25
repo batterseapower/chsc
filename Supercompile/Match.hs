@@ -30,7 +30,7 @@ matchInTerm :: IdSupply -> In AnnedTerm -> In AnnedTerm -> Maybe [(Var, Var)]
 matchInTerm ids = matchAnned (matchInTerm' ids)
 
 matchInTerm' :: IdSupply -> In (TermF Anned) -> In (TermF Anned) -> Maybe [(Var, Var)]
-matchInTerm' _   (rn_l, Var x_l)           (rn_r, Var x_r)           = Just [matchInVar (rn_l, x_l) (rn_r, x_r)]
+matchInTerm' _   (rn_l, Var x_l)           (rn_r, Var x_r)           = Just [matchAnned matchInVar (rn_l, x_l) (rn_r, x_r)]
 matchInTerm' ids (rn_l, Value v_l)         (rn_r, Value v_r)         = matchInValue ids (rn_l, v_l) (rn_r, v_r)
 matchInTerm' ids (rn_l, App e_l x_l)       (rn_r, App e_r x_r)       = matchInTerm ids (rn_l, e_l) (rn_r, e_r) >>= \eqs -> return (matchAnned matchInVar (rn_l, x_l) (rn_r, x_r) : eqs)
 matchInTerm' ids (rn_l, PrimOp pop_l es_l) (rn_r, PrimOp pop_r es_r) = guard (pop_l == pop_r) >> matchInList (matchInTerm ids) (rn_l, es_l) (rn_r, es_r)
@@ -71,8 +71,8 @@ matchAnnedVar x_l' x_r' = matchVar (annee x_l') (annee x_r')
 matchInVar :: In Var -> In Var -> (Var, Var)
 matchInVar (rn_l, x_l) (rn_r, x_r) = (safeRename "matchInVar: Left" rn_l x_l, safeRename "matchInVar: Right" rn_r x_r)
 
-matchInVars :: In [Var] -> In [Var] -> Maybe [(Var, Var)]
-matchInVars = matchInList (\x_l' x_r' -> return [matchInVar x_l' x_r'])
+matchInVars :: In [Anned Var] -> In [Anned Var] -> Maybe [(Var, Var)]
+matchInVars = matchInList (\x_l' x_r' -> return [matchAnned matchInVar x_l' x_r'])
 
 matchInList :: (In a -> In a -> Maybe [(Var, Var)])
             -> In [a] -> In [a] -> Maybe [(Var, Var)]

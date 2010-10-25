@@ -13,7 +13,6 @@ import Utilities
 import StaticFlags
 
 import Data.Char (toLower)
-import qualified Data.Set as S
 
 import System.Directory
 import System.Environment
@@ -45,8 +44,8 @@ test ways files = do
     mapM_ (testOne ways) files
 
 splitModule :: [(Var, Term)] -> (Term, Maybe Term)
-splitModule xes = (letRecSmart (transitiveInline (S.singleton root)) (var root),
-                   fmap (\test -> letRecSmart (filter ((/= root) . fst) $ transitiveInline (S.singleton test)) (var test)) mb_test)
+splitModule xes = (letRecSmart (transitiveInline (singletonFreeVar (I root))) (var root),
+                   fmap (\test -> letRecSmart (filter ((/= root) . fst) $ transitiveInline (singletonFreeVar (I test))) (var test)) mb_test)
   where
     findBinding what = fmap fst $ find ((== what) . name_string . fst) xes
     
@@ -54,8 +53,8 @@ splitModule xes = (letRecSmart (transitiveInline (S.singleton root)) (var root),
         | fvs == fvs' = need_xes
         | otherwise   = transitiveInline fvs'
       where
-        need_xes = [(x, e) | (x, e) <- xes, x `S.member` fvs]
-        fvs' = fvs `S.union` S.unions (map (termFreeVars . snd) need_xes)
+        need_xes = [(x, e) | (x, e) <- xes, x `isFreeVar` fvs]
+        fvs' = fvs `unionFreeVars` unionsFreeVars (map (termFreeVars . snd) need_xes)
     
     root    = expectJust "No root" $ findBinding "root"
     mb_test = findBinding "tests"

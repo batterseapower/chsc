@@ -14,7 +14,7 @@ import Utilities
 import qualified Data.Map as M
 
 
-type Anned = Tagged :.: FVed
+type Anned = Tagged :.: FVedF Tagged
 type AnnedTerm = Anned (TermF Anned)
 type AnnedValue = ValueF Anned
 type AnnedAlt = AltF Anned
@@ -29,7 +29,7 @@ annedTag :: Anned a -> Tag
 annedTag = tag . unComp
 
 
-annedVarFreeVars' = taggedFVedVarFreeVars'
+--annedVarFreeVars' = taggedFVedVarFreeVars'
 annedTermFreeVars = taggedFVedTermFreeVars
 annedTermFreeVars' = taggedFVedTermFreeVars'
 annedValueFreeVars = taggedFVedValueFreeVars
@@ -50,13 +50,13 @@ detagAnnedAlts = taggedFVedAltsToFVedAlts
 
 
 annedVar :: Tag -> Var -> Anned Var
-annedVar   tg x = Comp (Tagged tg (FVed (annedVarFreeVars' x)  x))
+annedVar   tg x = Comp (Tagged tg (FVed (M.singleton x [Tagged tg ()]) x))
 
 annedTerm :: Tag -> TermF Anned -> AnnedTerm
-annedTerm  tg e = Comp (Tagged tg (FVed (annedTermFreeVars' e)  e))
+annedTerm  tg e = Comp (Tagged tg (FVed (taggedFVedTermFreeVars' e) e))
 
 annedValue :: Tag -> ValueF Anned -> Anned AnnedValue
-annedValue tg v = Comp (Tagged tg (FVed (annedValueFreeVars' v) v))
+annedValue tg v = Comp (Tagged tg (FVed (taggedFVedValueFreeVars' v) v))
 
 
 toAnnedTerm :: Term -> AnnedTerm

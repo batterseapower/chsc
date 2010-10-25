@@ -43,7 +43,7 @@ wQO | not tERMINATION_CHECK                        = postcomp (const generaliseN
 supercompile :: Term -> Term
 supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ runScpM $ fmap snd $ sc (mkHistory (extra wQO)) (deeds, mkTopLevelStatics input_fvs, state)
   where input_fvs = annedTermFreeVars anned_e
-        state = (Heap M.empty reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, anned_e))
+        state = (Heap M.empty reduceIdSupply, [], (mkIdentityRenaming $ M.keys input_fvs, anned_e))
         anned_e = toAnnedTerm e
         
         deeds = mkDeeds (bLOAT_FACTOR - 1) (t, pPrint . rb)
@@ -61,10 +61,12 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ run
             
             term = rec term'
             term' e = case e of
-              Var x              -> ([], \[] -> Var x)
+              Var x              -> ([t], \[t'] -> Var (rb t'))
+                where (t, rb) = var x
               Value (Lambda x e) -> ([t], \[t'] -> Value (Lambda x (rb t')))
                 where (t, rb) = term e
-              Value (Data dc xs) -> ([], \[] -> Value (Data dc xs))
+              Value (Data dc xs) -> (ts, \ts' -> Value (Data dc (zipWith ($) rbs ts')))
+                where (ts, rbs) = unzip (map var xs)
               Value (Literal l)  -> ([], \[] -> Value (Literal l))
               App e x            -> ([t1, t2], \[t1', t2'] -> App (rb1 t1') (rb2 t2'))
                 where (t1, rb1) = term e
@@ -86,7 +88,7 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ run
 reduce :: (Deeds, State) -> (Deeds, State)
 reduce (deeds, state) = (deeds', state')
   where
-    (_, deeds', state') = go (mkHistory (extra wQO)) S.empty (emptyLosers, deeds, state)
+    (_, deeds', state') = go (mkHistory (extra wQO)) emptyFreeVars (emptyLosers, deeds, state)
       
     go hist lives (losers, deeds, state)
       -- | traceRender ("reduce.go", residualiseState state) False = undefined
@@ -198,7 +200,7 @@ promise p opt = ScpM $ \e s k -> traceRender ("promise", fun p, abstracted p, le
       (a, e') <- opt
       ScpM $ \e s k -> k () e (s { fulfilments = (p, e') : fulfilments s })
       
-      let fvs' = fvedTermFreeVars e' in fmap (S.fromList . ((abstracted p ++ lexical p) ++) . map fun) getPromises >>= \fvs -> assertRender ("sc: FVs", fun p, fvs' S.\\ fvs, fvs) (fvs' `S.isSubsetOf` fvs) $ return ()
+      let fvs' = fvedTermFreeVars e' in fmap (S.fromList . ((abstracted p ++ lexical p) ++) . map fun) getPromises >>= \fvs -> assertRender ("sc: FVs", fun p, fvs' `exclude` fvs, fvs) (M.null (fvs' `exclude` fvs)) $ return ()
       
       return (a, fun p `varApps` abstracted p)
 
@@ -292,7 +294,7 @@ memo opt (deeds, statics, state) = do
         return res
       [] -> {- traceRender ("new drive", residualiseState state) $ -} do
         let vs = stateFreeVars state
-            (static_vs_list, dynamic_vs_list) = partition (`isStatic` statics) (S.toList vs)
+            (static_vs_list, dynamic_vs_list) = partition (`isStatic` statics) (M.keys vs)
     
         -- NB: promises are lexically scoped because they may refer to FVs
         x <- freshHName

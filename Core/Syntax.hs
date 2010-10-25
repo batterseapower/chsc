@@ -1,4 +1,4 @@
-{-# LANGUAGE PatternGuards, ViewPatterns, TypeSynonymInstances, FlexibleInstances, Rank2Types, NoMonoPatBinds, NoMonomorphismRestriction #-}
+{-# LANGUAGE PatternGuards, ViewPatterns, TypeSynonymInstances, FlexibleInstances, Rank2Types, NoMonoPatBinds, NoMonomorphismRestriction, KindSignatures, TypeOperators, ScopedTypeVariables #-}
 module Core.Syntax where
 
 import Name
@@ -24,7 +24,7 @@ data Literal = Int Integer | Char Char
 type Term = Identity (TermF Identity)
 type TaggedTerm = Tagged (TermF Tagged)
 type CountedTerm = Counted (TermF Counted)
-data TermF ann = Var Var | Value (ValueF ann) | App (ann (TermF ann)) (ann Var) | PrimOp PrimOp [ann (TermF ann)] | Case (ann (TermF ann)) [AltF ann] | LetRec [(Var, ann (TermF ann))] (ann (TermF ann))
+data TermF ann = Var (ann Var) | Value (ValueF ann) | App (ann (TermF ann)) (ann Var) | PrimOp PrimOp [ann (TermF ann)] | Case (ann (TermF ann)) [AltF ann] | LetRec [(Var, ann (TermF ann))] (ann (TermF ann))
                deriving (Eq, Show)
 
 type Alt = AltF Identity
@@ -35,7 +35,7 @@ type AltF ann = (AltCon, ann (TermF ann))
 type Value = ValueF Identity
 type TaggedValue = ValueF Tagged
 type CountedValue = ValueF Counted
-data ValueF ann = Lambda Var (ann (TermF ann)) | Data DataCon [Var] | Literal Literal
+data ValueF ann = Lambda Var (ann (TermF ann)) | Data DataCon [ann Var] | Literal Literal
                 deriving (Eq, Show)
 
 instance NFData PrimOp
@@ -186,14 +186,22 @@ class Symantics ann where
     primOp :: PrimOp -> [ann (TermF ann)] -> ann (TermF ann)
     case_  :: ann (TermF ann) -> [AltF ann] -> ann (TermF ann)
     letRec :: [(Var, ann (TermF ann))] -> ann (TermF ann) -> ann (TermF ann)
+    
+    lambdaV  :: Var -> ann (TermF ann) -> ValueF ann
+    dataV    :: DataCon -> [Var] -> ValueF ann
+    literalV :: Literal -> ValueF ann
 
 instance Symantics Identity where
-    var = I . Var
+    var = I . Var . I
     value = I . Value
     app e x = I (App e (I x))
     primOp pop es = I (PrimOp pop es)
     case_ e = I . Case e
     letRec xes e = I $ LetRec xes e
+    
+    lambdaV = Lambda
+    dataV dc = Data dc . map I
+    literalV = Literal
 
 
 reify :: (forall ann. Symantics ann => ann (TermF ann)) -> Term
@@ -201,10 +209,10 @@ reify = id
 
 reflect :: Term -> (forall ann. Symantics ann => ann (TermF ann))
 reflect (I e) = case e of
-    Var x              -> var x
-    Value (Lambda x e) -> value (Lambda x (reflect e))
-    Value (Data dc xs) -> value (Data dc xs)
-    Value (Literal l)  -> value (Literal l)
+    Var (I x)          -> var x
+    Value (Lambda x e) -> value (lambdaV x (reflect e))
+    Value (Data dc xs) -> value (dataV dc (map unI xs))
+    Value (Literal l)  -> value (literalV l)
     App e1 (I x2)      -> app (reflect e1) x2
     PrimOp pop es      -> primOp pop (map reflect es)
     Case e alts        -> case_ (reflect e) (map (second reflect) alts)
@@ -221,7 +229,7 @@ lambdas :: Symantics ann => [Var] -> ann (TermF ann) -> ann (TermF ann)
 lambdas = flip $ foldr lambda
 
 data_ :: Symantics ann => DataCon -> [Var] -> ann (TermF ann)
-data_ dc = value . Data dc
+data_ dc = value . dataV dc
 
 apps :: Symantics ann => ann (TermF ann) -> [Var] -> ann (TermF ann)
 apps = foldl app
@@ -238,7 +246,7 @@ collectLambdas (I (Value (Lambda x e))) = first (x:) $ collectLambdas e
 collectLambdas e                        = ([], e)
 
 freshFloatVar :: IdSupply -> String -> Term -> (IdSupply, Maybe (Name, Term), Name)
-freshFloatVar ids _ (I (Var x)) = (ids,  Nothing,     x)
+freshFloatVar ids _ (I (Var x)) = (ids,  Nothing,     unI x)
 freshFloatVar ids s e           = (ids', Just (y, e), y)
   where (ids', y) = freshName ids s
 
@@ -246,3 +254,91 @@ freshFloatVars :: IdSupply -> String -> [Term] -> (IdSupply, [(Name, Term)], [Na
 freshFloatVars ids s es = reassociate $ mapAccumL (\ids -> associate . freshFloatVar ids s) ids es
   where reassociate (ids, unzip -> (mb_floats, xs)) = (ids, catMaybes mb_floats, xs)
         associate (ids, mb_float, x) = (ids, (mb_float, x))
+
+
+-- TODO: I'd really like to generalise this so it can capture SyntaxAlg as well, but without type-level
+-- lambdas this is a very painful exercise :-(
+data SyntaxHom ann ann' = SyntaxHom {
+    varHom    :: ann Var          -> ann' Var,
+    termHom   :: ann (TermF ann)  -> ann' (TermF ann'),
+    termHom'  :: TermF ann        -> TermF ann',
+    valueHom  :: ann (ValueF ann) -> ann' (ValueF ann'),
+    valueHom' :: ValueF ann       -> ValueF ann',
+    altsHom'  :: [AltF ann]       -> [AltF ann']
+  }
+
+class Category1 (cat :: (* -> *) -> (* -> *) -> *) where
+    id1 :: cat a a
+    compose1 :: cat b c -> cat a b -> cat a c
+
+instance Category1 SyntaxHom where
+    id1 = SyntaxHom id id id id id id
+    hom1 `compose1` hom2
+      = SyntaxHom (varHom hom1 . varHom hom2)
+                  (termHom hom1 . termHom hom2)
+                  (termHom' hom1 . termHom' hom2)
+                  (valueHom hom1 . valueHom hom2)
+                  (valueHom' hom1 . valueHom' hom2)
+                  (altsHom' hom1 . altsHom' hom2)
+
+mkSyntaxHom :: (ann Var          -> ann' Var)
+            -> (ann (TermF ann)  -> ann' (TermF ann'))
+            -> (ann (ValueF ann) -> ann' (ValueF ann'))
+            -> SyntaxHom ann ann'
+mkSyntaxHom var term value = SyntaxHom var term term' value value' alternatives'
+  where
+    term' e = case e of
+      Var x         -> Var (var x)
+      Value v       -> Value (value' v)
+      App e x       -> App (term e) (var x)
+      PrimOp pop es -> PrimOp pop (map term es)
+      Case e alts   -> Case (term e) (alternatives' alts)
+      LetRec xes e  -> LetRec (map (second term) xes) (term e)
+
+    value' v = case v of
+      Lambda x e -> Lambda x (term e)
+      Data dc xs -> Data dc (map var xs)
+      Literal l  -> Literal l
+
+    alternatives' alts = map (second term) alts
+
+leftIdentity :: forall ann. Functor ann => SyntaxHom (Identity :.: ann) ann
+leftIdentity = alg
+  where
+    alg = mkSyntaxHom (discard id) (discard (termHom' alg)) (discard (valueHom' alg))
+    
+    discard :: forall a b. (a -> b) -> (Identity :.: ann) a -> ann b
+    discard f (Comp (I anned)) = fmap f anned
+
+rightIdentity :: forall ann. Functor ann => SyntaxHom (ann :.: Identity) ann
+rightIdentity = alg
+  where
+    alg = mkSyntaxHom (discard id) (discard (termHom' alg)) (discard (valueHom' alg))
+    
+    discard :: forall a b. (a -> b) -> (ann :.: Identity) a -> ann b
+    discard f (Comp anned) = fmap (f . unI) anned
+
+-- data SyntaxCata ann r = SyntaxCata {
+--     varAlg    :: ann Var -> r,
+--     termAlg   :: ann (TermF ann) -> r,
+--     termAlg'  :: TermF ann -> r,
+--     valueAlg  :: ann (ValueF ann) -> r,
+--     valueAlg' :: ValueF ann -> r,
+--     altsAlg'  :: [AltF ann] -> r
+--   }
+
+-- data SyntaxAlg f = SyntaxAlg {
+--     varAlg    :: f (/\ann -> ann Var),
+--     termAlg   :: f (/\ann -> ann (TermF ann)),
+--     termAlg'  :: f (/\ann -> TermF ann),
+--     valueAlg  :: f (/\ann -> ann (ValueF ann)),
+--     valueAlg' :: f (/\ann -> ValueF ann),
+--     altsAlg'  :: f (/\ann -> [AltF ann])
+--   }
+-- 
+-- fmapAlg :: (forall a. f a -> g a)
+--         -> SyntaxAlg f -> SyntaxAlg g
+-- fmapAlg nat (SyntaxAlg a b c d e f) = SyntaxAlg (nat a) (nat b) (nat c) (nat d) (nat e) (nat f)
+-- 
+-- type SyntaxHom ann ann' = SyntaxAlg (/\g -> g ann -> g ann')
+-- type SyntaxCata ann res = SyntaxAlg (/\g -> g ann -> res)

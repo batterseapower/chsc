@@ -17,7 +17,6 @@ import Utilities
 
 import qualified Data.IntSet as IS
 import qualified Data.Map as M
-import qualified Data.Set as S
 
 
 type Losers = IS.IntSet
@@ -28,7 +27,7 @@ emptyLosers = IS.empty
 
 step :: (FreeVars -> (Losers, Deeds, State) -> (Losers, Deeds, State)) -> FreeVars -> (Losers, Deeds, State) -> Maybe (Losers, Deeds, State)
 step reduce live (losers, deeds, (h, k, (rn, Comp (Tagged tg (FVed _ e))))) = case e of
-    Var x             -> fmap (\(a, b) -> (losers, a, b)) $ force  deeds h k tg (rename rn x)
+    Var x             -> fmap (\(a, b) -> (losers, a, b)) $ force  deeds h k tg (renameAnnedVar rn x)
     Value v           -> fmap (\(a, b) -> (losers, a, b)) $ unwind deeds h k tg (rn, v)
     App e1 x2         -> Just (losers, deeds', (h, Apply (renameAnnedVar rn x2)    : k, (rn, e1)))
     PrimOp pop (e:es) -> Just (losers, deeds', (h, PrimApply pop [] (map (rn,) es) : k, (rn, e)))
@@ -37,8 +36,8 @@ step reduce live (losers, deeds, (h, k, (rn, Comp (Tagged tg (FVed _ e))))) = ca
   where
     deeds' = releaseDeedDescend_ deeds tg
 
-    force :: Deeds -> Heap -> Stack -> Tag -> Out Var -> Maybe (Deeds, State)
-    force deeds (Heap h ids) k tg x' = M.lookup x' h >>= \in_e -> return (deeds, (Heap (M.delete x' h) ids, Update (annedVar tg x') : k, in_e))
+    force :: Deeds -> Heap -> Stack -> Tag -> Out (Anned Var) -> Maybe (Deeds, State)
+    force deeds (Heap h ids) k tg (annee -> x') = M.lookup x' h >>= \in_e -> return (deeds, (Heap (M.delete x' h) ids, Update (annedVar tg x') : k, in_e))
 
     unwind :: Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> Maybe (Deeds, State)
     unwind deeds h k tg_v in_v = uncons k >>= \(kf, k) -> case kf of
@@ -57,7 +56,7 @@ step reduce live (losers, deeds, (h, k, (rn, Comp (Tagged tg (FVed _ e))))) = ca
       | (alt_e, rest):_ <- [((rn_alts, alt_e), rest) | ((LiteralAlt alt_l, alt_e), rest) <- bagContexts alts, alt_l == l] ++ [((rn_alts, alt_e), rest) | ((DefaultAlt Nothing, alt_e), rest) <- bagContexts alts]
       = Just (releaseAltDeeds rest (releaseDeedDeep deeds tg_v), (h, k, alt_e))
     scrutinise deeds h            k tg_v (rn_v, Data dc xs) (rn_alts, alts)
-      | (alt_e, rest):_ <- [((insertRenamings (alt_xs `zip` map (rename rn_v) xs) rn_alts, alt_e), rest) | ((DataAlt alt_dc alt_xs, alt_e), rest) <- bagContexts alts, alt_dc == dc] ++ [((rn_alts, alt_e), rest) | ((DefaultAlt Nothing, alt_e), rest) <- bagContexts alts]
+      | (alt_e, rest):_ <- [((insertRenamings (alt_xs `zip` map (annee . renameAnnedVar rn_v) xs) rn_alts, alt_e), rest) | ((DataAlt alt_dc alt_xs, alt_e), rest) <- bagContexts alts, alt_dc == dc] ++ [((rn_alts, alt_e), rest) | ((DefaultAlt Nothing, alt_e), rest) <- bagContexts alts]
       = Just (releaseAltDeeds rest (releaseDeedDeep deeds tg_v), (h, k, alt_e))
     scrutinise deeds (Heap h ids) k tg_v (rn_v, v)          (rn_alts, alts)
       | ((alt_x, alt_e), rest):_ <- [((alt_x, alt_e), rest) | ((DefaultAlt (Just alt_x), alt_e), rest) <- bagContexts alts]
@@ -97,8 +96,8 @@ step reduce live (losers, deeds, (h, k, (rn, Comp (Tagged tg (FVed _ e))))) = ca
         --
         -- TODO: make finding FVs much cheaper (i.e. memoise it in the syntax functor construction)
         -- TODO: could GC cycles as well (i.e. don't consider stuff from the Heap that was only referred to by the thing being removed as "GC roots")
-        linear = x' `S.notMember` pureHeapFreeVars h (stackFreeVars k (inFreeVars annedValueFreeVars' (rn, v))) &&
-                 x' `S.notMember` live
+        linear = x' `M.notMember` pureHeapFreeVars h (stackFreeVars k (inFreeVars annedValueFreeVars' (rn, v))) &&
+                 x' `M.notMember` live
 
     allocate :: Deeds -> Heap -> Stack -> In ([(Var, AnnedTerm)], AnnedTerm) -> (Losers, Deeds, State)
     allocate deeds (Heap h ids) k (rn, (xes, e)) = (losers', deeds', (heap', k, (rn', e)))
@@ -111,7 +110,7 @@ step reduce live (losers, deeds, (h, k, (rn, Comp (Tagged tg (FVed _ e))))) = ca
               -- Construct the live set for use when speculating each heap binding. This prevent us from accidentally GCing something that is live
               -- in the "continuation" when speculating a heap binding. We ensure that only those heap bindings that occur *strictly later* than
               -- the binding being speculated contribute to the live set -- this means that GC can still collect stuff that speculation truly makes dead.
-              (_, lives') = mapAccumR (\live (_x', in_e) -> (live `S.union` inFreeVars annedTermFreeVars in_e, live)) (live `S.union` snd (stackFreeVars k (inFreeVars annedTermFreeVars (rn', e)))) xes'
+              (_, lives') = mapAccumR (\live (_x', in_e) -> (live `M.union` inFreeVars annedTermFreeVars in_e, live)) (live `M.union` snd (stackFreeVars k (inFreeVars annedTermFreeVars (rn', e)))) xes'
               
               speculate_one (losers, deeds, Heap h ids) ((x', in_e), live')
                 = case reduce live' (losers, deeds, (Heap h ids, [], in_e)) of

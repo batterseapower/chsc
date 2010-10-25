@@ -1,4 +1,4 @@
-{-# LANGUAGE ViewPatterns, TupleSections, Rank2Types #-}
+{-# LANGUAGE ViewPatterns, TupleSections, Rank2Types, NoMonoPatBinds #-}
 module Core.Renaming where
 
 import Core.FreeVars
@@ -7,15 +7,15 @@ import Core.Syntax
 import Renaming
 import Utilities
 
-import qualified Data.Set as S
+import qualified Data.Map as M
 
 
 type In a = (Renaming, a)
 type Out a = a
 
 
-renameFreeVars :: Renaming -> FreeVars -> FreeVars
-renameFreeVars rn = S.map (rename rn)
+renameFreeVars :: Renaming -> FreeVarsF ann -> FreeVarsF ann
+renameFreeVars rn = unionsFreeVars . map (uncurry M.singleton . first (rename rn)) . M.toList
 
 
 renameIn :: (IdSupply -> Renaming -> a -> a) -> IdSupply -> In a -> a
@@ -44,11 +44,11 @@ mkRename :: (forall a. (Renaming -> a -> a) -> Renaming -> ann a -> ann a)
 mkRename rec = (var, term, alternatives, value, value')
   where
     var rn = rec var' rn
-    var' = rename
+    var' = safeRename "renameTerm"
     
     term ids rn = rec (term' ids) rn
     term' ids rn e = case e of
-      Var x -> Var (safeRename "renameTerm" rn x)
+      Var x -> Var (var rn x)
       Value v -> Value (value' ids rn v)
       App e1 x2 -> App (term ids rn e1) (var rn x2)
       PrimOp pop es -> PrimOp pop (map (term ids rn) es)
@@ -60,7 +60,7 @@ mkRename rec = (var, term, alternatives, value, value')
     value' ids rn v = case v of
       Lambda x e -> Lambda x' (term ids' rn' e)
         where (ids', rn', x') = renameBinder ids rn x
-      Data dc xs -> Data dc (map (rename rn) xs)
+      Data dc xs -> Data dc (map (var rn) xs)
       Literal l -> Literal l
     
     alternatives ids rn = map (alternative ids rn)

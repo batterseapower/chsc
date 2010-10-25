@@ -1,4 +1,4 @@
-{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RankNTypes, ScopedTypeVariables, NoMonoPatBinds #-}
 module Core.Tag where
 
 import Utilities
@@ -6,26 +6,36 @@ import Utilities
 import Core.FreeVars
 import Core.Syntax
 
+import qualified Data.Map as M
+
 
 tagTerm :: Term -> TaggedTerm
-tagTerm = mkTag (\i f (I e) -> Tagged (hashedId i) (f e))
+tagTerm = mkTag tag_any tag_any
+  where tag_any i f (I e) = Tagged (hashedId i) (f e)
 
 tagFVedTerm :: FVedTerm -> TaggedFVedTerm
-tagFVedTerm = mkTag (\i f (FVed fvs e) -> Comp (Tagged (hashedId i) (FVed fvs (f e))))
+tagFVedTerm = mkTag (\i f (FVed _fvs x) -> let x' = f x; tag_it = Tagged (hashedId i) in Comp (tag_it              (FVed (M.singleton x' [tag_it ()]) (f x))))
+                    (\i f (FVed _fvs e) -> let e' = f e                               in Comp (Tagged (hashedId i) (FVed (taggedFVedTermFreeVars' e') e')))
+
+fvTaggedTerm :: TaggedTerm -> TaggedFVedTerm
+fvTaggedTerm = termHom annFreeVars
 
 
 {-# INLINE mkTag #-}
-mkTag :: (forall a b. Id -> (a -> b) -> ann a -> ann' b)
+mkTag :: forall ann ann'.
+         (Id -> (Var       -> Var)        -> ann Var         -> ann' Var)
+      -> (Id -> (TermF ann -> TermF ann') -> ann (TermF ann) -> ann' (TermF ann'))
       -> ann (TermF ann) -> ann' (TermF ann')
-mkTag rec = term tagIdSupply
+mkTag tag_var tag_term = term tagIdSupply
   where
-    var ids = rec (idFromSupply ids) var'
+    var ids = tag_var (idFromSupply ids) var'
     var' x = x
     
-    term ids = rec i (term' ids')
+    term ids = tag_term i (term' ids')
       where (ids', i) = stepIdSupply ids
+    term' :: IdSupply -> TermF ann -> TermF ann'
     term' ids e = case e of
-        Var x         -> Var x
+        Var x         -> Var (var ids x)
         Value v       -> Value (value ids v)
         App e x       -> App (term ids0' e) (var ids1' x)
           where (ids0', ids1') = splitIdSupply ids
@@ -37,9 +47,11 @@ mkTag rec = term tagIdSupply
           where (ids0', ids1') = splitIdSupply ids
                 idss' = splitIdSupplyL ids0'
 
+    value :: IdSupply -> ValueF ann -> ValueF ann'
     value ids v = case v of
         Lambda x e -> Lambda x (term ids e)
-        Data dc xs -> Data dc xs
+        Data dc xs -> Data dc (zipWith var idss' xs)
+          where idss' = splitIdSupplyL ids
         Literal l  -> Literal l
 
     alternatives = zipWith alternative . splitIdSupplyL
@@ -50,7 +62,7 @@ mkTag rec = term tagIdSupply
 (taggedVarToVar,         taggedTermToTerm,         taggedAltsToAlts,         taggedValueToValue,         taggedValue'ToValue')         = mkDetag (\f e -> I (f (tagee e)))
 (fVedVarToVar,           fVedTermToTerm,           fVedAltsToAlts,           fVedValueToValue,           fVedValue'ToValue')           = mkDetag (\f e -> I (f (fvee e)))
 (taggedFVedVarToVar,     taggedFVedTermToTerm,     taggedFVedAltsToAlts,     taggedFVedValueToValue,     taggedFVedValue'ToValue')     = mkDetag (\f e -> I (f (fvee (tagee (unComp e)))))
-(taggedFVedVarToFVedVar, taggedFVedTermToFVedTerm, taggedFVedAltsToFVedAlts, taggedFVedValueToFVedValue, taggedFVedValue'ToFVedValue') = mkDetag (\f e -> FVed (freeVars (tagee (unComp e))) (f (fvee (tagee (unComp e)))))
+(taggedFVedVarToFVedVar, taggedFVedTermToFVedTerm, taggedFVedAltsToFVedAlts, taggedFVedValueToFVedValue, taggedFVedValue'ToFVedValue') = mkDetag (\f e -> FVed (fmap (map (\(Tagged _ ()) -> I ())) (freeVars (tagee (unComp e)))) (f (fvee (tagee (unComp e)))))
 
 
 {-# INLINE mkDetag #-}
@@ -67,7 +79,7 @@ mkDetag rec = (var, term, alternatives, value, value')
     
     term = rec term'
     term' e = case e of
-        Var x         -> Var x
+        Var x         -> Var (var x)
         Value v       -> Value (value' v)
         App e x       -> App (term e) (var x)
         PrimOp pop es -> PrimOp pop (map term es)
@@ -76,7 +88,7 @@ mkDetag rec = (var, term, alternatives, value, value')
 
     value = rec value'
     value' (Lambda x e) = Lambda x (term e)
-    value' (Data dc xs) = Data dc xs
+    value' (Data dc xs) = Data dc (map var xs)
     value' (Literal l)  = Literal l
 
     alternatives = map (second term)

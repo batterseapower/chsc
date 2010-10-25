@@ -107,7 +107,7 @@ freshName :: String -> ParseM Name
 freshName n = ParseM $ \s -> let (ids', x) = Name.freshName (ids s) n in (s { ids = ids' }, x)
 
 freshFloatName :: String -> Term -> ParseM (Maybe (Var, Term), Name)
-freshFloatName _ (I (Var x)) = return (Nothing, x)
+freshFloatName _ (I (Var x)) = return (Nothing, unI x)
 freshFloatName n e           = freshName n >>= \x -> return (Just (x, e), x)
 
 nameIt :: Term -> (Var -> ParseM Term) -> ParseM Term
