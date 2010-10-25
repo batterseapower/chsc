@@ -17,11 +17,12 @@ import Evaluator.Syntax
 
 import Size.Deeds
 
+import Termination.Generaliser
+import Termination.Statics
 import Termination.TagBag
 import Termination.TagGraph
 import Termination.TagSet
 import Termination.Terminate
-import Termination.Generaliser
 
 import Name
 import Renaming
@@ -41,7 +42,7 @@ wQO | not tERMINATION_CHECK                        = postcomp (const generaliseN
                                          TagSet   -> embedWithTagSets
 
 supercompile :: Term -> Term
-supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ runScpM $ fmap snd $ sc (mkHistory (extra wQO)) (deeds, mkTopLevelStatics input_fvs, state)
+supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ runScpM $ fmap snd $ sc (mkHistory (extra (embedStatics `prod` wQO))) (deeds, mkTopLevelStatics input_fvs, state)
   where input_fvs = annedTermFreeVars anned_e
         state = (Heap M.empty reduceIdSupply, [], (mkIdentityRenaming $ M.keys input_fvs, anned_e))
         anned_e = toAnnedTerm e
@@ -236,17 +237,18 @@ catchScpM f_try f_abort = ScpM $ \e s k -> unScpM (f_try (\c -> ScpM $ \_ _ _ ->
 
 
 type SCHistory = SCHistory' (Deeds, Out FVedTerm)
-type SCHistory' a = History (State, SCRollback a) (Generaliser, SCRollback a)
+type SCHistory' a = History ((Statics, State), SCRollback a) (Generaliser, SCRollback a)
 type SCRollback a = Generaliser -> ScpM a
 
 sc, sc' :: SCHistory -> (Deeds, Statics, State) -> ScpM (Deeds, Out FVedTerm)
 sc  hist = memo (sc' hist)
 sc' hist (deeds, statics, state)
-  = terminateM hist state (\hist     ->                   split generaliseNothing (sc hist) ((\res@(_, _, state') -> traceRender ("reduce end", residualiseState state') res) $
-                                                                                             case reduce (deeds, state) of (deeds, state) -> (deeds, statics, state))) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).)
-                          (\gen hist -> trace "sc-stop" $ split gen               (sc hist) (deeds, statics, state))
+  = terminateM hist (statics, state)
+        (\hist     ->                   split generaliseNothing (sc hist) ((\res@(_, _, state') -> traceRender ("reduce end", residualiseState state') res) $
+                                                                           case reduce (deeds, state) of (deeds, state) -> (deeds, statics, state))) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).)
+        (\gen hist -> trace "sc-stop" $ split gen               (sc hist) (deeds, statics, state))
 
-terminateM :: SCHistory' a -> State
+terminateM :: SCHistory' a -> (Statics, State)
            -> (               SCHistory' a -> ScpM a)
            -> (Generaliser -> SCHistory' a -> ScpM a)
            -> ScpM a

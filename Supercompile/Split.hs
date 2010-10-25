@@ -1,7 +1,7 @@
 {-# LANGUAGE PatternGuards, ViewPatterns, TupleSections, DeriveFunctor, DeriveFoldable, DeriveTraversable,
              MultiParamTypeClasses, FlexibleInstances, GeneralizedNewtypeDeriving #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
-module Supercompile.Split (Statics, mkTopLevelStatics, extendStatics, isStatic, MonadStatics(..), split) where
+module Supercompile.Split (Statics, staticVars, mkTopLevelStatics, extendStatics, isStatic, MonadStatics(..), split) where
 
 --import Supercompile.Residualise
 
@@ -15,7 +15,7 @@ import Evaluator.Syntax
 
 import Size.Deeds
 
-import Termination.Generaliser (Generaliser(..))
+import Termination.Generaliser
 
 import Algebra.Lattice
 import Name
@@ -32,18 +32,18 @@ import qualified Data.IntSet as IS
 
 
 -- | We do not abstract the h functions over these variables. This helps typechecking and gives GHC a chance to inline the definitions.
-newtype Statics = Statics { staticVars :: S.Set (Out Var) }
+newtype Statics = Statics { staticVars :: FreeVars }
                 deriving (Pretty)
 
 mkTopLevelStatics :: FreeVars -> Statics
-mkTopLevelStatics = Statics . M.keysSet
+mkTopLevelStatics = Statics
 
-extendStatics :: Statics -> S.Set Var -> Statics
-extendStatics (Statics xs) ys | lOCAL_TIEBACKS = Statics (xs `S.union` ys)
+extendStatics :: Statics -> FreeVars -> Statics
+extendStatics (Statics xs) ys | lOCAL_TIEBACKS = Statics (xs `unionFreeVars` ys)
                               | otherwise      = Statics xs
 
 isStatic :: Var -> Statics -> Bool
-isStatic x xs = x `S.member` staticVars xs
+isStatic x xs = x `isFreeVar` staticVars xs
 
 
 -- | We force h functions to be abstracted over these variables. This is required for generalisation. TODO: is this still true?
@@ -111,7 +111,7 @@ data QA = Question (Anned Var)
 simplify :: Generaliser
          -> (Deeds, State)
          -> (S.Set (Out Var), (Deeds, M.Map (Out Var) (Bracketed State), Bracketed State))
-simplify gen = go
+simplify (gen_statics, gen_s) = go
   where
     go (deeds, s@(Heap h ids, k, (rn, e)))
          -- We can't step past a variable or value, because if we do so I can't prove that simplify terminates and the sc recursion has finite depth
@@ -131,8 +131,8 @@ simplify gen = go
     
     seekAdmissable :: PureHeap -> NamedStack -> Maybe (IS.IntSet, S.Set (Out Var))
     seekAdmissable h named_k = traceRender ("gen_kfs", gen_kfs, "gen_xs'", gen_xs') $ guard (not (IS.null gen_kfs) || not (S.null gen_xs')) >> Just (traceRender ("seekAdmissable", gen_kfs, gen_xs') (gen_kfs, gen_xs'))
-      where gen_kfs = IS.fromList [i  | (i, kf) <- named_k, generaliseStackFrame gen kf]
-            gen_xs' = S.fromList  [x' | (x', in_e) <- M.toList h, generaliseHeapBinding gen x' in_e]
+      where gen_kfs = IS.fromList [i  | (i, kf) <- named_k, generaliseStackFrame gen_s kf]
+            gen_xs' = S.fromList  [x' | (x', in_e) <- M.toList h, generaliseHeapBinding gen_s x' in_e]
 
 
 -- Discard dead bindings:
@@ -331,7 +331,7 @@ transformWholeList f xs yss = (xs', yss')
         yss' = splitManyBy yss ys'
 
 optimiseSplit :: MonadStatics m
-              => (S.Set (Out Var) -> (Deeds, State) -> m (Deeds, Out FVedTerm))
+              => (FreeVars -> (Deeds, State) -> m (Deeds, Out FVedTerm))
               -> S.Set (Out Var)
               -> Deeds
               -> M.Map (Out Var) (Bracketed State)
@@ -387,7 +387,7 @@ optimiseSplit opt gen_xs deeds bracketeds_heap bracketed_focus = do
     -- TODO: clean up this incomprehensible loop
     -- TODO: investigate the possibility of just fusing in the optimiseLetBinds loop with this one
     go hes extra_statics leftover_deeds bracketeds_deeded_heap xes fvs = do
-        let extra_statics' = extra_statics `S.union` S.fromList (map fst hes) -- NB: the statics already include all the binders from bracketeds_deeded_heap, so no need to add xes stuff
+        let extra_statics' = extra_statics `unionFreeVars` S.fromList (map fst hes) -- NB: the statics already include all the binders from bracketeds_deeded_heap, so no need to add xes stuff
         (hes', (leftover_deeds, bracketeds_deeded_heap, fvs, xes')) <- bindCapturedFloats extra_statics' $ optimiseLetBinds (opt extra_statics') leftover_deeds bracketeds_deeded_heap (fvs `S.union` S.unions (map (M.keysSet . fvedTermFreeVars . snd) hes)) -- TODO: no need to get FVs in this way (they are in Promise)
         (if null hes' then (\a b c _d -> return (a,b,c)) else go hes' extra_statics') leftover_deeds bracketeds_deeded_heap (xes ++ hes ++ xes') fvs
 

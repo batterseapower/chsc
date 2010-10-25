@@ -23,7 +23,7 @@ import qualified Data.Map as M
 type TagGraph = TagMap (TagSet, Nat)
 
 
-embedWithTagGraphs :: WQO State Generaliser
+embedWithTagGraphs :: WQO State StateGeneraliser
 embedWithTagGraphs = precomp stateTags $ postcomp generaliserFromGrowing $ refineCollection (\discard -> postcomp discard $ zippable (postcomp snd (prod equal nat))) -- NB: NOT using natsWeak
   where
     -- consolidate :: (Functor f, Foldable.Foldable f) => f (TagSet, Nat) -> (TagSet, f Nat)
@@ -63,8 +63,8 @@ embedWithTagGraphs = precomp stateTags $ postcomp generaliserFromGrowing $ refin
         mkTagGraph :: [Tag] -> FreeVars -> TagGraph
         mkTagGraph e_tgs fvs = plusTagGraphs [IM.singleton e_tg (IS.empty, 1) | e_tg <- e_tgs] `plusTagGraph` referrerEdges e_tgs fvs
     
-    generaliserFromGrowing :: TagMap Bool -> Generaliser
-    generaliserFromGrowing growing = Generaliser {
+    generaliserFromGrowing :: TagMap Bool -> StateGeneraliser
+    generaliserFromGrowing growing = StateGeneraliser {
           generaliseStackFrame  = \kf       -> any strictly_growing (stackFrameTags' kf),
           generaliseHeapBinding = \_ (_, e) -> strictly_growing (pureHeapBindingTag' e)
         }  
