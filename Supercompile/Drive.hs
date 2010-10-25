@@ -236,18 +236,27 @@ catchScpM :: ((forall b. c -> ScpM b) -> ScpM a) -- ^ Action to try: supplies a 
 catchScpM f_try f_abort = ScpM $ \e s k -> unScpM (f_try (\c -> ScpM $ \_ _ _ -> unScpM (f_abort c) e s k)) e s k
 
 
-newtype SCRollback = SCRB { rollbackWith :: Generaliser -> ScpM (Deeds, Out FVedTerm) }
+type SCHistory = SCHistory' (Deeds, Out FVedTerm)
+type SCHistory' a = History (State, SCRollback a) (Generaliser, SCRollback a)
+type SCRollback a = Generaliser -> ScpM a
 
-sc, sc' :: History (State, SCRollback) (Generaliser, SCRollback) -> (Deeds, Statics, State) -> ScpM (Deeds, Out FVedTerm)
+sc, sc' :: SCHistory -> (Deeds, Statics, State) -> ScpM (Deeds, Out FVedTerm)
 sc  hist = memo (sc' hist)
-sc' hist (deeds, statics, state) = (\raise -> check (SCRB raise)) `catchScpM` \gen -> stop gen hist -- TODO: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
+sc' hist (deeds, statics, state)
+  = terminateM hist state (\hist     ->                   split generaliseNothing (sc hist) ((\res@(_, _, state') -> traceRender ("reduce end", residualiseState state') res) $
+                                                                                             case reduce (deeds, state) of (deeds, state) -> (deeds, statics, state))) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).)
+                          (\gen hist -> trace "sc-stop" $ split gen               (sc hist) (deeds, statics, state))
+
+terminateM :: SCHistory' a -> State
+           -> (               SCHistory' a -> ScpM a)
+           -> (Generaliser -> SCHistory' a -> ScpM a)
+           -> ScpM a
+terminateM hist x kcontinue kstop = (\raise -> try_what raise) `catchScpM` catch_what -- NB: this useless eta-expansion is necessary for type checking
   where
-    check mb_rb = case terminate hist (state, mb_rb) of
-                    Continue hist' -> continue hist'
-                    Stop (gen, rb) -> maybe (stop gen hist) (`rollbackWith` gen) $ guard sC_ROLLBACK >> Just rb
-    stop gen hist = trace "sc-stop" $ split gen               (sc hist) (deeds, statics, state)
-    continue hist =                   split generaliseNothing (sc hist) ((\res@(_, _, state') -> traceRender ("reduce end", residualiseState state') res) $
-                                                                         case reduce (deeds, state) of (deeds, state) -> (deeds, statics, state)) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
+    try_what rb = case terminate hist (x, rb) of
+                    Continue hist' -> kcontinue hist'
+                    Stop (why, rb) -> if sC_ROLLBACK then rb why else kstop why hist
+    catch_what gen = kstop gen hist -- TODO: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
 
 memo :: ((Deeds, Statics, State) -> ScpM (Deeds, Out FVedTerm))
      ->  (Deeds, Statics, State) -> ScpM (Deeds, Out FVedTerm)
