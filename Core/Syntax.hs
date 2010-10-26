@@ -18,6 +18,43 @@ data PrimOp = Add | Subtract | Multiply | Divide | Modulo | Equal | LessThan | L
 data AltCon = DataAlt DataCon [Var] | LiteralAlt Literal | DefaultAlt (Maybe Var)
             deriving (Eq, Show)
 
+-- Note [Case wildcards]
+-- ~~~~~~~~~~~~~~~~~~~~~
+--
+-- Simon thought that I should use the variable in the DefaultAlt to agressively rewrite occurences of a scrutinised variable.
+-- The motivation is that this lets us do more inlining above the case. For example, take this code fragment from foldl':
+--
+--   let n' = c n y
+--   in case n' of wild -> foldl' c n' ys
+--
+-- If we rewrite, n' becomes linear:
+--
+--   let n' = c n y
+--   in case n' of wild -> foldl c wild ys
+--
+-- This lets us potentially inline n' directly into the scrutinee position (operationally, this prevent creation of a thunk for n').
+-- However, I don't think that this particular form of improving linearity helps the supercompiler. We only want to inline n' in
+-- somewhere if it meets some interesting context, with which it can cancel. But if we are creating an update frame for n' at all,
+-- it is *probably* because we had no information about what it evaluated to.
+--
+-- An interesting exception is when n' binds a case expression:
+--
+--   let n' = case unk of T -> F; F -> T
+--   in case (case n' of T -> F; F -> T) of
+--        wild -> e[n']
+--
+-- You might think that we want n' to be linear so we can inline it into the case on it. However, the splitter will save us and produce:
+--
+--   case unk of
+--     T -> let n' = F
+--          in case (case n' of T -> F; F -> T) of wild -> e[n']
+--     F -> let n' = T
+--          in case (case n' of T -> F; F -> T) of wild -> e[n']
+--
+-- Since we now know the form of n', everything works out nicely.
+--
+-- Conclusion: I don't think rewriting to use the case wildcard buys us anything at all.
+
 data Literal = Int Integer | Char Char
              deriving (Eq, Show)
 
