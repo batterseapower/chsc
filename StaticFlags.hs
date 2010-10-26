@@ -127,3 +127,7 @@ sTEP_GARBAGE_COLLECTION = not $ "--no-step-gc" `elem` unsafePerformIO getArgs
 {-# NOINLINE sC_ROLLBACK #-}
 sC_ROLLBACK :: Bool
 sC_ROLLBACK = not $ "--no-sc-rollback" `elem` unsafePerformIO getArgs
+
+{-# NOINLINE gENERALISE_STATICS #-}
+gENERALISE_STATICS :: Bool
+gENERALISE_STATICS = not $ "--no-generalise-statics" `elem` unsafePerformIO getArgs

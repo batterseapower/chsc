@@ -119,7 +119,7 @@ simplify (gen_split, gen_s) (init_deeds, statics, init_s)
     toQA _ = Nothing
     
     admissableStatics :: Maybe Statics
-    admissableStatics = guard (not (M.null removed_static_vars)) >> return (Statics static_vars')
+    admissableStatics = guard (gENERALISE_STATICS && not (M.null removed_static_vars)) >> return (Statics static_vars')
       where (removed_static_vars, static_vars') = M.partitionWithKey (\x' static_sort -> generaliseStaticVar gen_split x' static_sort) (staticVars statics)
     
     seekAdmissable :: PureHeap -> NamedStack -> Maybe (IS.IntSet, S.Set (Out Var))
