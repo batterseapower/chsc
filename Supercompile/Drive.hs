@@ -44,16 +44,7 @@ wQO | not tERMINATION_CHECK                        = postcomp (const stateGenera
 
 supercompile :: Term -> Term
 supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ runScpM $ fmap snd $ sc (mkHistory (extra (precomp (\(statics, state) -> (gcStatics state statics, state)) $ embedStatics `prod` wQO))) (deeds, input_statics, state)
-  where -- Note [Garbage-collecting statics for the WQO]
-        -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        --
-        -- Sometimes, static variables can be made non-static again by virtue of not being a free variable of the current term.
-        -- Since the statics set is a component of the WQO, doing this is actually critical to get good optimisation in some
-        -- circumstances!
-        --
-        -- FIXME: insert example. foldl' is a good test case.
-        
-        gcStatics state statics = statics `restrictStatics` stateFreeVars state
+  where gcStatics state statics = statics `restrictStatics` stateFreeVars state
         
         input_fvs = annedTermFreeVars anned_e
         input_statics = mkTopLevelStatics (setToMap InputVariable input_fvs)
@@ -383,6 +374,33 @@ memo opt (deeds, statics, state) = do
         --
         -- Note that foldl is not affected by this problem because the "n" binding is floated out by *generalisation* rather
         -- than for work-duplication reasons, which deals with unmarking "n" as a static.
+        --
+        -- Note [Garbage-collecting statics for the WQO]
+        -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        --
+        -- Sometimes, static variables can be made non-static again by virtue of not being a free variable of the current term.
+        -- Since the statics set is a component of the WQO, doing this is actually critical to get good optimisation in some
+        -- circumstances!
+        --
+        -- An example arises during specialisation of the foldl' function:
+        --
+        --   D[foldl' (+) 0 xs]
+        --   => case xs of []     -> D[n]
+        --                 (y:ys) -> let n0 = D[c 0 y]
+        --                           in case n0 of _ -> D[foldl' (+) n0 ys]
+        --                                              => case ys of []     -> D[n0]
+        --                                                            (z:zs) -> let n1 = D[c n0 y]
+        --                                                                      in case n1 of _ -> D[foldl' (+) n1 zs]
+        --                                                                                         => ...
+        --
+        -- We ensure that the memoiser discards n1 as a static variable when it detects that tieback was prevented by it.
+        -- However, this leaves n0 in scope as a static variable. This is a problem, because it means that the D[foldl' (+) n1 ys]
+        -- step is embedded into the earlier D[foldl' (+) n0 ys] with an identical statics set. This causes the termination
+        -- criteria to hit and Bad Things happen.
+        --
+        -- If we notice that n0 is unreachable from (foldl' (+) n1 ys) then we can remove it from the statics set. This means that
+        -- the term will embed into the previous one, but the statics set will be smaller. This lets us continue supercompilation
+        -- of the general version and build an optimal loop. Yay!
         let clashing_statics = [x' | (x, x') <- lexical p `zip` tb_static_vs, not (x' == x && x' `isStatic` statics)]
         if null clashing_statics
          then do --traceRenderM ("memo'", statics, stateFreeVars state, rn_lr, (fun p, lexical p, abstracted p))
