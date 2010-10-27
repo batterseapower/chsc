@@ -95,10 +95,13 @@ simplify (gen_split, gen_s) (init_deeds, statics, init_s)
   = (\res@(_, (deeds', bracketed_heap, bracketed)) -> assertRender (text "simplify: deeds lost or gained") (noGain (init_deeds `releaseStateDeed` init_s) (M.fold (flip (releaseBracketedDeeds releaseStateDeed) . tagee) (releaseBracketedDeeds releaseStateDeed deeds' bracketed) bracketed_heap)) res) $
     go (init_deeds, init_s) -- FIXME: use gen_split
   where
-    -- FIXME: I'm not sure why it is well motivated to generalise away staticness by looking for growing statics. I think my original
-    -- plan was to generalise it away if and only if it caused tieback to fail. However, if I just did that then it wouldn't
-    -- help as I would immediately terminate (as I would be driving a term matching a previous one recorded in the history),
-    -- unless I could fold at once.
+    -- Note [Generalisation of static variables]
+    -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    --
+    -- I used to generalise away staticness by looking for "growing" static variables, but I don't know why this is a good
+    -- idea. I reverted to my original plan, which was to generalise it away if and only if it caused tieback to fail. However,
+    -- if I just did that then it wouldn't help as I would immediately terminate (as I would be driving a term matching a previous
+    -- one recorded in the history), unless I could fold at once.
     --
     -- The real thing I wanted to to do (motivated by foldl') is tie back to a promise even though some of *my* static
     -- variables "clash" with some of *it's* static variables in that they are not totally identical. This necessitates
@@ -125,7 +128,11 @@ simplify (gen_split, gen_s) (init_deeds, statics, init_s)
          -- If we can find some fraction of the stack or heap to drop that looks like it will be admissable, just residualise those parts and continue
         | Just split_from@(_, gen_xs) <- seekAdmissable h named_k, (ids', ctxt_id) <- stepIdSupply ids = (\extra_statics -> (statics `extendStatics` extra_statics) `excludeStatics` gen_xs, splitt split_from (deeds, (Heap h ids', named_k, ([],                                                     oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], (rn, e)))))))
          -- If we can find some static variables to drop that look like they will improve the situation, generalise them away
-        -- FIXME: this was building bad loops in output >_>
+         --
+         -- FIXME: this was building bad loops in output >_>. I think this was caused by throwing away a static that
+         -- wasn't actually preventing tieback from occuring. Thus when I drove the new term the matcher found that it could
+         -- tieback by just instantiating the term I generalised from. If we make sure that the statics set are garbage collected
+         -- immediately before calling simplify, I don't think that this should be a problem.
         -- | Just statics' <- admissableStatics                                                           = (statics',                        (deeds, M.empty, oneBracketed s))
          -- Otherwise, keep dropping stuff until one of the two conditions above holds
         | Just (_, deeds', s') <- step (const id) emptyFreeVars (emptyLosers, deeds, s)                = trace ("simplify: dropping " ++ droppingWhat (annee (snd (thd3 s))) ++ " piece :(") $ go (deeds', s')
