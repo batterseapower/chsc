@@ -12,3 +12,6 @@ dist/
 dist-profiling/
 *.hi
 *.o
+
+# Python stuff
+*.pyc
