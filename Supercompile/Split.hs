@@ -95,6 +95,28 @@ simplify (gen_split, gen_s) (init_deeds, statics, init_s)
   = (\res@(_, (deeds', bracketed_heap, bracketed)) -> assertRender (text "simplify: deeds lost or gained") (noGain (init_deeds `releaseStateDeed` init_s) (M.fold (flip (releaseBracketedDeeds releaseStateDeed) . tagee) (releaseBracketedDeeds releaseStateDeed deeds' bracketed) bracketed_heap)) res) $
     go (init_deeds, init_s) -- FIXME: use gen_split
   where
+    -- FIXME: I'm not sure why it is well motivated to generalise away staticness by looking for growing statics. I think my original
+    -- plan was to generalise it away if and only if it caused tieback to fail. However, if I just did that then it wouldn't
+    -- help as I would immediately terminate (as I would be driving a term matching a previous one recorded in the history),
+    -- unless I could fold at once.
+    --
+    -- The real thing I wanted to to do (motivated by foldl') is tie back to a promise even though some of *my* static
+    -- variables "clash" with some of *it's* static variables in that they are not totally identical. This necessitates
+    -- driving a version of this term with some statics generalised away, and hoping it can tie back to itself in the future.
+    -- 
+    -- In the case of foldl', tying back to itself in the future explicitly means that we have to instantiate the promises'
+    -- lambda-bound variables with some variables that are currently static. BAH!
+    --
+    -- So, The Plan is:
+    --  1) Allow tieback even if that means static variables instantiating lambdas (... no comment)
+    --  2) Generalise statics only in the memoisation mechanism ...
+    --  3) ... but still incorporate a test on them in the WQO (we do want to keep going if we have an identical term with a different statics set)
+    --
+    -- I think this will let us:
+    --  1) Optimise foldl' nicely (specialisation on functional argument)
+    --     * Note that foldl only optimises nicely because we force generalised variables to become non-static
+    --  2) Prove that the supercompiler terminates (again)
+    
     go (deeds, s@(Heap h ids, k, (rn, e)))
          -- We can't step past a variable or value, because if we do so I can't prove that simplify terminates and the sc recursion has finite depth
          -- If the termination criteria has not hit, we
