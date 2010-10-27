@@ -33,5 +33,8 @@ extendStatics (Statics xs) ys | lOCAL_TIEBACKS = Statics (xs `M.union` ys)
 excludeStatics :: Statics -> S.Set (Out Var) -> Statics
 excludeStatics (Statics xs) ys = Statics (xs `exclude` ys)
 
+restrictStatics :: Statics -> S.Set (Out Var) -> Statics
+restrictStatics (Statics xs) ys = Statics (xs `restrict` ys)
+
 isStatic :: Var -> Statics -> Bool
 isStatic x xs = x `M.member` staticVars xs

@@ -43,8 +43,19 @@ wQO | not tERMINATION_CHECK                        = postcomp (const stateGenera
                                          TagSet   -> embedWithTagSets
 
 supercompile :: Term -> Term
-supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ runScpM $ fmap snd $ sc (mkHistory (extra (embedStatics `prod` wQO))) (deeds, input_statics, state)
-  where input_fvs = annedTermFreeVars anned_e
+supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ runScpM $ fmap snd $ sc (mkHistory (extra (precomp (\(statics, state) -> (gcStatics state statics, state)) $ embedStatics `prod` wQO))) (deeds, input_statics, state)
+  where -- Note [Garbage-collecting statics for the WQO]
+        -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        --
+        -- Sometimes, static variables can be made non-static again by virtue of not being a free variable of the current term.
+        -- Since the statics set is a component of the WQO, doing this is actually critical to get good optimisation in some
+        -- circumstances!
+        --
+        -- FIXME: insert example. foldl' is a good test case.
+        
+        gcStatics state statics = statics `restrictStatics` stateFreeVars state
+        
+        input_fvs = annedTermFreeVars anned_e
         input_statics = mkTopLevelStatics (setToMap InputVariable input_fvs)
         
         state = (Heap M.empty reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, anned_e))
@@ -306,9 +317,9 @@ memo opt (deeds, statics, state) = do
         -- NB: promises are lexically scoped because they may refer to FVs
         x <- freshHName
         promise P { fun = x, abstracted = dynamic_vs_list, lexical = static_vs_list, meaning = state } $ do
-            traceRenderM (">sc", x, statics, residualiseState state, deeds)
+            traceRenderM (">sc", x, statics', residualiseState state, deeds)
             res <- opt (deeds, statics' `extendStatics` M.singleton x HFunction, state)
-            traceRenderM ("<sc", x, statics, residualiseState state, res)
+            traceRenderM ("<sc", x, statics', residualiseState state, res)
             return res
   where
     tiebackOne p = do
@@ -376,5 +387,5 @@ memo opt (deeds, statics, state) = do
         if null clashing_statics
          then do --traceRenderM ("memo'", statics, stateFreeVars state, rn_lr, (fun p, lexical p, abstracted p))
                  return (fun p, (releaseStateDeed deeds state, fun p `varApps` tb_dynamic_vs))
-         else do --traceRenderM ("memo: rejected by statics", lexical p, tb_static_vs)
+         else do traceRenderM ("memo: rejected by statics", lexical p, tb_static_vs, "generalising:", clashing_statics)
                  PreventedByStatics (S.fromList clashing_statics)
