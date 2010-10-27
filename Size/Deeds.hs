@@ -90,9 +90,9 @@ claimDeed deeds tg = claimDeeds deeds tg 1
 -- NB: it is OK if the number of deeds to claim is negative -- that just causes some deeds to be released
 claimDeeds :: Deeds -> Tag -> Int -> Maybe Deeds
 claimDeeds deeds _ _ | not dEEDS = Just deeds
-claimDeeds (Local ldeeds) tg want = guard (unclaimed >= want) >> foldM claimDeed (Local (ldeeds { localChildren = updateTag tg (unclaimed - want, child_tgs) (localChildren ldeeds) })) child_tgs
+claimDeeds (Local ldeeds) tg want = guard (unclaimed >= want) >> foldM (\deeds tg -> claimDeeds deeds tg want) (Local (ldeeds { localChildren = updateTag tg (unclaimed - want, child_tgs) (localChildren ldeeds) })) child_tgs
   where !(unclaimed, child_tgs) = lookupTag tg (localChildren ldeeds)
-claimDeeds (Global gdeeds) tg want = guard (globalUnclaimed gdeeds >= want) >> foldM claimDeed (Global (gdeeds { globalUnclaimed = globalUnclaimed gdeeds - want })) child_tgs
+claimDeeds (Global gdeeds) tg want = guard (globalUnclaimed gdeeds >= want) >> foldM (\deeds tg -> claimDeeds deeds tg want) (Global (gdeeds { globalUnclaimed = globalUnclaimed gdeeds - want })) child_tgs
   where !(I child_tgs) = lookupTag tg (globalChildren gdeeds)
 
 releaseDeedDeep :: Deeds -> Tag -> Deeds
