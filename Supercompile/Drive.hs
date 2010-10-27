@@ -43,10 +43,8 @@ wQO | not tERMINATION_CHECK                        = postcomp (const stateGenera
                                          TagSet   -> embedWithTagSets
 
 supercompile :: Term -> Term
-supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ runScpM $ fmap snd $ sc (mkHistory (extra (precomp (\(statics, state) -> (gcStatics state statics, state)) $ embedStatics `prod` wQO))) (deeds, input_statics, state)
-  where gcStatics state statics = statics `restrictStatics` stateFreeVars state
-        
-        input_fvs = annedTermFreeVars anned_e
+supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ runScpM $ fmap snd $ sc (mkHistory (extra (embedStatics `prod` wQO))) (deeds, input_statics, state)
+  where input_fvs = annedTermFreeVars anned_e
         input_statics = mkTopLevelStatics (setToMap InputVariable input_fvs)
         
         state = (Heap M.empty reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, anned_e))
@@ -300,17 +298,18 @@ memo opt (deeds, statics, state) = do
         traceRenderM ("=sc", _x, statics, residualiseState state, deeds, res)
         return res
       no_tieback -> {- traceRender ("new drive", residualiseState state) $ -} do
-        let statics' | PreventedByStatics overstatic_xs <- no_tieback = statics `excludeStatics` overstatic_xs
+        let statics0 | PreventedByStatics overstatic_xs <- no_tieback = statics `excludeStatics` overstatic_xs
                      | otherwise                                      = statics
             vs = stateFreeVars state
-            (static_vs_list, dynamic_vs_list) = partition (`isStatic` statics') (S.toList vs)
+            statics1 = statics0 `restrictStatics` vs -- See Note [Garbage-collecting statics for the WQO]
+            (static_vs_list, dynamic_vs_list) = partition (`isStatic` statics1) (S.toList vs)
     
         -- NB: promises are lexically scoped because they may refer to FVs
         x <- freshHName
         promise P { fun = x, abstracted = dynamic_vs_list, lexical = static_vs_list, meaning = state } $ do
-            traceRenderM (">sc", x, statics', residualiseState state, deeds)
-            res <- opt (deeds, statics' `extendStatics` M.singleton x HFunction, state)
-            traceRenderM ("<sc", x, statics', residualiseState state, res)
+            traceRenderM (">sc", x, statics1, residualiseState state, deeds)
+            res <- opt (deeds, statics1 `extendStatics` M.singleton x HFunction, state)
+            traceRenderM ("<sc", x, statics1, residualiseState state, res)
             return res
   where
     tiebackOne p = do
