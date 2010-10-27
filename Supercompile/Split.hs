@@ -131,7 +131,7 @@ simplify (gen_split, gen_s) (init_deeds, statics, init_s)
            -- This is usually fine if our current state is the output of reduce (since it will likely be stuck anyway), but is very bad otherwise!
            splitt bottom (deeds, (Heap h ids1, named_k, (case qa of Question x -> [rename rn x]; Answer _ -> [], splitQA ids2 (rn, qa)))))
          -- If we can find some fraction of the stack or heap to drop that looks like it will be admissable, just residualise those parts and continue
-        | Just split_from@(_, gen_xs) <- seekAdmissable h named_k
+        | Just split_from@(_, gen_xs) <- seekAdmissable h named_k -- FIXME: causes e.g. the accumulator in foldl (\acc _ -> not acc) True xs to be split into two pieces so we can't fuse not with its argument
         , (ids', ctxt_id) <- stepIdSupply ids
         = (-- See Note [Generalisation of static variables]
            \extra_statics -> (statics `extendStatics` extra_statics) `excludeStatics` gen_xs,
