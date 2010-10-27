@@ -98,7 +98,6 @@ step reduce live (losers, deeds, _state@(h, k, (rn, e))) =
         -- NB: to prevent incorrectly garbage collecting bindings from the enclosing heap when we have speculation on,
         -- we pass around an extra "live set" of parts of the heap that might be referred to later on
         --
-        -- TODO: make finding FVs much cheaper (i.e. memoise it in the syntax functor construction)
         -- TODO: could GC cycles as well (i.e. don't consider stuff from the Heap that was only referred to by the thing being removed as "GC roots")
         linear = sTEP_GARBAGE_COLLECTION &&
                  annee x' `S.notMember` pureHeapFreeVars h (stackFreeVars k (inFreeVars annedValueFreeVars' (rn, v))) &&
