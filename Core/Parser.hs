@@ -217,7 +217,7 @@ altPatCore (LHE.PParen pat)                = altPatCore pat
 altPatCore (LHE.PList [])                  = return $ dataAlt nilDataCon ([], [], id)
 altPatCore (LHE.PLit (LHE.Int i))          = return (LiteralAlt (Int i), id)
 altPatCore (LHE.PLit (LHE.Char c))         = return (LiteralAlt (Char c), id)
-altPatCore LHE.PWildCard                   = return (DefaultAlt Nothing, id)
+altPatCore LHE.PWildCard                   = return (DefaultAlt Nothing, id) -- TODO: this is not quite right, because case on variable is not strict in Haskell. But the standard library depends on it being so...
 altPatCore p = panic "altPatCore" (text $ show p)
 
 dataAlt :: DataCon -> ([Var], [Var], Term -> Term) -> (AltCon, Term -> Term)
