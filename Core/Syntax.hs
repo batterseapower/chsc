@@ -92,7 +92,7 @@ instance Pretty1 ann => Pretty (TermF ann) where
         PrimOp pop xs -> pPrintPrecPrimOp level prec pop xs
         Case e alts | level == haskellLevel, null alts                              -> pPrintPrecSeq level prec e (text "undefined")
                     | level == haskellLevel, [(DefaultAlt Nothing, e_alt)]  <- alts -> pPrintPrecSeq level prec e e_alt
-                    | level == haskellLevel, [(DefaultAlt (Just x), e_alt)] <- alts -> pPrintPrecLetRec level prec [(x, e)] e_alt
+                    | level == haskellLevel, [(DefaultAlt (Just x), e_alt)] <- alts -> pPrintPrecLetRec level prec [(x, e)] (pPrintPrecSeq level prec x e_alt)
                     | otherwise                                                     -> pPrintPrecCase level prec e alts
 
 pPrintPrecSeq :: (Pretty a, Pretty b) => PrettyLevel -> Rational -> a -> b -> Doc
