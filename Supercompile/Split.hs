@@ -109,8 +109,9 @@ simplify (gen_split, gen_s) (init_deeds, statics, init_s)
     --
     -- So, The Plan is:
     --  1) Allow tieback even if that means static variables instantiating lambdas (... no comment)
-    --  2) Generalise statics only in the memoisation mechanism ...
+    --  2) Also generalise statics in the memoisation mechanism ...
     --  3) ... but still incorporate a test on them in the WQO (we do want to keep going if we have an identical term with a different statics set)
+    --  (NB: I'm retaining the mechanism that generalises statics if doing so would prevent us from dropping some frames. I don't feel strongly about this.)
     --
     -- I think this will let us:
     --  1) Optimise foldl' nicely (specialisation on functional argument)
