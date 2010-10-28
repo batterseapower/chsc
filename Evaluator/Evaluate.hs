@@ -97,7 +97,8 @@ step reduce live (losers, deeds, (h, k, (rn, Comp (Tagged tg (FVed _ e))))) = ca
         --
         -- TODO: make finding FVs much cheaper (i.e. memoise it in the syntax functor construction)
         -- TODO: could GC cycles as well (i.e. don't consider stuff from the Heap that was only referred to by the thing being removed as "GC roots")
-        linear = annee x' `S.notMember` pureHeapFreeVars h (stackFreeVars k (inFreeVars annedValueFreeVars' (rn, v))) &&
+        linear = sTEP_GARBAGE_COLLECTION &&
+                 annee x' `S.notMember` pureHeapFreeVars h (stackFreeVars k (inFreeVars annedValueFreeVars' (rn, v))) &&
                  annee x' `S.notMember` live
 
     allocate :: Deeds -> Heap -> Stack -> In ([(Var, AnnedTerm)], AnnedTerm) -> (Losers, Deeds, State) -- FIXME: I suspect we should accumulate Losers across the boundary of sc
