@@ -135,7 +135,8 @@ apportionN _      []        = error "apportionN: empty list"
 apportionN orig_n weighting = result
   where
     fracs :: [Rational]
-    fracs = map (\numerator -> fromIntegral numerator / denominator) weighting
+    fracs = assertRender (text "apportionN: must have at least one non-zero weight") (denominator /= 0) $
+            map (\numerator -> fromIntegral numerator / denominator) weighting
       where denominator = fromIntegral (sum weighting)
     
     -- Here is the idea:

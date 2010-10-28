@@ -330,10 +330,10 @@ optimiseSplit opt gen_xs deeds bracketeds_heap bracketed_focus = do
         bracketSizes = map stateSize . fillers
         
         (heap_xs, bracketeds_heap_elts) = unzip (M.toList bracketeds_heap)
-        -- NB: it is *very important* that the list supplied to apportion contains at least one element, or some
-        -- deeds will vanish in a puff of digital smoke. We deal with this in the proportional case by padding the input list with a 0
+        -- NB: it is *very important* that the list supplied to apportion contains at least one element and at least one non-zero weight, or some
+        -- deeds will vanish in a puff of digital smoke. We deal with this in the proportional case by padding the input list with a 1
         (deeds_initial:deeds_focus, deedss_heap)
-          | Proportional <- dEEDS_POLICY = transformWholeList (apportion deeds) (0 : bracketSizes bracketed_focus) (map bracketSizes bracketeds_heap_elts)
+          | Proportional <- dEEDS_POLICY = transformWholeList (apportion deeds) (1 : bracketSizes bracketed_focus) (map bracketSizes bracketeds_heap_elts)
           | otherwise                    = (deeds : [deeds_empty | _ <- bracketSizes bracketed_focus], [[deeds_empty | _ <- bracketSizes b] | b <- bracketeds_heap_elts])
             where deeds_empty = mkEmptyDeeds deeds
         
