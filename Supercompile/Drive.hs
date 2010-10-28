@@ -204,6 +204,7 @@ promise p opt = ScpM $ \e s k -> traceRender ("promise", fun p, abstracted p, le
       (a, e') <- opt
       ScpM $ \e s k -> k () e (s { fulfilments = (p, e') : fulfilments s })
       
+      -- TODO: we could use the final FV information to cut down the lexical FV set: this would let us float completed promises slightly further outwards.
       let fvs' = fvedTermFreeVars e' in fmap (S.fromList . ((abstracted p ++ lexical p) ++) . map fun) getPromises >>= \fvs -> assertRender ("sc: FVs", fun p, fvs' S.\\ fvs, fvs) (fvs' `S.isSubsetOf` fvs) $ return ()
       
       return (a, fun p `varApps` abstracted p)

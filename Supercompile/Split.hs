@@ -118,10 +118,14 @@ simplify (gen_split, gen_s) (init_deeds, statics, init_s)
     toQA (Value v) = Just (Answer v)
     toQA _ = Nothing
     
+    -- FIXME: I should throw away a random static variable before I throw away any stack frames!
     admissableStatics :: Maybe Statics
     admissableStatics = guard (gENERALISE_STATICS && not (M.null removed_static_vars)) >> return (Statics static_vars')
       where (removed_static_vars, static_vars') = M.partitionWithKey (\x' static_sort -> generaliseStaticVar gen_split x' static_sort) (staticVars statics)
     
+    -- FIXME: variables that are generalised should be removed from the statics immediately: the whole point of generalisation
+    -- is to make the term under consideration more... general. If we are still tied to some particular FV this won't happen!
+    -- The only thing that it is worth keeping local h-functions for is for things residualised for work-duplication purposes.
     seekAdmissable :: PureHeap -> NamedStack -> Maybe (IS.IntSet, S.Set (Out Var))
     seekAdmissable h named_k = traceRender ("gen_kfs", gen_kfs, "gen_xs'", gen_xs') $ guard (not (IS.null gen_kfs) || not (S.null gen_xs')) >> Just (traceRender ("seekAdmissable", gen_kfs, gen_xs') (gen_kfs, gen_xs'))
       where gen_kfs = IS.fromList [i  | (i, kf) <- named_k, generaliseStackFrame gen_s kf]
