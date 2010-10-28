@@ -27,7 +27,7 @@ emptyLosers = IS.empty
 
 
 step :: (FreeVars -> (Losers, Deeds, State) -> (Losers, Deeds, State)) -> FreeVars -> (Losers, Deeds, State) -> Maybe (Losers, Deeds, State)
-step reduce live (losers, deeds, (h, k, (rn, Comp (Tagged tg (FVed _ e))))) = case e of
+step reduce live (losers, deeds, (h, k, (rn, e))) = case annee e of
     Var x             -> fmap (\(a, b) -> (losers, a, b)) $ force  deeds h k tg (rename rn x)
     Value v           -> fmap (\(a, b) -> (losers, a, b)) $ unwind deeds h k tg (rn, v)
     App e1 x2         -> Just (losers, deeds', (h, Apply (renameAnnedVar rn x2)    : k, (rn, e1)))
@@ -35,6 +35,7 @@ step reduce live (losers, deeds, (h, k, (rn, Comp (Tagged tg (FVed _ e))))) = ca
     Case e alts       -> Just (losers, deeds', (h, Scrutinise (rn, alts)           : k, (rn, e)))
     LetRec xes e      -> Just (allocate deeds' h k (rn, (xes, e)))
   where
+    tg = annedTag e
     deeds' = releaseDeedDescend_ deeds tg
 
     force :: Deeds -> Heap -> Stack -> Tag -> Out Var -> Maybe (Deeds, State)
