@@ -1,0 +1,10 @@
+map f xs = case xs of []     -> []
+                      (y:ys) -> f y : map f ys
+
+repeat x = x : repeat x -- Use the non-value-recursive definition to keep things simple for the work duplication detector
+
+root = map Just (repeat True)
+
+tests = [
+    (case root of x:xs -> case xs of y:ys -> (x, y), (Just True, Just True))
+  ]
