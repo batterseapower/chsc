@@ -7,6 +7,7 @@ module Supercompile.Split (StaticSort(..), Statics, staticVars, mkTopLevelStatic
 
 import Core.FreeVars
 import Core.Renaming
+import Core.Statics
 import Core.Syntax
 
 import Evaluator.Evaluate
@@ -29,32 +30,6 @@ import qualified Data.Traversable as Traversable
 import qualified Data.Map as M
 import qualified Data.Set as S
 import qualified Data.IntSet as IS
-
-
-data StaticSort = HFunction | LocalVariable Tag | InputVariable
-
-instance Pretty StaticSort where
-    pPrint HFunction           = text "(h-function static)"
-    pPrint (LocalVariable _tg) = text "(local variable static)"
-    pPrint InputVariable       = text "(input variable static)"
-
--- | We do not abstract the h functions over these variables. This helps typechecking and gives GHC a chance to inline the definitions.
-newtype Statics = Statics { staticVars :: M.Map (Out Var) StaticSort }
-                deriving (Pretty)
-
-mkTopLevelStatics :: M.Map (Out Var) StaticSort -> Statics
-mkTopLevelStatics = Statics
-
-extendStatics :: Statics -> M.Map (Out Var) StaticSort -> Statics
-extendStatics (Statics xs) ys | lOCAL_TIEBACKS = Statics (xs `M.union` ys)
-                              | otherwise      = Statics xs
-
-isStatic :: Var -> Statics -> Bool
-isStatic x xs = x `M.member` staticVars xs
-
-
--- | We force h functions to be abstracted over these variables. This is required for generalisation. TODO: is this still true?
-type GeneralisedVars = FreeVars
 
 
 class Monad m => MonadStatics m where
@@ -103,8 +78,8 @@ split :: MonadStatics m
       -> ((Deeds, Statics, State) -> m (Deeds, Out FVedTerm))
       -> (Deeds, Statics, State)
       -> m (Deeds, Out FVedTerm)
-split gen opt (deeds, statics, s) = optimiseSplit (\extra_statics (deeds, s) -> opt (deeds, statics `extendStatics` extra_statics, s)) gen_xs deeds' bracketeds_heap bracketed_focus
-  where (gen_xs, (deeds', bracketeds_heap, bracketed_focus)) = simplify gen (deeds, s)
+split gen opt (deeds, statics, s) = optimiseSplit (\extra_statics (deeds, s) -> opt (deeds, statics' `extendStatics` extra_statics, s)) deeds' bracketeds_heap bracketed_focus
+  where (statics', (deeds', bracketeds_heap, bracketed_focus)) = simplify gen (deeds, statics, s)
 
 
 -- Non-expansive simplification that we can safely do just before splitting to make the splitter a bit simpler
@@ -114,18 +89,20 @@ data QA = Question Var
 
 {-# INLINE simplify #-}
 simplify :: Generaliser
-         -> (Deeds, State)
-         -> (S.Set (Out Var), (Deeds, M.Map (Out Var) (Tagged (Bracketed State)), Bracketed State))
-simplify (gen_split, gen_s) (init_deeds, init_s)
+         -> (Deeds, Statics, State)
+         -> (Statics, (Deeds, M.Map (Out Var) (Tagged (Bracketed State)), Bracketed State))
+simplify (gen_split, gen_s) (init_deeds, statics, init_s)
   = (\res@(_, (deeds', bracketed_heap, bracketed)) -> assertRender (text "simplify: deeds lost or gained") (noGain (init_deeds `releaseStateDeed` init_s) (M.fold (flip (releaseBracketedDeeds releaseStateDeed) . tagee) (releaseBracketedDeeds releaseStateDeed deeds' bracketed) bracketed_heap)) res) $
     go (init_deeds, init_s) -- FIXME: use gen_split
   where
     go (deeds, s@(Heap h ids, k, (rn, e)))
          -- We can't step past a variable or value, because if we do so I can't prove that simplify terminates and the sc recursion has finite depth
          -- If the termination criteria has not hit, we
-        | Just qa <- toQA (annee e),                   (ids1, ids2)    <- splitIdSupply ids = (S.empty,        splitt bottom     (deeds, (Heap h ids1, named_k, (case qa of Question x -> [rename rn x]; Answer _ -> [], splitQA ids2 (rn, qa)))))
+        | Just qa <- toQA (annee e),                   (ids1, ids2)    <- splitIdSupply ids = (statics,  splitt bottom     (deeds, (Heap h ids1, named_k, (case qa of Question x -> [rename rn x]; Answer _ -> [], splitQA ids2 (rn, qa)))))
          -- If we can find some fraction of the stack or heap to drop that looks like it will be admissable, just residualise those parts and continue
-        | Just split_from <- seekAdmissable h named_k, (ids', ctxt_id) <- stepIdSupply ids  = (snd split_from, splitt split_from (deeds, (Heap h ids', named_k, ([],                                                     oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], (rn, e)))))))
+        | Just split_from <- seekAdmissable h named_k, (ids', ctxt_id) <- stepIdSupply ids  = (statics,  splitt split_from (deeds, (Heap h ids', named_k, ([],                                                     oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], (rn, e)))))))
+         -- If we can find some static variables to drop that look like they will improve the situation, generalise them away
+        | Just statics' <- admissableStatics                                                = (statics', (deeds, M.empty, oneBracketed s))
          -- Otherwise, keep dropping stuff until one of the two conditions above holds
         | Just (_, deeds', s') <- step (const id) emptyFreeVars (emptyLosers, deeds, s)     = trace ("simplify: dropping " ++ droppingWhat (annee (snd (thd3 s))) ++ " piece :(") $ go (deeds', s')
          -- Even if we can never find some admissable fragment of the input, we *must* eventually reach a variable or value
@@ -140,6 +117,10 @@ simplify (gen_split, gen_s) (init_deeds, init_s)
     toQA (Var x)   = Just (Question x)
     toQA (Value v) = Just (Answer v)
     toQA _ = Nothing
+    
+    admissableStatics :: Maybe Statics
+    admissableStatics = guard (not (M.null removed_static_vars)) >> return (Statics static_vars')
+      where (removed_static_vars, static_vars') = M.partitionWithKey (\x' static_sort -> generaliseStaticVar gen_split x' static_sort) (staticVars statics)
     
     seekAdmissable :: PureHeap -> NamedStack -> Maybe (IS.IntSet, S.Set (Out Var))
     seekAdmissable h named_k = traceRender ("gen_kfs", gen_kfs, "gen_xs'", gen_xs') $ guard (not (IS.null gen_kfs) || not (S.null gen_xs')) >> Just (traceRender ("seekAdmissable", gen_kfs, gen_xs') (gen_kfs, gen_xs'))
@@ -347,12 +328,11 @@ transformWholeList f xs yss = (xs', yss')
 
 optimiseSplit :: MonadStatics m
               => (M.Map (Out Var) StaticSort -> (Deeds, State) -> m (Deeds, Out FVedTerm))
-              -> S.Set (Out Var)
               -> Deeds
               -> M.Map (Out Var) (Tagged (Bracketed State))
               -> Bracketed State
               -> m (Deeds, Out FVedTerm)
-optimiseSplit opt gen_xs deeds bracketeds_heap bracketed_focus = do
+optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
     -- 0) The "process tree" splits at this point. We can choose to distribute the deeds between the children in a number of ways
     let stateSize (h, k, in_e) = heapSize h + stackSize k + termSize (snd in_e)
           where heapSize (Heap h _) = sum (map (termSize . snd) (M.elems h))

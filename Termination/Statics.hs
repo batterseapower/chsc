@@ -6,11 +6,9 @@ module Termination.Statics (
 import Termination.Generaliser
 import Termination.Terminate
 
-import Supercompile.Split (StaticSort(..), Statics(..))
-
 import Core.Renaming (Out)
 import Core.Syntax (Var)
-import Evaluator.Syntax (annee, annedTag)
+import Core.Statics (StaticSort(..), Statics(..))
 
 import Utilities
 
@@ -40,5 +38,5 @@ embedStatics = precomp (staticsTags . staticVars) $ postcomp generaliserFromGrow
     
     generaliserFromGrowing :: (TagMap Bool, M.Map InputVar Bool) -> StaticGeneraliser
     generaliserFromGrowing (growing_locals, growing_inputs)
-      = StaticGeneraliser $ \x -> fromMaybe False $ IM.lookup (annedTag x) growing_locals `mplus`
-                                                    M.lookup (UnsafeCertifyInputVar (annee x)) growing_inputs
+      = StaticGeneraliser $ \x' sort -> fromMaybe False $ do { LocalVariable tg <- return sort; IM.lookup tg growing_locals } `mplus`
+                                                          do { InputVariable <- return sort; M.lookup (UnsafeCertifyInputVar x') growing_inputs }

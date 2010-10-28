@@ -2,6 +2,7 @@ module Termination.Generaliser where
 
 import Core.Syntax   (Var)
 import Core.Renaming (In, Out)
+import Core.Statics  (StaticSort)
 
 import Evaluator.Syntax
 
@@ -9,11 +10,11 @@ import Evaluator.Syntax
 type Generaliser = (StaticGeneraliser, StateGeneraliser)
 
 newtype StaticGeneraliser = StaticGeneraliser {
-    generaliseStaticVar :: Out (Anned Var) -> Bool
+    generaliseStaticVar :: Out Var -> StaticSort -> Bool
   }
 
 staticGeneraliseNothing :: StaticGeneraliser
-staticGeneraliseNothing = StaticGeneraliser (\_ -> False)
+staticGeneraliseNothing = StaticGeneraliser (\_ _ -> False)
 
 data StateGeneraliser = StateGeneraliser {
     generaliseStackFrame  :: StackFrame -> Bool,
