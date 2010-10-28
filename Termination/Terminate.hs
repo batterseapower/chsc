@@ -82,6 +82,8 @@ instance Prearrow WQO where
     {-# INLINE postcomp #-}
     postcomp f_why (lazy -> WQO prepare embed) = WQO prepare $ \x y -> fmap f_why $ embed x y
 
+-- FIXME: inlining this causes bus errors... why?
+{-# NOINLINE lazy #-}
 lazy :: forall a why. WQO a why -> WQO a why
 lazy wqo = WQO (case wqo of WQO prepare _ -> unsafeCoerce prepare :: a -> ()) (case wqo of WQO _ embed -> unsafeCoerce embed)
 
