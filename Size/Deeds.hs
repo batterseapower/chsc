@@ -10,7 +10,7 @@ module Size.Deeds (
     mkEmptyDeeds, releaseDeedsTo,
     
     -- * Sanity checking
-    noLoss
+    noChange, noGain
   ) where
 
 import StaticFlags
@@ -158,11 +158,17 @@ apportionN orig_n weighting = result
     -- We cannot allocate more of these "fixup" pieces than we had "n" left at the end of the first pass.
     final_deserving_allowed = map fst (take remaining (sortBy (comparing (Down . snd)) final_deserving))
 
-noLoss :: Deeds -> Deeds -> Bool
-noLoss (Local ldeeds1) (Local ldeeds2) = IM.keysSet children1 == IM.keysSet children2 && Foldable.and (IM.intersectionWith (\(unclaimed1, _) (unclaimed2, _) -> unclaimed1 == unclaimed2) children1 children2)
+noChange, noGain :: Deeds -> Deeds -> Bool
+noChange = andZipDeeds (==)
+noGain = andZipDeeds (>=)
+
+andZipDeeds :: (Unclaimed -> Unclaimed -> Bool)
+            -> Deeds -> Deeds -> Bool
+andZipDeeds f (Local ldeeds1) (Local ldeeds2) = IM.keysSet children1 == IM.keysSet children2 && Foldable.and (IM.intersectionWith (\(unclaimed1, _) (unclaimed2, _) -> unclaimed1 `f` unclaimed2) children1 children2)
   where (children1, children2) = (childrenMap (localChildren ldeeds1), childrenMap (localChildren ldeeds2))
-noLoss (Global gdeeds1) (Global gdeeds2) = globalUnclaimed gdeeds1 == globalUnclaimed gdeeds2
-noLoss _ _ = error "noLoss: unsupported loss combination"
+andZipDeeds f (Global gdeeds1) (Global gdeeds2) = globalUnclaimed gdeeds1 `f` globalUnclaimed gdeeds2
+andZipDeeds _ _ _ = error "andZipDeeds: unsupported loss combination"
+
 
 -- | Puts any unclaimed deeds in the first argument into the unclaimed deed store of the second argument
 releaseDeedsTo :: Deeds -> Deeds -> Deeds

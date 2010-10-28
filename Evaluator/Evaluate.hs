@@ -28,7 +28,7 @@ emptyLosers = IS.empty
 
 step :: (FreeVars -> (Losers, Deeds, State) -> (Losers, Deeds, State)) -> FreeVars -> (Losers, Deeds, State) -> Maybe (Losers, Deeds, State)
 step reduce live (losers, deeds, _state@(h, k, (rn, e))) =
-  (\mb_res -> assertRender (text "step: deeds lost or gained!") (maybe True (\(_, deeds', state') -> noLoss (releaseStateDeed deeds _state) (releaseStateDeed deeds' state')) mb_res) mb_res) $
+  (\mb_res -> assertRender (text "step: deeds lost or gained!") (maybe True (\(_, deeds', state') -> noChange (releaseStateDeed deeds _state) (releaseStateDeed deeds' state')) mb_res) mb_res) $
   case annee e of
     Var x             -> fmap (\(a, b) -> (losers, a, b)) $ force  deeds h k tg (rename rn x)
     Value v           -> fmap (\(a, b) -> (losers, a, b)) $ unwind deeds h k tg (rn, v)
