@@ -343,8 +343,10 @@ optimiseSplit opt gen_xs deeds bracketeds_heap bracketed_focus = do
             where deeds_empty = mkEmptyDeeds deeds
         
         bracketeds_deeded_heap = M.fromList (heap_xs `zip` zipWith (\deeds_heap -> modifyFillers (deeds_heap `zip`)) deedss_heap bracketeds_heap_elts)
+        bracketed_deeded_focus = modifyFillers (deeds_focus `zip`) bracketed_focus
     
-    -- FIXME: assertRenderM (text "optimiseSplit: deeds lost or gained!") (noLoss ?? ??)
+    assertRenderM (text "optimiseSplit: deeds lost or gained!") (noLoss (M.fold (flip (releaseBracketedDeeds releaseStateDeed)) (releaseBracketedDeeds releaseStateDeed deeds bracketed_focus) bracketeds_heap)
+                                                                        (M.fold (flip (releaseBracketedDeeds (\deeds (extra_deeds, s) -> extra_deeds `releaseDeedsTo` releaseStateDeed deeds s))) (releaseBracketedDeeds (\deeds (extra_deeds, s) -> extra_deeds `releaseDeedsTo` releaseStateDeed deeds s) deeds_initial bracketed_deeded_focus) bracketeds_deeded_heap))
     
     -- 1) Recursively drive the focus itself
     --
@@ -356,7 +358,7 @@ optimiseSplit opt gen_xs deeds bracketeds_heap bracketed_focus = do
     -- need to make sure that the gen_xs *are removed entirely* from the statics set in the monad environment (the dangerous case is if the variable
     -- is already in there, which can be caused by shadowing induced by value duplication).
     let statics = M.keysSet bracketeds_heap
-    (hes, (leftover_deeds, e_focus)) <- withStatics statics gen_xs $ optimiseBracketed opt (deeds_initial, modifyFillers (deeds_focus `zip`) bracketed_focus)
+    (hes, (leftover_deeds, e_focus)) <- withStatics statics gen_xs $ optimiseBracketed opt (deeds_initial, bracketed_deeded_focus)
     
     -- 2) We now need to think about how we are going to residualise the letrec. In fact, we need to loop adding
     -- stuff to the letrec because it might be the case that:
