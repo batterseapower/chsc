@@ -7,12 +7,16 @@ module Size.Deeds (
     
     -- * Deed allocation policy
     apportion,
-    mkEmptyDeeds, releaseDeedsTo
+    mkEmptyDeeds, releaseDeedsTo,
+    
+    -- * Sanity checking
+    noLoss
   ) where
 
 import StaticFlags
 import Utilities
 
+import qualified Data.Foldable as Foldable
 import qualified Data.IntMap as IM
 import Data.Tree
 import Data.Ord (comparing)
@@ -153,6 +157,12 @@ apportionN orig_n weighting = result
     -- We should prefer to allocate pieces to those bits of the fraction where the error (i.e. the fractional part) is greatest.
     -- We cannot allocate more of these "fixup" pieces than we had "n" left at the end of the first pass.
     final_deserving_allowed = map fst (take remaining (sortBy (comparing (Down . snd)) final_deserving))
+
+noLoss :: Deeds -> Deeds -> Bool
+noLoss (Local ldeeds1) (Local ldeeds2) = IM.keysSet children1 == IM.keysSet children2 && Foldable.and (IM.intersectionWith (\(unclaimed1, _) (unclaimed2, _) -> unclaimed1 == unclaimed2) children1 children2)
+  where (children1, children2) = (childrenMap (localChildren ldeeds1), childrenMap (localChildren ldeeds2))
+noLoss (Global gdeeds1) (Global gdeeds2) = globalUnclaimed gdeeds1 == globalUnclaimed gdeeds2
+noLoss _ _ = error "noLoss: unsupported loss combination"
 
 -- | Puts any unclaimed deeds in the first argument into the unclaimed deed store of the second argument
 releaseDeedsTo :: Deeds -> Deeds -> Deeds
