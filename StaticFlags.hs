@@ -112,6 +112,10 @@ sPECULATION = not $ "--no-speculation" `elem` unsafePerformIO getArgs
 sPECULATE_ON_LOSERS :: Bool
 sPECULATE_ON_LOSERS = "--speculate-on-losers" `elem` unsafePerformIO getArgs
 
+{-# NOINLINE rOLLBACK_DEEDS_ON_FAILED_SPECULATION #-}
+rOLLBACK_DEEDS_ON_FAILED_SPECULATION :: Bool
+rOLLBACK_DEEDS_ON_FAILED_SPECULATION = not $ "--no-rollback-deeds-on-failed-speculation" `elem` unsafePerformIO getArgs
+
 {-# NOINLINE lOCAL_TIEBACKS #-}
 lOCAL_TIEBACKS :: Bool
 lOCAL_TIEBACKS = not $ "--no-local-tiebacks" `elem` unsafePerformIO getArgs

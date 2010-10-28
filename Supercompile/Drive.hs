@@ -243,26 +243,26 @@ catchScpM f_try f_abort = ScpM $ \e s k -> unScpM (f_try (\c -> ScpM $ \_ _ _ ->
 
 type SCHistory = SCHistory' (Deeds, Out FVedTerm)
 type SCHistory' a = History ((Statics, State), SCRollback a) (Generaliser, SCRollback a)
-type SCRollback a = Generaliser -> ScpM a
+type SCRollback a = (Generaliser, Deeds) -> ScpM a
 
 sc, sc' :: SCHistory -> (Deeds, Statics, State) -> ScpM (Deeds, Out FVedTerm)
 sc  hist = memo (sc' hist)
 sc' hist (deeds, statics, state)
-  = terminateM hist (statics, state)
-        (\hist     ->                   split generaliseNothing (sc hist) ((\res@(_, _, state') -> traceRender ("reduce end", residualiseState state') res) $
-                                                                           case reduce (deeds, state) of (deeds, state) -> (deeds, statics, state))) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).)
-        (\gen hist -> trace "sc-stop" $ split gen               (sc hist) (deeds, statics, state))
+  = terminateM hist (deeds, statics, state)
+        (\hist            ->                   split generaliseNothing (sc hist) ((\res@(_, _, state') -> traceRender ("reduce end", residualiseState state') res) $
+                                                                                  case reduce (deeds, state) of (deeds, state) -> (deeds, statics, state))) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).)
+        (\gen deeds' hist -> trace "sc-stop" $ split gen               (sc hist) (deeds', statics, state))
 
-terminateM :: SCHistory' a -> (Statics, State)
-           -> (               SCHistory' a -> ScpM a)
-           -> (Generaliser -> SCHistory' a -> ScpM a)
+terminateM :: SCHistory' a -> (Deeds, Statics, State)
+           -> (                        SCHistory' a -> ScpM a)
+           -> (Generaliser -> Deeds -> SCHistory' a -> ScpM a)
            -> ScpM a
-terminateM hist x kcontinue kstop = (\raise -> try_what raise) `catchScpM` catch_what -- NB: this useless eta-expansion is necessary for type checking
+terminateM hist (deeds, statics, state) kcontinue kstop = (\raise -> try_what raise) `catchScpM` catch_what -- NB: this useless eta-expansion is necessary for type checking
   where
-    try_what rb = case terminate hist (x, rb) of
+    try_what rb = case terminate hist ((statics, state), rb) of
                     Continue hist' -> kcontinue hist'
-                    Stop (why, rb) -> if sC_ROLLBACK then rb why else kstop why hist
-    catch_what gen = kstop gen hist -- TODO: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
+                    Stop (why, rb) -> if sC_ROLLBACK then rb (why, deeds) else kstop why deeds hist
+    catch_what (gen, deeds') = kstop gen (if rOLLBACK_DEEDS_ON_FAILED_SPECULATION then deeds else deeds') hist -- TODO: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
 
 
 data Tieback a = CanTieback a

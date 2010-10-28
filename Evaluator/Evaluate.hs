@@ -131,7 +131,8 @@ step reduce live (losers, deeds, _state@(h, k, (rn, e))) =
                     -- NB: commenting in this line is useful if you want to test whether speculation is causing
                     -- a benchmark to be slow due to the cost of the speculation OR due to the extra info. propagation
                     --(rnf -> ()) | False -> undefined
-                    _ | not sPECULATE_ON_LOSERS, tg `IS.member` losers                 -> (losers,              deeds,  extra_live `makeLive` in_e, M.insert x' in_e  h_losers, Heap h_winners  ids)              -- Heuristic: don't speculate if it has failed before
-                    (losers', deeds', (Heap h' ids', [], in_e'@(_, annee -> Value _))) -> (losers',             deeds', extra_live,                 h_losers,                   Heap (M.insert x' in_e' h') ids') -- Speculation: if we can evaluate to a value "quickly" then use that value,
-                    _                                                                  -> (IS.insert tg losers, deeds,  extra_live `makeLive` in_e, M.insert x' in_e  h_losers, Heap h_winners  ids)              -- otherwise throw away the half-evaluated mess that we reach
+                    _ | not sPECULATE_ON_LOSERS, tg `IS.member` losers                 -> (losers,              deeds,   extra_live `makeLive` in_e, M.insert x' in_e  h_losers, Heap h_winners  ids)              -- Heuristic: don't speculate if it has failed before
+                    (losers', deeds', (Heap h' ids', [], in_e'@(_, annee -> Value _))) -> (losers',             deeds',  extra_live,                 h_losers,                   Heap (M.insert x' in_e' h') ids') -- Speculation: if we can evaluate to a value "quickly" then use that value,
+                    (_,       deeds', _)                                               -> (IS.insert tg losers, deeds'', extra_live `makeLive` in_e, M.insert x' in_e  h_losers, Heap h_winners  ids)              -- otherwise throw away the half-evaluated mess that we reach
+                      where deeds'' = if rOLLBACK_DEEDS_ON_FAILED_SPECULATION then deeds else deeds'
                 where tg = annedTag (snd in_e)
