@@ -13,8 +13,8 @@ import qualified Data.IntSet as IS
 import qualified Data.Map as M
 
 
-embedWithTagSets :: WQO State Generaliser
-embedWithTagSets = precomp stateTags $ postcomp (const generaliseNothing) equal
+embedWithTagSets :: WQO State StateGeneraliser
+embedWithTagSets = precomp stateTags $ postcomp (const stateGeneraliseNothing) equal
   where
     stateTags (Heap h _, k, (_, e)) = traceRender ("stateTags (TagSet)", M.map (pureHeapBindingTag' . snd) h, map stackFrameTags' k, focusedTermTag' e) $
                                       pureHeapTagSet h `IS.union` stackTagSet k `IS.union` tagTagSet (focusedTermTag' e)

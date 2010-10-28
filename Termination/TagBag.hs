@@ -15,7 +15,7 @@ import qualified Data.Map as M
 
 type TagBag = TagMap Nat
 
-embedWithTagBags :: WQO State Generaliser
+embedWithTagBags :: WQO State StateGeneraliser
 embedWithTagBags = precomp stateTags $ postcomp generaliserFromGrowing $ refineCollection (\discard -> postcomp discard $ natsWeak) -- TODO: have a version where I replace weakManyNat with (zippable nat)
   where
     -- NB: this is stronger than 
@@ -40,8 +40,8 @@ embedWithTagBags = precomp stateTags $ postcomp generaliserFromGrowing $ refineC
         plusTagBags :: [TagBag] -> TagBag
         plusTagBags = foldr plusTagBag IM.empty
     
-    generaliserFromGrowing :: TagMap Bool -> Generaliser
-    generaliserFromGrowing growing = Generaliser {
+    generaliserFromGrowing :: TagMap Bool -> StateGeneraliser
+    generaliserFromGrowing growing = StateGeneraliser {
           generaliseStackFrame  = \kf       -> any strictly_growing (stackFrameTags' kf),
           generaliseHeapBinding = \_ (_, e) -> strictly_growing $ pureHeapBindingTag' e
         }

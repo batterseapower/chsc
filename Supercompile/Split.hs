@@ -1,7 +1,7 @@
 {-# LANGUAGE PatternGuards, ViewPatterns, TupleSections, DeriveFunctor, DeriveFoldable, DeriveTraversable,
              MultiParamTypeClasses, FlexibleInstances, GeneralizedNewtypeDeriving #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
-module Supercompile.Split (Statics, mkTopLevelStatics, extendStatics, isStatic, MonadStatics(..), split) where
+module Supercompile.Split (StaticSort(..), Statics, staticVars, mkTopLevelStatics, extendStatics, isStatic, MonadStatics(..), split) where
 
 --import Supercompile.Residualise
 
@@ -15,7 +15,7 @@ import Evaluator.Syntax
 
 import Size.Deeds
 
-import Termination.Generaliser (Generaliser(..))
+import Termination.Generaliser
 
 import Algebra.Lattice
 import Name
@@ -23,6 +23,7 @@ import Renaming
 import StaticFlags
 import Utilities hiding (tails)
 
+import Control.Applicative
 import qualified Data.Foldable as Foldable
 import qualified Data.Traversable as Traversable
 import qualified Data.Map as M
@@ -30,19 +31,26 @@ import qualified Data.Set as S
 import qualified Data.IntSet as IS
 
 
+data StaticSort = HFunction | LocalVariable Tag | InputVariable
+
+instance Pretty StaticSort where
+    pPrint HFunction           = text "(h-function static)"
+    pPrint (LocalVariable _tg) = text "(local variable static)"
+    pPrint InputVariable       = text "(input variable static)"
+
 -- | We do not abstract the h functions over these variables. This helps typechecking and gives GHC a chance to inline the definitions.
-newtype Statics = Statics { staticVars :: FreeVars }
+newtype Statics = Statics { staticVars :: M.Map (Out Var) StaticSort }
                 deriving (Pretty)
 
-mkTopLevelStatics :: FreeVars -> Statics
+mkTopLevelStatics :: M.Map (Out Var) StaticSort -> Statics
 mkTopLevelStatics = Statics
 
-extendStatics :: Statics -> FreeVars -> Statics
-extendStatics (Statics xs) ys | lOCAL_TIEBACKS = Statics (xs `S.union` ys)
+extendStatics :: Statics -> M.Map (Out Var) StaticSort -> Statics
+extendStatics (Statics xs) ys | lOCAL_TIEBACKS = Statics (xs `M.union` ys)
                               | otherwise      = Statics xs
 
 isStatic :: Var -> Statics -> Bool
-isStatic x xs = x `S.member` staticVars xs
+isStatic x xs = x `M.member` staticVars xs
 
 
 -- | We force h functions to be abstracted over these variables. This is required for generalisation. TODO: is this still true?
@@ -107,10 +115,10 @@ data QA = Question Var
 {-# INLINE simplify #-}
 simplify :: Generaliser
          -> (Deeds, State)
-         -> (S.Set (Out Var), (Deeds, M.Map (Out Var) (Bracketed State), Bracketed State))
-simplify gen (init_deeds, init_s)
-  = (\res@(_, (deeds', bracketed_heap, bracketed)) -> assertRender (text "simplify: deeds lost or gained") (noGain (init_deeds `releaseStateDeed` init_s) (M.fold (flip (releaseBracketedDeeds releaseStateDeed)) (releaseBracketedDeeds releaseStateDeed deeds' bracketed) bracketed_heap)) res) $
-    go (init_deeds, init_s)
+         -> (S.Set (Out Var), (Deeds, M.Map (Out Var) (Tagged (Bracketed State)), Bracketed State))
+simplify (gen_split, gen_s) (init_deeds, init_s)
+  = (\res@(_, (deeds', bracketed_heap, bracketed)) -> assertRender (text "simplify: deeds lost or gained") (noGain (init_deeds `releaseStateDeed` init_s) (M.fold (flip (releaseBracketedDeeds releaseStateDeed) . tagee) (releaseBracketedDeeds releaseStateDeed deeds' bracketed) bracketed_heap)) res) $
+    go (init_deeds, init_s) -- FIXME: use gen_split
   where
     go (deeds, s@(Heap h ids, k, (rn, e)))
          -- We can't step past a variable or value, because if we do so I can't prove that simplify terminates and the sc recursion has finite depth
@@ -119,9 +127,9 @@ simplify gen (init_deeds, init_s)
          -- If we can find some fraction of the stack or heap to drop that looks like it will be admissable, just residualise those parts and continue
         | Just split_from <- seekAdmissable h named_k, (ids', ctxt_id) <- stepIdSupply ids  = (snd split_from, splitt split_from (deeds, (Heap h ids', named_k, ([],                                                     oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], (rn, e)))))))
          -- Otherwise, keep dropping stuff until one of the two conditions above holds
-        | Just (_, deeds', s') <- step (const id) S.empty (emptyLosers, deeds, s)     = trace ("simplify: dropping " ++ droppingWhat (annee (snd (thd3 s))) ++ " piece :(") $ go (deeds', s')
+        | Just (_, deeds', s') <- step (const id) emptyFreeVars (emptyLosers, deeds, s)     = trace ("simplify: dropping " ++ droppingWhat (annee (snd (thd3 s))) ++ " piece :(") $ go (deeds', s')
          -- Even if we can never find some admissable fragment of the input, we *must* eventually reach a variable or value
-        | otherwise                                                                 = error "simplify: could not stop or step!"
+        | otherwise                                                                         = error "simplify: could not stop or step!"
       where named_k = [0..] `zip` k
     
     droppingWhat (App _ _)    = "App"
@@ -135,8 +143,8 @@ simplify gen (init_deeds, init_s)
     
     seekAdmissable :: PureHeap -> NamedStack -> Maybe (IS.IntSet, S.Set (Out Var))
     seekAdmissable h named_k = traceRender ("gen_kfs", gen_kfs, "gen_xs'", gen_xs') $ guard (not (IS.null gen_kfs) || not (S.null gen_xs')) >> Just (traceRender ("seekAdmissable", gen_kfs, gen_xs') (gen_kfs, gen_xs'))
-      where gen_kfs = IS.fromList [i  | (i, kf) <- named_k, generaliseStackFrame gen kf]
-            gen_xs' = S.fromList  [x' | (x', in_e) <- M.toList h, generaliseHeapBinding gen x' in_e]
+      where gen_kfs = IS.fromList [i  | (i, kf) <- named_k, generaliseStackFrame gen_s kf]
+            gen_xs' = S.fromList  [x' | (x', in_e) <- M.toList h, generaliseHeapBinding gen_s x' in_e]
 
 
 -- Discard dead bindings:
@@ -232,12 +240,18 @@ simplify gen (init_deeds, init_s)
 -- Lacking extra language features, our only option is to under-specialise the floats by inlining less
 -- evaluation context.
 data Bracketed a = Bracketed {
-    rebuild :: [Out FVedTerm] -> Out FVedTerm, -- Rebuild the full output term given outputs to plug into each hole
+    rebuild :: [Out FVedTerm] -> Out FVedTerm,        -- Rebuild the full output term given outputs to plug into each hole
     extraFvs :: FreeVars,                      -- Maximum free variables added by the residual wrapped around the holes
-    transfer :: [FreeVars] -> FreeVars,        -- Strips any variables bound by the residual out of the hole FVs
-    fillers :: [a],                            -- Hole-fillers themselves. Usually State
-    tails :: Maybe [Int]                       -- The indexes of all holes in tail position. If this is not Nothing, this is an *exhaustive* list of possible tail positions.
-  } deriving (Functor, Foldable.Foldable, Traversable.Traversable)
+    transfer :: [FreeVars] -> FreeVars, -- Strips any variables bound by the residual out of the hole FVs
+    fillers :: [a],                                   -- Hole-fillers themselves. Usually State
+    tails :: Maybe [Int]                              -- The indexes of all holes in tail position. If this is not Nothing, this is an *exhaustive* list of possible tail positions.
+  } deriving (Functor)
+
+instance Foldable.Foldable Bracketed where
+    foldMap f = Foldable.foldMap f . fillers
+
+instance Traversable.Traversable Bracketed where
+    traverse f (Bracketed a b c d e) = (\d' -> Bracketed a b c d' e) <$> Traversable.traverse f d
 
 instance Accumulatable Bracketed where
     mapAccumTM f acc b = liftM (\(acc', fillers') -> (acc', b { fillers = fillers' })) $ mapAccumTM f acc (fillers b)
@@ -246,7 +260,7 @@ noneBracketed :: Out FVedTerm -> FreeVars -> Bracketed a
 noneBracketed a b = Bracketed {
     rebuild  = \[] -> a,
     extraFvs = b,
-    transfer = \[] -> S.empty,
+    transfer = \[] -> emptyFreeVars,
     fillers  = [],
     tails    = Nothing
   }
@@ -254,7 +268,7 @@ noneBracketed a b = Bracketed {
 oneBracketed :: a -> Bracketed a
 oneBracketed x = Bracketed {
     rebuild  = \[e] -> e,
-    extraFvs = S.empty,
+    extraFvs = emptyFreeVars,
     transfer = \[fvs] -> fvs,
     fillers  = [x],
     tails    = Just [0]
@@ -276,7 +290,7 @@ zipBracketeds a b c d bracketeds = Bracketed {
   where xss = map fillers bracketeds
 
 bracketedFreeVars :: (a -> FreeVars) -> Bracketed a -> FreeVars
-bracketedFreeVars fvs bracketed = extraFvs bracketed `S.union` transfer bracketed (map fvs (fillers bracketed))
+bracketedFreeVars fvs bracketed = extraFvs bracketed `unionFreeVars` transfer bracketed (map fvs (fillers bracketed))
 
 releaseBracketedDeeds :: (Deeds -> a -> Deeds) -> Deeds -> Bracketed a -> Deeds
 releaseBracketedDeeds release deeds b = foldl' release deeds (fillers b)
@@ -332,10 +346,10 @@ transformWholeList f xs yss = (xs', yss')
         yss' = splitManyBy yss ys'
 
 optimiseSplit :: MonadStatics m
-              => (FreeVars -> (Deeds, State) -> m (Deeds, Out FVedTerm))
+              => (M.Map (Out Var) StaticSort -> (Deeds, State) -> m (Deeds, Out FVedTerm))
               -> S.Set (Out Var)
               -> Deeds
-              -> M.Map (Out Var) (Bracketed State)
+              -> M.Map (Out Var) (Tagged (Bracketed State))
               -> Bracketed State
               -> m (Deeds, Out FVedTerm)
 optimiseSplit opt gen_xs deeds bracketeds_heap bracketed_focus = do
@@ -354,15 +368,15 @@ optimiseSplit opt gen_xs deeds bracketeds_heap bracketed_focus = do
         -- NB: it is *very important* that the list supplied to apportion contains at least one element and at least one non-zero weight, or some
         -- deeds will vanish in a puff of digital smoke. We deal with this in the proportional case by padding the input list with a 1
         (deeds_initial:deeds_focus, deedss_heap)
-          | Proportional <- dEEDS_POLICY = transformWholeList (apportion deeds) (1 : bracketSizes bracketed_focus) (map bracketSizes bracketeds_heap_elts)
-          | otherwise                    = (deeds : [deeds_empty | _ <- bracketSizes bracketed_focus], [[deeds_empty | _ <- bracketSizes b] | b <- bracketeds_heap_elts])
+          | Proportional <- dEEDS_POLICY = transformWholeList (apportion deeds) (1 : bracketSizes bracketed_focus) (map (bracketSizes . tagee) bracketeds_heap_elts)
+          | otherwise                    = (deeds : [deeds_empty | _ <- bracketSizes bracketed_focus], [[deeds_empty | _ <- bracketSizes (tagee b)] | b <- bracketeds_heap_elts])
             where deeds_empty = mkEmptyDeeds deeds
         
-        bracketeds_deeded_heap = M.fromList (heap_xs `zip` zipWith (\deeds_heap -> modifyFillers (deeds_heap `zip`)) deedss_heap bracketeds_heap_elts)
+        bracketeds_deeded_heap = M.fromList (heap_xs `zip` zipWith (\deeds_heap -> fmap (modifyFillers (deeds_heap `zip`))) deedss_heap bracketeds_heap_elts)
         bracketed_deeded_focus = modifyFillers (deeds_focus `zip`) bracketed_focus
     
-    assertRenderM (text "optimiseSplit: deeds lost or gained!") (noChange (M.fold (flip (releaseBracketedDeeds releaseStateDeed)) (releaseBracketedDeeds releaseStateDeed deeds bracketed_focus) bracketeds_heap)
-                                                                          (M.fold (flip (releaseBracketedDeeds (\deeds (extra_deeds, s) -> extra_deeds `releaseDeedsTo` releaseStateDeed deeds s))) (releaseBracketedDeeds (\deeds (extra_deeds, s) -> extra_deeds `releaseDeedsTo` releaseStateDeed deeds s) deeds_initial bracketed_deeded_focus) bracketeds_deeded_heap))
+    assertRenderM (text "optimiseSplit: deeds lost or gained!") (noChange (M.fold (flip (releaseBracketedDeeds releaseStateDeed) . tagee) (releaseBracketedDeeds releaseStateDeed deeds bracketed_focus) bracketeds_heap)
+                                                                          (M.fold (flip (releaseBracketedDeeds (\deeds (extra_deeds, s) -> extra_deeds `releaseDeedsTo` releaseStateDeed deeds s)) . tagee) (releaseBracketedDeeds (\deeds (extra_deeds, s) -> extra_deeds `releaseDeedsTo` releaseStateDeed deeds s) deeds_initial bracketed_deeded_focus) bracketeds_deeded_heap))
     
     -- 1) Recursively drive the focus itself
     -- FIXME: fix comments below
@@ -374,8 +388,8 @@ optimiseSplit opt gen_xs deeds bracketeds_heap bracketed_focus = do
     -- that refer to the generalised variable. If we just naively did (statics S.\\ gen_xs) for the statics set, we would break this. Instead, we
     -- need to make sure that the gen_xs *are removed entirely* from the statics set in the monad environment (the dangerous case is if the variable
     -- is already in there, which can be caused by shadowing induced by value duplication).
-    let extra_statics = M.keysSet bracketeds_heap
-    (hes, (leftover_deeds, e_focus)) <- bindCapturedFloats extra_statics $ optimiseBracketed (opt extra_statics) (deeds_initial, bracketed_deeded_focus)
+    let extra_statics = M.map (LocalVariable . tag) bracketeds_heap
+    (hes, (leftover_deeds, e_focus)) <- bindCapturedFloats (M.keysSet extra_statics) $ optimiseBracketed (opt extra_statics) (deeds_initial, bracketed_deeded_focus)
     
     -- 2) We now need to think about how we are going to residualise the letrec. In fact, we need to loop adding
     -- stuff to the letrec because it might be the case that:
@@ -383,18 +397,18 @@ optimiseSplit opt gen_xs deeds bracketeds_heap bracketed_focus = do
     --  * So after we do withStatics above we need to drive some element of the bracketeds_heap
     --  * And after driving that we find in our new hes a new h function referring to a new free variable
     --    that refers to some binding that is as yet unbound...
-    (leftover_deeds, bracketeds_deeded_heap, xes, _fvs) <- go hes extra_statics leftover_deeds bracketeds_deeded_heap [] (fvedTermFreeVars e_focus)
+    (leftover_deeds, bracketeds_deeded_heap, xes) <- go hes extra_statics leftover_deeds bracketeds_deeded_heap [] (fvedTermFreeVars e_focus)
     
     -- 3) Combine the residualised let bindings with the let body
-    return (foldl' (releaseBracketedDeeds (\deeds (s_deeds, s) -> s_deeds `releaseDeedsTo` releaseStateDeed deeds s)) leftover_deeds (M.elems bracketeds_deeded_heap),
+    return (foldl' (releaseBracketedDeeds (\deeds (s_deeds, s) -> s_deeds `releaseDeedsTo` releaseStateDeed deeds s)) leftover_deeds (map tagee $ M.elems bracketeds_deeded_heap),
             letRecSmart xes e_focus)
   where
     -- TODO: clean up this incomprehensible loop
     -- TODO: investigate the possibility of just fusing in the optimiseLetBinds loop with this one
     go hes extra_statics leftover_deeds bracketeds_deeded_heap xes fvs = do
-        let extra_statics' = extra_statics `S.union` S.fromList (map fst hes) -- NB: the statics already include all the binders from bracketeds_deeded_heap, so no need to add xes stuff
-        (hes', (leftover_deeds, bracketeds_deeded_heap, fvs, xes')) <- bindCapturedFloats extra_statics' $ optimiseLetBinds (opt extra_statics') leftover_deeds bracketeds_deeded_heap (fvs `S.union` S.unions (map (fvedTermFreeVars . snd) hes)) -- TODO: no need to get FVs in this way (they are in Promise)
-        (if null hes' then (\a b c d -> return (a,b,c,d)) else go hes' extra_statics') leftover_deeds bracketeds_deeded_heap (xes ++ hes ++ xes') fvs
+        let extra_statics' = extra_statics `M.union` M.fromList [(x', HFunction) | (x', _) <- hes] -- NB: the statics already include all the binders from bracketeds_deeded_heap, so no need to add xes stuff
+        (hes', (leftover_deeds, bracketeds_deeded_heap, fvs, xes')) <- bindCapturedFloats (M.keysSet extra_statics') $ optimiseLetBinds (opt extra_statics') leftover_deeds bracketeds_deeded_heap (fvs `unionFreeVars` unionsFreeVars (map (fvedTermFreeVars . snd) hes)) -- TODO: no need to get FVs in this way (they are in Promise)
+        (if null hes' then (\a b c _d -> return (a,b,c)) else go hes' extra_statics') leftover_deeds bracketeds_deeded_heap (xes ++ hes ++ xes') fvs
 
 
 -- We only want to drive (and residualise) as much as we actually refer to. This loop does this: it starts
@@ -403,9 +417,9 @@ optimiseSplit opt gen_xs deeds bracketeds_heap bracketed_focus = do
 optimiseLetBinds :: MonadStatics m
                  => ((Deeds, State) -> m (Deeds, Out FVedTerm))
                  -> Deeds
-                 -> M.Map (Out Var) (Bracketed (Deeds, State))
+                 -> M.Map (Out Var) (Tagged (Bracketed (Deeds, State)))
                  -> FreeVars
-                 -> m (Deeds, M.Map (Out Var) (Bracketed (Deeds, State)), FreeVars, Out [(Var, FVedTerm)])
+                 -> m (Deeds, M.Map (Out Var) (Tagged (Bracketed (Deeds, State))), FreeVars, Out [(Var, FVedTerm)])
 optimiseLetBinds opt leftover_deeds bracketeds_heap fvs' = traceRender ("optimiseLetBinds", M.keysSet bracketeds_heap, fvs') $
                                                            go leftover_deeds bracketeds_heap [] fvs'
   where
@@ -414,7 +428,7 @@ optimiseLetBinds opt leftover_deeds bracketeds_heap fvs' = traceRender ("optimis
                          return (leftover_deeds, bracketeds_deeded_heap_not_resid, resid_fvs, xes_resid)
       | otherwise = {- traceRender ("optimiseSplit", xs_resid') $ -} do
         -- Recursively drive the new residuals arising from the need to bind the resid_fvs
-        (leftover_deeds, es_resid') <- optimiseMany (optimiseBracketed opt) (leftover_deeds, bracks_resid)
+        (leftover_deeds, es_resid') <- optimiseMany (optimiseBracketed opt) (leftover_deeds, map tagee bracks_resid)
         let extra_resid_fvs' = S.unions (map fvedTermFreeVars es_resid')
         -- Recurse, because we might now need to residualise and drive even more stuff (as we have added some more FVs and BVs)
         go leftover_deeds bracketeds_deeded_heap_not_resid'
@@ -429,9 +443,9 @@ type NamedStack = [(Int, StackFrame)]
 
 splitt :: (IS.IntSet, S.Set (Out Var))
        -> (Deeds, (Heap, NamedStack, ([Out Var], Bracketed (Entered, IdSupply -> State))))         -- ^ The thing to split, and the Deeds we have available to do it
-       -> (Deeds,                               -- ^ The Deeds still available after splitting
-           M.Map (Out Var) (Bracketed State),   -- ^ The residual "let" bindings
-           Bracketed State)                     -- ^ The residual "let" body
+       -> (Deeds,                                        -- ^ The Deeds still available after splitting
+           M.Map (Out Var) (Tagged (Bracketed State)),   -- ^ The residual "let" bindings
+           Bracketed State)                              -- ^ The residual "let" body
 splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply -> (ids_brack, ids))), named_k, (scruts, bracketed_qa)))
     = -- traceRender ("splitt", residualiseHeap (Heap h ids_brack) (\ids -> residualiseStack ids k (case tagee qa of Question x' -> var x'; Answer in_v -> value $ detagTaggedValue $ renameIn renameTaggedValue ids in_v))) $
       snd $ split_step split_fp -- TODO: eliminate redundant recomputation here?
@@ -455,12 +469,12 @@ splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (sp
         fill_ids :: Bracketed (Entered, IdSupply -> State) -> Bracketed (Entered, State)
         fill_ids = fmap (\(ent, f) -> (ent, f ids_brack))
         (deeds0_unreleased, bracketeds_updated, bracketed_focus)
-          = (\(a, b, c) -> (a, M.map fill_ids b, fill_ids c)) $
+          = (\(a, b, c) -> (a, M.map (fmap fill_ids) b, fill_ids c)) $
             pushStack ids deeds scruts [(i `IS.notMember` resid_kfs, kf) | (i, kf) <- named_k] bracketed_qa
         
         -- 2) Build a splitting for those elements of the heap we propose to residualise in resid_xs
         (h_residualised, h_not_residualised) = M.partitionWithKey (\x' _ -> x' `S.member` resid_xs) h
-        bracketeds_nonupdated = M.mapWithKey (\x' in_e -> oneBracketed (Once (fromJust (name_id x')), (Heap M.empty ids_brack, [], in_e))) h_residualised
+        bracketeds_nonupdated = M.mapWithKey (\x' in_e -> Tagged (annedTag (snd in_e)) $ oneBracketed (Once (fromJust (name_id x')), (Heap M.empty ids_brack, [], in_e))) h_residualised
         bracketeds_heap = bracketeds_updated `M.union` bracketeds_nonupdated
         
         -- 3) Inline as much of the Heap as possible into the candidate splitting
@@ -493,8 +507,8 @@ splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (sp
         
         -- 3c) Actually do the inlining of as much of the heap as possible into the proposed floats
         -- We also take this opportunity to strip out the Entered information from each context.
-        (deeds1, fvs_paths_focus', entered_focus, bracketed_focus') =             inlineBracketHeap deeds0 bracketed_focus
-        (deeds2, fvs_paths_heap',  entered_heap,  bracketeds_heap') = inlineHeapT inlineBracketHeap deeds1 bracketeds_heap
+        (deeds1, fvs_paths_focus', entered_focus, bracketed_focus') =                                                              inlineBracketHeap                        deeds0 bracketed_focus
+        (deeds2, fvs_paths_heap',  entered_heap,  bracketeds_heap') = inlineHeapT (\deeds tged_x -> fourth4 (Tagged (tag tged_x)) (inlineBracketHeap deeds (tagee tged_x))) deeds1 bracketeds_heap
 
         -- 4) Construct the next element of the fixed point process:
         --  a) We should also residualise bindings that occur as free variables of any of the
@@ -503,7 +517,7 @@ splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (sp
         --  b) Lastly, we should residualise non-cheap bindings that got Entered more than once in the proposal
         --     to make the splitter more agressive (see Note [Better fixed points of Entered information]), I only
         --     do this for bindings that were actually direct free variables of the original term.
-        fvs' = bracketedFreeVars stateFreeVars bracketed_focus' `S.union` S.unions [bracketedFreeVars stateFreeVars bracketed' | (_, bracketed') <- M.toList bracketeds_heap']
+        fvs' = bracketedFreeVars stateFreeVars bracketed_focus' `S.union` S.unions [bracketedFreeVars stateFreeVars (tagee bracketed') | bracketed' <- M.elems bracketeds_heap']
         entered    = entered_focus `join` entered_heap
         fvs_paths' = M.unionWith (++) fvs_paths_focus' fvs_paths_heap'
         entered_resid_substep x' paths no_change@(newly_resid, not_newly_resid)
@@ -636,7 +650,7 @@ pushStack :: IdSupply
           -> [(Bool, StackFrame)]
           -> Bracketed (Entered, IdSupply -> State)
           -> (Deeds,
-              M.Map (Out Var) (Bracketed (Entered, IdSupply -> State)),
+              M.Map (Out Var) (Tagged (Bracketed (Entered, IdSupply -> State))),
               Bracketed (Entered, IdSupply -> State))
 pushStack _   deeds _      []                 bracketed_hole = (deeds, M.empty, bracketed_hole)
 pushStack ids deeds scruts ((may_push, kf):k) bracketed_hole = second3 (`M.union` bracketed_heap') $ pushStack ids2 deeds' scruts' k bracketed_hole'
@@ -668,10 +682,10 @@ splitStackFrame :: IdSupply
                 -> [Out Var]
                 -> Bracketed (Entered, IdSupply -> State)
                 -> ([Out Var],
-                    M.Map (Out Var) (Bracketed (Entered, IdSupply -> State)),
+                    M.Map (Out Var) (Tagged (Bracketed (Entered, IdSupply -> State))),
                     Bracketed (Entered, IdSupply -> State))
 splitStackFrame ids kf scruts bracketed_hole
-  | Update (annee -> x') <- kf = splitUpdate scruts x' bracketed_hole
+  | Update x' <- kf = splitUpdate scruts x' bracketed_hole
   | otherwise = ([], M.empty, case kf of
     Apply (annee -> x2') -> zipBracketeds (\[e] -> e `app` x2') (\[fvs] -> S.insert x2' fvs) (\[fvs] -> fvs) (\_ -> Nothing) [bracketed_hole]
     Scrutinise (rn, unzip -> (alt_cons, alt_es)) -> -- (if null k_remaining then id else traceRender ("splitStack: FORCED SPLIT", M.keysSet entered_hole, [x' | Tagged _ (Update x') <- k_remaining])) $
@@ -706,9 +720,9 @@ splitStackFrame ids kf scruts bracketed_hole
     altConToValue (LiteralAlt l)  = Just $ Literal l
     altConToValue (DefaultAlt _)  = Nothing
 
-splitUpdate :: [Out Var] -> Out Var -> Bracketed (Entered, IdSupply -> State)
-            -> ([Out Var], M.Map (Out Var) (Bracketed (Entered, IdSupply -> State)), Bracketed (Entered, IdSupply -> State))
-splitUpdate scruts x' bracketed_hole = (x' : scruts, M.singleton x' bracketed_hole, noneBracketed (var x') (S.singleton x'))
+splitUpdate :: [Out Var] -> Out (Anned Var) -> Bracketed (Entered, IdSupply -> State)
+            -> ([Out Var], M.Map (Out Var) (Tagged (Bracketed (Entered, IdSupply -> State))), Bracketed (Entered, IdSupply -> State))
+splitUpdate scruts x' bracketed_hole = (annee x' : scruts, M.singleton (annee x') (Tagged (annedTag x') bracketed_hole), noneBracketed (var (annee x')) (S.singleton (annee x'))) -- FIXME: sort of crappy source of tags for the bracketed info
 
 splitValue :: IdSupply -> In AnnedValue -> Bracketed (Entered, IdSupply -> State)
 splitValue ids (rn, Lambda x e) = zipBracketeds (\[e'] -> lambda x' e') (\[fvs'] -> fvs') (\[fvs'] -> S.delete x' fvs') (\_ -> Nothing) [oneBracketed (Many, \ids -> (Heap M.empty ids, [], (rn', e)))]

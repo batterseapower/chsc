@@ -12,6 +12,18 @@ import qualified Data.Foldable as Foldable
 type FreeVars = S.Set Var
 type BoundVars = S.Set Var
 
+emptyFreeVars :: FreeVars
+emptyFreeVars = S.empty
+
+unionFreeVars :: FreeVars -> FreeVars -> FreeVars
+unionFreeVars = S.union
+
+unionsFreeVars :: [FreeVars] -> FreeVars
+unionsFreeVars = S.unions
+
+isFreeVar :: Var -> FreeVars -> Bool
+isFreeVar = S.member
+
 
 (termVarFreeVars',       termFreeVars,           termFreeVars',           altsFreeVars,           valueFreeVars,           valueFreeVars')           = mkFreeVars (\f (I e) -> f e)
 (fvedTermVarFreeVars',   fvedTermFreeVars,       fvedTermFreeVars',       fvedAltsFreeVars,       fvedValueFreeVars,       fvedValueFreeVars')       = mkFreeVars (\_ (FVed fvs _) -> fvs)

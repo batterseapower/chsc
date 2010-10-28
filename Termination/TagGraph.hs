@@ -3,7 +3,7 @@ module Termination.TagGraph (
         embedWithTagGraphs
     ) where
 
-import Core.FreeVars (FreeVars)
+import Core.FreeVars (FreeVars, isFreeVar)
 import Core.Renaming (In, Out)
 import Core.Syntax (Var)
 
@@ -18,13 +18,12 @@ import Utilities
 import qualified Data.IntMap as IM
 import qualified Data.IntSet as IS
 import qualified Data.Map as M
-import qualified Data.Set as S
 
 
 type TagGraph = TagMap (TagSet, Nat)
 
 
-embedWithTagGraphs :: WQO State Generaliser
+embedWithTagGraphs :: WQO State StateGeneraliser
 embedWithTagGraphs = precomp stateTags $ postcomp generaliserFromGrowing $ refineCollection (\discard -> postcomp discard $ zippable (postcomp snd (prod equal nat))) -- NB: NOT using natsWeak
   where
     -- consolidate :: (Functor f, Foldable.Foldable f) => f (TagSet, Nat) -> (TagSet, f Nat)
@@ -55,8 +54,8 @@ embedWithTagGraphs = precomp stateTags $ postcomp generaliserFromGrowing $ refin
         referrerEdges :: [Tag] -> FreeVars -> TagGraph
         referrerEdges referrer_tgs fvs = M.foldWithKey go IM.empty referants
           where go x referant_tgs edges
-                  | x `S.notMember` fvs = edges
-                  | otherwise           = foldr (\referrer_tg edges -> IM.singleton referrer_tg (referant_tgs, 0) `plusTagGraph` edges) edges referrer_tgs
+                  | x `isFreeVar` fvs = edges
+                  | otherwise         = foldr (\referrer_tg edges -> IM.singleton referrer_tg (referant_tgs, 0) `plusTagGraph` edges) edges referrer_tgs
         
         mkTermTagGraph :: Tag -> In AnnedTerm -> TagGraph
         mkTermTagGraph e_tg in_e = mkTagGraph [e_tg] (inFreeVars annedTermFreeVars in_e)
@@ -64,8 +63,8 @@ embedWithTagGraphs = precomp stateTags $ postcomp generaliserFromGrowing $ refin
         mkTagGraph :: [Tag] -> FreeVars -> TagGraph
         mkTagGraph e_tgs fvs = plusTagGraphs [IM.singleton e_tg (IS.empty, 1) | e_tg <- e_tgs] `plusTagGraph` referrerEdges e_tgs fvs
     
-    generaliserFromGrowing :: TagMap Bool -> Generaliser
-    generaliserFromGrowing growing = Generaliser {
+    generaliserFromGrowing :: TagMap Bool -> StateGeneraliser
+    generaliserFromGrowing growing = StateGeneraliser {
           generaliseStackFrame  = \kf       -> any strictly_growing (stackFrameTags' kf),
           generaliseHeapBinding = \_ (_, e) -> strictly_growing (pureHeapBindingTag' e)
         }  
