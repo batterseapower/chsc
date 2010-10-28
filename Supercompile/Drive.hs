@@ -84,11 +84,11 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ run
 --
 
 reduce :: (Deeds, State) -> (Deeds, State)
-reduce (deeds, state) = (deeds', state')
+reduce (deeds, orig_state) = (deeds', state')
   where
-    (_, deeds', state') = go (mkHistory (extra wQO)) S.empty (emptyLosers, deeds, state)
+    (_, deeds', state') = go (0 :: Int) (mkHistory (extra wQO)) S.empty (emptyLosers, deeds, orig_state)
       
-    go hist lives (losers, deeds, state)
+    go depth hist lives (losers, deeds, state)
       -- | traceRender ("reduce.go", residualiseState state) False = undefined
       | not eVALUATE_PRIMOPS, (_, _, (_, annee -> PrimOp _ _)) <- state = (losers, deeds, state)
       | otherwise = fromMaybe (losers, deeds, state) $ either id id $ do
@@ -97,7 +97,10 @@ reduce (deeds, state) = (deeds', state')
                       -- _ | traceRender ("reduce.go (non-intermediate)", residualiseState state) False -> undefined
                       Continue hist               -> Right hist
                       Stop (_gen, (deeds, state)) -> trace "reduce-stop" $ Left (guard rEDUCE_ROLLBACK >> return (losers, deeds, state)) -- FIXME: generalise?
-          Right $ fmap (go hist' lives) $ step (go hist') lives (losers, deeds, state)
+          Right $ fmap (go depth hist' lives) $ step (speculate hist' state) lives (losers, deeds, state)
+      where speculate hist' (Heap base_h _, _, _) lives (losers, deeds, state@(Heap h ids, k, in_e))
+              | not (isValue (annee (snd in_e))), traceRender ("speculate", depth, residualiseState (Heap (h `exclude` M.keysSet base_h) ids, k, in_e)) False = undefined
+              | otherwise = go (depth + 1) hist' lives (losers, deeds, state)
     
     intermediate :: State -> Bool
     intermediate (_, _, (_, annee -> Var _)) = False
