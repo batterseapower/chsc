@@ -1,4 +1,4 @@
-{-# LANGUAGE ViewPatterns, TupleSections, PatternGuards, BangPatterns, RankNTypes #-}
+{-# LANGUAGE ViewPatterns, TupleSections, PatternGuards, BangPatterns, RankNTypes, DeriveFunctor #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 module Supercompile.Drive (supercompile) where
 
@@ -8,6 +8,7 @@ import Supercompile.Split
 
 import Core.FreeVars
 import Core.Renaming
+import Core.Statics
 import Core.Syntax
 import Core.Tag
 
@@ -263,49 +264,117 @@ terminateM hist x kcontinue kstop = (\raise -> try_what raise) `catchScpM` catch
                     Stop (why, rb) -> if sC_ROLLBACK then rb why else kstop why hist
     catch_what gen = kstop gen hist -- TODO: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
 
+
+data Tieback a = CanTieback a
+               | PreventedByStatics FreeVars
+               | CantTieback
+               deriving (Functor)
+
+instance Monad Tieback where
+    return = CanTieback
+    
+    CanTieback x         >>= fxmy = fxmy x
+    PreventedByStatics a >>= _    = PreventedByStatics a
+    CantTieback          >>= _    = CantTieback
+    
+    fail _ = mzero
+
+instance MonadPlus Tieback where
+    -- NB: not quite correct, because
+    --  PreventedByStatics x >> CantTieback /= CantTieback
+    --                                      == PreventedByStatics x
+    mzero = CantTieback
+    
+    CantTieback `mplus` my = my
+    mx          `mplus` _  = mx -- NB: if any of the actions are PreventedByStatics, assume the rest are too
+
+
 memo :: ((Deeds, Statics, State) -> ScpM (Deeds, Out FVedTerm))
      ->  (Deeds, Statics, State) -> ScpM (Deeds, Out FVedTerm)
 memo opt (deeds, statics, state) = do
     ps <- getPromises
-    case [ (fun p, (releaseStateDeed deeds state, fun p `varApps` tb_dynamic_vs))
-         | p <- ps
-         , Just rn_lr <- [-- (\res -> if isNothing res then traceRender ("no match:", fun p) res else res) $
-                           match (meaning p) state]
-         , let rn_fvs = map (safeRename ("tieback: FVs " ++ pPrintRender (fun p)) rn_lr) -- NB: If tb contains a dead PureHeap binding (hopefully impossible) then it may have a free variable that I can't rename, so "rename" will cause an error. Not observed in practice yet.
-               tb_dynamic_vs = rn_fvs (abstracted p)
-               tb_static_vs  = rn_fvs (lexical p)
-          -- Check that all of the things that were dynamic last time are dynamic this time.
-          -- This is an issue of *performance* and *typeability*. If we omit this check, the generated code may
-          -- be harder for GHC to chew on because we will apply static variables to dynamic positions in the tieback.
-          --
-          -- Rejecting tieback on this basis can lead to crappy supercompilation (since -- if we didn't incorporate the Statics set in
-          -- the wqo -- we would immediately whistle without making a tieback). For an example, see AccumulatingParam-Peano: with split
-          -- point generalisation, we *would* be building an optimal loop, but this check rejects it (tieback at h15 to h6 rejected
-          -- because "n" would be converted from static to dynamic). Instead, we do something like this:
-          --  * Record whether a variable is static or dynamic in the Statics set
-          --  * "Generalise away" a variables staticness if this check fails so that:
-          --     a) The termination criteria does not immediately fire
-          --     b) We have a chance to build a loop where that variable is dynamic
-         , (\res -> if res then True else traceRender ("memo: rejected by dynamics", statics, tb_dynamic_vs) False) $
-           all (`isStatic` statics) tb_dynamic_vs
-          -- Check that all of the things that were static last time are static this time *and refer to exactly the same thing*.
-          -- This is an issue of *correctness*. If we omit this check, we may tie back to a version of the function where a FV
-          -- actually referred to a different let binding than that which we intend to refer tos.
-         , (\res -> if res then True else traceRender ("memo: rejected by statics", lexical p, tb_static_vs) False) $
-           and $ zipWith (\x x' -> x' == x && x' `isStatic` statics) (lexical p) tb_static_vs
-         , traceRender ("memo'", statics, stateFreeVars state, rn_lr, (fun p, lexical p, abstracted p)) True
-         ] of
-      (_x, res):_ -> {- traceRender ("tieback", residualiseState state, fst res) $ -} do
-        traceRenderM ("=sc", _x, residualiseState state, deeds, res)
+    case msum (map tiebackOne ps) of
+      CanTieback (_x, res) -> {- traceRender ("tieback", residualiseState state, fst res) $ -} do
+        traceRenderM ("=sc", _x, statics, residualiseState state, deeds, res)
         return res
-      [] -> {- traceRender ("new drive", residualiseState state) $ -} do
-        let vs = stateFreeVars state
-            (static_vs_list, dynamic_vs_list) = partition (`isStatic` statics) (S.toList vs)
+      no_tieback -> {- traceRender ("new drive", residualiseState state) $ -} do
+        let statics' | PreventedByStatics overstatic_xs <- no_tieback = statics `excludeStatics` overstatic_xs
+                     | otherwise                                      = statics
+            vs = stateFreeVars state
+            (static_vs_list, dynamic_vs_list) = partition (`isStatic` statics') (S.toList vs)
     
         -- NB: promises are lexically scoped because they may refer to FVs
         x <- freshHName
         promise P { fun = x, abstracted = dynamic_vs_list, lexical = static_vs_list, meaning = state } $ do
-            traceRenderM (">sc", x, residualiseState state, deeds)
-            res <- opt (deeds, statics `extendStatics` M.singleton x HFunction, state)
-            traceRenderM ("<sc", x, residualiseState state, res)
+            traceRenderM (">sc", x, statics, residualiseState state, deeds)
+            res <- opt (deeds, statics' `extendStatics` M.singleton x HFunction, state)
+            traceRenderM ("<sc", x, statics, residualiseState state, res)
             return res
+  where
+    tiebackOne p = do
+        Just rn_lr <- return (-- (\res -> if isNothing res then traceRender ("no match:", fun p) res else res) $
+                              match (meaning p) state)
+        let rn_fvs = map (safeRename ("tieback: FVs " ++ pPrintRender (fun p)) rn_lr) -- NB: If tb contains a dead PureHeap binding (hopefully impossible) then it may have a free variable that I can't rename, so "rename" will cause an error. Not observed in practice yet.
+            tb_dynamic_vs = rn_fvs (abstracted p)
+            tb_static_vs  = rn_fvs (lexical p)
+        -- Note [Static-to-dynamic conversion]
+        -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        --
+        -- Check that all of the things that were dynamic last time are dynamic this time.
+        -- This is an issue of *performance* and *typeability*. If we omit this check, the generated code may
+        -- be harder for GHC to chew on because we will apply static variables to dynamic positions in the tieback.
+        --
+        -- Rejecting tieback on this basis can lead to crappy supercompilation (since -- if we didn't incorporate the Statics set in
+        -- the wqo -- we would immediately whistle without making a tieback). For an example, see AccumulatingParam-Peano: with split
+        -- point generalisation, we *would* be building an optimal loop, but this check rejects it (tieback at h15 to h6 rejected
+        -- because "n" would be converted from static to dynamic). Instead, we do something like this:
+        --  * Record whether a variable is static or dynamic in the Statics set
+        --  * "Generalise away" a variables staticness if this check fails so that:
+        --     a) The termination criteria does not immediately fire
+        --     b) We have a chance to build a loop where that variable is dynamic
+        --
+        -- NB: I've now turned this check off. The reason is that if we don't tie back here, in order to actually continue supercompilation
+        -- in a half-decent way we need to generalise away some staticness so the WQO doesn't fire. But if we do that then we'll just reach
+        -- here again, except with less statics and thus we hope that this test now passes.
+        --
+        -- It is more direct to just shortcut the process and do the tieback. This decision is essentially motivated by the thinking that
+        -- it is ALWAYS better to convert a static into a dynamic than drop a frame in the splitter.
+        --
+        -- The old check looked like this:
+        --
+        --   , (\res -> if res then True else traceRender ("memo: rejected by dynamics", statics, tb_dynamic_vs) False) $
+        --     all (`isStatic` statics) tb_dynamic_vs
+        --
+        -- Note [Static-to-static matching]
+        -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        --
+        -- Check that all of the things that were static last time are static this time *and refer to exactly the same thing*.
+        -- This is an issue of *correctness*. If we omit this check, we may tie back to a version of the function where a FV
+        -- actually referred to a different let binding than that which we intend to refer tos.
+        --
+        -- If this test fails, we take this as a cue to generalise away some staticness and compile a version of the function that
+        -- we *could* have tied back to. Because we don't change the term we are supercompiling at all, this would immediately hit
+        -- the WQO if we didn't incorporate a test on the staticness set in the WQO.
+        --
+        -- This should let us build an optimal loop for foldl', which otherwise hits a problem like this:
+        --
+        --   D[foldl' (+) n xs]
+        --   => case xs of []     -> D[n]
+        --                 (y:ys) -> let n0 = D[c n y]
+        --                           in case n0 of _ -> D[foldl' (+) n0 ys]
+        --                                              => case ys of []     -> D[n0]
+        --                                                            (z:zs) -> let n1 = D[c n0 y]
+        --                                                                      in case n1 of _ -> D[foldl' (+) n1 zs]
+        --                                                                                         => ...
+        --
+        -- As you can see, we drive a foldl' specialisation with a different n every time, so this check prevents us from
+        -- tying back to any previous ones. We need to detect this case and generalise away "n" to win.
+        --
+        -- Note that foldl is not affected by this problem because the "n" binding is floated out by *generalisation* rather
+        -- than for work-duplication reasons, which deals with unmarking "n" as a static.
+        let clashing_statics = [x' | (x, x') <- lexical p `zip` tb_static_vs, not (x' == x && x' `isStatic` statics)]
+        if null clashing_statics
+         then do --traceRenderM ("memo'", statics, stateFreeVars state, rn_lr, (fun p, lexical p, abstracted p))
+                 return (fun p, (releaseStateDeed deeds state, fun p `varApps` tb_dynamic_vs))
+         else do --traceRenderM ("memo: rejected by statics", lexical p, tb_static_vs)
+                 PreventedByStatics (S.fromList clashing_statics)

@@ -8,6 +8,7 @@ import StaticFlags
 import Utilities
 
 import qualified Data.Map as M
+import qualified Data.Set as S
 
 
 data StaticSort = HFunction | LocalVariable Tag | InputVariable
@@ -28,6 +29,9 @@ mkTopLevelStatics = Statics
 extendStatics :: Statics -> M.Map (Out Var) StaticSort -> Statics
 extendStatics (Statics xs) ys | lOCAL_TIEBACKS = Statics (xs `M.union` ys)
                               | otherwise      = Statics xs
+
+excludeStatics :: Statics -> S.Set (Out Var) -> Statics
+excludeStatics (Statics xs) ys = Statics (xs `exclude` ys)
 
 isStatic :: Var -> Statics -> Bool
 isStatic x xs = x `M.member` staticVars xs
