@@ -92,7 +92,9 @@ data QA = Question Var
 simplify :: Generaliser
          -> (Deeds, State)
          -> (S.Set (Out Var), (Deeds, M.Map (Out Var) (Bracketed State), Bracketed State))
-simplify gen = go
+simplify gen (init_deeds, init_s)
+  = (\res@(_, (deeds', bracketed_heap, bracketed)) -> assertRender (text "simplify: deeds lost or gained") (noLoss (init_deeds `releaseStateDeed` init_s) (M.fold (flip (releaseBracketedDeeds releaseStateDeed)) (releaseBracketedDeeds releaseStateDeed deeds' bracketed) bracketed_heap)) res) $
+    go (init_deeds, init_s)
   where
     go (deeds, s@(Heap h ids, k, (rn, e)))
          -- We can't step past a variable or value, because if we do so I can't prove that simplify terminates and the sc recursion has finite depth
@@ -260,6 +262,9 @@ zipBracketeds a b c d bracketeds = Bracketed {
 bracketedFreeVars :: (a -> FreeVars) -> Bracketed a -> FreeVars
 bracketedFreeVars fvs bracketed = extraFvs bracketed `S.union` transfer bracketed (map fvs (fillers bracketed))
 
+releaseBracketedDeeds :: (Deeds -> a -> Deeds) -> Deeds -> Bracketed a -> Deeds
+releaseBracketedDeeds release deeds b = foldl' release deeds (fillers b)
+
 modifyFillers :: ([a] -> [b]) -> Bracketed a -> Bracketed b
 modifyFillers f bracketed = Bracketed {
     rebuild = rebuild bracketed,
@@ -339,6 +344,8 @@ optimiseSplit opt gen_xs deeds bracketeds_heap bracketed_focus = do
         
         bracketeds_deeded_heap = M.fromList (heap_xs `zip` zipWith (\deeds_heap -> modifyFillers (deeds_heap `zip`)) deedss_heap bracketeds_heap_elts)
     
+    -- FIXME: assertRenderM (text "optimiseSplit: deeds lost or gained!") (noLoss ?? ??)
+    
     -- 1) Recursively drive the focus itself
     --
     -- NB: it is *very important* that we do not mark generalised variables as static! If we do, we defeat the whole point of
@@ -360,7 +367,7 @@ optimiseSplit opt gen_xs deeds bracketeds_heap bracketed_focus = do
     (leftover_deeds, bracketeds_deeded_heap, xes, _fvs) <- go hes statics leftover_deeds bracketeds_deeded_heap [] (fvedTermFreeVars e_focus)
     
     -- 3) Combine the residualised let bindings with the let body
-    return (foldl' (\deeds b -> foldl' (\deeds (s_deeds, s) -> s_deeds `releaseDeedsTo` releaseStateDeed deeds s) deeds (fillers b)) leftover_deeds (M.elems bracketeds_deeded_heap),
+    return (foldl' (releaseBracketedDeeds (\deeds (s_deeds, s) -> s_deeds `releaseDeedsTo` releaseStateDeed deeds s)) leftover_deeds (M.elems bracketeds_deeded_heap),
             letRecSmart xes e_focus)
   where
     -- TODO: clean up this incomprehensible loop

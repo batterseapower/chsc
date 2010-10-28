@@ -340,6 +340,9 @@ assertRender _ _ x | not aSSERTIONS = x
 assertRender _ True  x = x
 assertRender a False _ = error (pPrintRender a)
 
+assertRenderM :: (Pretty a, Monad m) => a -> Bool -> m ()
+assertRenderM a b = assertRender a b (return ())
+
 
 removeOnes :: [a] -> [[a]]
 removeOnes [] = []
