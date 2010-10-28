@@ -127,6 +127,9 @@ apportion _               []        = error "apportion: empty list"
 apportion (Local ldeeds)  weighting = [Local (ldeeds { localChildren = ffmapTags (\(unclaimed, tags) -> (sel (apportionN unclaimed weighting), tags)) (localChildren ldeeds) }) | (sel, _) <- listSelectors `zip` weighting]
 apportion (Global gdeeds) weighting = [Global (gdeeds { globalUnclaimed = unclaimed }) | unclaimed <- apportionN (globalUnclaimed gdeeds) weighting]
 
+-- | Splits up a number evenly across several partitions in proportions to weights given to those partitions.
+--
+-- > sum (apportionN n weights) == n
 apportionN :: Int -> [Int] -> [Int]
 apportionN _      []        = error "apportionN: empty list"
 apportionN orig_n weighting = result

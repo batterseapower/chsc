@@ -48,9 +48,9 @@ step reduce live (losers, deeds, (h, k, (rn, Comp (Tagged tg (FVed _ e))))) = ca
         Update x'                 ->          update     deeds h k tg_v x' in_v
 
     apply :: Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> Out (Anned Var) -> (Deeds, State)
-    apply deeds h k tg_v (rn, Lambda x e_body) (Comp (Tagged tg_x (FVed _ x2'))) = (deeds', (h, k, (insertRenaming x x2' rn, e_body)))
-      where deeds' = releaseDeedDescend_ (releaseDeedDeep deeds tg_x) tg_v
-    apply _     _ _ _    (_,  v)               _                 = panic "apply" (pPrint v)
+    apply deeds h k tg_v (rn, Lambda x e_body) x2' = (deeds', (h, k, (insertRenaming x (annee x2') rn, e_body)))
+      where deeds' = releaseDeedDescend_ (releaseDeedDeep deeds (annedTag x2')) tg_v
+    apply _     _ _ _    (_,  v)               _   = panic "apply" (pPrint v)
 
     scrutinise :: Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> In [AnnedAlt] -> Maybe (Deeds, State)
     scrutinise deeds h            k tg_v (_,    Literal l)  (rn_alts, alts)
@@ -79,14 +79,14 @@ step reduce live (losers, deeds, (h, k, (rn, Comp (Tagged tg (FVed _ e))))) = ca
     primop deeds h k tg_v  pop in_vs (rn, v) (in_e:in_es) = (deeds, (h, PrimApply pop (in_vs ++ [(rn, annedValue tg_v v)]) in_es : k, in_e))
 
     update :: Deeds -> Heap -> Stack -> Tag -> Anned (Out Var) -> In AnnedValue -> Maybe (Deeds, State)
-    update deeds (Heap h ids) k tg_v (Comp (Tagged tg_x' (FVed _ x'))) (rn, v)
+    update deeds (Heap h ids) k tg_v x' (rn, v)
       | linear    = Just (deeds', (Heap h ids, k, (rn, annedTerm tg_v (Value v))))
       | otherwise = case claimDeed deeds' tg_v of
-                      Nothing    -> traceRender ("update: deed claim FAILURE", x') Nothing
-                      Just deeds'' -> Just (deeds'', (Heap (M.insert x' (rn, annedTerm tg_v (Value v)) h) ids, k, (rn, annedTerm tg_v (Value v))))
+                      Nothing      -> traceRender ("update: deed claim FAILURE", annee x') Nothing
+                      Just deeds'' -> Just (deeds'', (Heap (M.insert (annee x') (rn, annedTerm tg_v (Value v)) h) ids, k, (rn, annedTerm tg_v (Value v))))
       where
         -- Unconditionally release the tag associated with the update frame
-        deeds' = releaseDeedDeep deeds tg_x'
+        deeds' = releaseDeedDeep deeds (annedTag x')
 
         -- If we can GC the update frame (because it can't be referred to in the continuation) then:
         --  1) We don't have to actually update the heap or even claim a new deed
@@ -97,8 +97,8 @@ step reduce live (losers, deeds, (h, k, (rn, Comp (Tagged tg (FVed _ e))))) = ca
         --
         -- TODO: make finding FVs much cheaper (i.e. memoise it in the syntax functor construction)
         -- TODO: could GC cycles as well (i.e. don't consider stuff from the Heap that was only referred to by the thing being removed as "GC roots")
-        linear = x' `S.notMember` pureHeapFreeVars h (stackFreeVars k (inFreeVars annedValueFreeVars' (rn, v))) &&
-                 x' `S.notMember` live
+        linear = annee x' `S.notMember` pureHeapFreeVars h (stackFreeVars k (inFreeVars annedValueFreeVars' (rn, v))) &&
+                 annee x' `S.notMember` live
 
     allocate :: Deeds -> Heap -> Stack -> In ([(Var, AnnedTerm)], AnnedTerm) -> (Losers, Deeds, State)
     allocate deeds (Heap h ids) k (rn, (xes, e)) = (losers', deeds', (heap', k, (rn', e)))
