@@ -42,7 +42,7 @@ class Monad m => MonadStatics m where
 --
 
 data Entered = Once Id -- ^ The Id is a context identifier: if a binding is Entered twice from the same context it's really a single Entrance
-             | Many    -- ^ The Bool records whether any of those Many occurrences are in the residual
+             | Many    -- ^ A result of anything other than Once (or None, represented implicitly) is uninteresting for optimisation purposes
              deriving (Eq, Show)
 
 instance Pretty Entered where
