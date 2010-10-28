@@ -123,21 +123,41 @@ simplify (gen_split, gen_s) (init_deeds, statics, init_s)
     
     go (deeds, s@(Heap h ids, k, (rn, e)))
          -- We can't step past a variable or value, because if we do so I can't prove that simplify terminates and the sc recursion has finite depth
-         -- If the termination criteria has not hit, we
-        | Just qa <- toQA (annee e),                   (ids1, ids2)    <- splitIdSupply ids            = ((statics `extendStatics`),                                                         splitt bottom     (deeds, (Heap h ids1, named_k, (case qa of Question x -> [rename rn x]; Answer _ -> [], splitQA ids2 (rn, qa)))))
+        | Just qa <- toQA (annee e)
+        , (ids1, ids2) <- splitIdSupply ids
+        = (-- We haven't generalised away any static variables
+           (statics `extendStatics`),
+           -- Just identify subcomponents within the term, which means that we give up on reducing the *current* term any further.
+           -- This is usually fine if our current state is the output of reduce (since it will likely be stuck anyway), but is very bad otherwise!
+           splitt bottom (deeds, (Heap h ids1, named_k, (case qa of Question x -> [rename rn x]; Answer _ -> [], splitQA ids2 (rn, qa)))))
          -- If we can find some fraction of the stack or heap to drop that looks like it will be admissable, just residualise those parts and continue
-        | Just split_from@(_, gen_xs) <- seekAdmissable h named_k, (ids', ctxt_id) <- stepIdSupply ids = (\extra_statics -> (statics `extendStatics` extra_statics) `excludeStatics` gen_xs, splitt split_from (deeds, (Heap h ids', named_k, ([],                                                     oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], (rn, e)))))))
+        | Just split_from@(_, gen_xs) <- seekAdmissable h named_k
+        , (ids', ctxt_id) <- stepIdSupply ids
+        = (-- See Note [Generalisation of static variables]
+           \extra_statics -> (statics `extendStatics` extra_statics) `excludeStatics` gen_xs,
+           -- We reach this case if the input term was not manifestly stuck. This can only happen if:
+           --  a) The reduce function returned a non-stuck term (in which case its own termination condition must have fired)
+           --  b) The sc function couldn't reduce at all because it was forced to terminate
+           -- We try to evaluate the current term a bit further by throwing away some part of it that appears to be growing:
+           splitt split_from (deeds, (Heap h ids', named_k, ([], oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], (rn, e)))))))
+       
          -- If we can find some static variables to drop that look like they will improve the situation, generalise them away
          --
          -- FIXME: this was building bad loops in output >_>. I think this was caused by throwing away a static that
          -- wasn't actually preventing tieback from occuring. Thus when I drove the new term the matcher found that it could
          -- tieback by just instantiating the term I generalised from. If we make sure that the statics set are garbage collected
          -- immediately before calling simplify, I don't think that this should be a problem.
-        -- | Just statics' <- admissableStatics                                                           = (statics',                        (deeds, M.empty, oneBracketed s))
+        -- | Just statics' <- admissableStatics
+        -- = (statics',
+        --    (deeds, M.empty, oneBracketed s))
+       
          -- Otherwise, keep dropping stuff until one of the two conditions above holds
-        | Just (_, deeds', s') <- step (const id) emptyFreeVars (emptyLosers, deeds, s)                = trace ("simplify: dropping " ++ droppingWhat (annee (snd (thd3 s))) ++ " piece :(") $ go (deeds', s')
+        | Just (_, deeds', s') <- step (const id) emptyFreeVars (emptyLosers, deeds, s)
+        = trace ("simplify: dropping " ++ droppingWhat (annee (snd (thd3 s))) ++ " piece :(" ++ if M.null (staticVars statics) then "" else " - with " ++ show (M.size (staticVars statics)) ++ " statics") $
+          go (deeds', s')
          -- Even if we can never find some admissable fragment of the input, we *must* eventually reach a variable or value
-        | otherwise                                                                                    = error "simplify: could not stop or step!"
+        | otherwise
+        = error "simplify: could not stop or step!"
       where named_k = [0..] `zip` k
     
     droppingWhat (App _ _)    = "App"
