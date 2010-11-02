@@ -253,7 +253,7 @@ memo :: ((Deeds, State) -> ScpM (Deeds, Out FVedTerm))
      ->  (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
 memo opt (deeds, state) = do
     ps <- getPromises
-    case [ (fun p, (releaseStateDeed deeds state, fun p `varApps` tb_dynamic_vs))
+    case [ (p, (releaseStateDeed deeds state, fun p `varApps` tb_dynamic_vs))
          | p <- ps
          , Just rn_lr <- [-- (\res -> if isNothing res then traceRender ("no match:", fun p) res else res) $
                            match (meaning p) state]
@@ -283,8 +283,8 @@ memo opt (deeds, state) = do
           --   and $ zipWith (\x x' -> x' == x && x' `isStatic` statics) (lexical p) tb_static_vs
           -- , traceRender ("memo'", statics, stateFreeVars state, rn_lr, (fun p, lexical p, abstracted p)) True
          ] of
-      (_x, res):_ -> {- traceRender ("tieback", residualiseState state, fst res) $ -} do
-        traceRenderM ("=sc", _x, residualiseState state, deeds, res)
+      (_p, res):_ -> {- traceRender ("tieback", residualiseState state, fst res) $ -} do
+        traceRenderM ("=sc", fun _p, residualiseState state, deeds, res)
         return res
       [] -> {- traceRender ("new drive", residualiseState state) $ -} do
         let vs_list = S.toList $ stateFreeVars state
