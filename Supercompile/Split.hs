@@ -459,13 +459,17 @@ splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (sp
         deeds0 = M.fold (flip releaseHeapBindingDeeds) deeds0_unreleased h_not_residualised
         
         -- 3b) Work out which part of the heap is admissable for inlining
-        -- We are allowed to inline concrete things which are duplicatable or are not residualised right here and now
-        -- Non-concrete stuff should be inlined if and only if it is not explicitly residualised by the caller. The motivation that
-        -- if we generalise away a term, we want to generalise away the staticness as well. Furthermore, it is clear that if we are
-        -- just generalising away staticness itself we certainly should not push the corresponding non-concrete binding down.
+        -- * We are allowed to inline concrete things which are duplicatable or are not residualised right here and now
+        -- * Non-concrete stuff should be inlined if and only if it is not explicitly residualised by the caller. The motivation that
+        --   if we generalise away a term, we want to generalise away the staticness as well. Furthermore, it is clear that if we are
+        --   just generalising away staticness itself we certainly should not push the corresponding non-concrete binding down.
+        -- * We take this opportunity to mark all residualised things as static (being careful to not override actual definitions in h_cheap).
+        --   It important that we do not mark residualised things as phantoms just because they are in bracketeds_heap. If we did, it would mean
+        --   that *concrete residualised stuff* is recorded as a phantom even if it was explicitly residualised in the initial iteration (since
+        --   anything residualised in the first iteration is certainly in bracketeds_heap).
         h_cheap = M.filter (\hb -> case hb of Concrete (_, e) -> isCheap (annee e); _ -> True) h
+                    `M.union` M.map (\(in_e, _) -> Phantom in_e) bracketeds_heap -- This is where I mark things residualised here which are not explicitly generalised as static
         h_inlineable = (h_not_residualised `M.union` h_cheap) `exclude` snd split_from -- FIXME: reduce hack value and explain?? (Astonishingly, this does the right thing for staticness as well)
-                        `M.union` M.map (\(in_e, _) -> Phantom in_e) bracketeds_heap -- Mark all residualised things as static (being careful to not override actual definitions in h_cheap)
         
         -- Generalising the final proposed floats may cause some bindings that we *thought* were going to be inlined to instead be
         -- residualised. We need to account for this in the Entered information (for work-duplication purposes), and in that we will
