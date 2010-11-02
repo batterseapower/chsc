@@ -16,11 +16,14 @@ import qualified Data.Map as M
 embedWithTagSets :: WQO State Generaliser
 embedWithTagSets = precomp stateTags $ postcomp (const generaliseNothing) equal
   where
-    stateTags (Heap h _, k, (_, e)) = traceRender ("stateTags (TagSet)", M.map (pureHeapBindingTag' . snd) h, map stackFrameTags' k, focusedTermTag' e) $
+    stateTags (Heap h _, k, (_, e)) = traceRender ("stateTags (TagSet)", M.map heapBindingTagSet h, map stackFrameTags' k, focusedTermTag' e) $
                                       pureHeapTagSet h `IS.union` stackTagSet k `IS.union` tagTagSet (focusedTermTag' e)
       where
+        heapBindingTagSet :: HeapBinding -> TagSet
+        heapBindingTagSet = maybe IS.empty (tagTagSet . pureHeapBindingTag' . snd) . heapBindingTerm
+        
         pureHeapTagSet :: PureHeap -> IS.IntSet
-        pureHeapTagSet = IS.unions . map (IS.singleton . pureHeapBindingTag' . snd) . M.elems
+        pureHeapTagSet = IS.unions . map heapBindingTagSet . M.elems
     
         stackTagSet :: Stack -> IS.IntSet
         stackTagSet = IS.fromList . concatMap stackFrameTags'

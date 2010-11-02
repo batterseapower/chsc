@@ -19,7 +19,10 @@ residualiseHeap :: Heap -> (IdSupply -> (Out [(Var, FVedTerm)], FVedTerm)) -> FV
 residualiseHeap (Heap h ids) (($ ids) -> (floats, e)) = letRecSmart (residualisePureHeap ids h ++ floats) e
 
 residualisePureHeap :: IdSupply -> PureHeap -> Out [(Var, FVedTerm)]
-residualisePureHeap ids h = [(x', detagAnnedTerm $ renameIn renameAnnedTerm ids in_e) | (x', in_e) <- M.toList h]
+residualisePureHeap ids h = [(x', e') | (x', hb) <- M.toList h, Just e' <- [residualiseHeapBinding ids hb]]
+
+residualiseHeapBinding :: IdSupply -> HeapBinding -> Maybe (Out FVedTerm)
+residualiseHeapBinding ids hb = fmap (detagAnnedTerm . renameIn renameAnnedTerm ids) $ heapBindingTerm hb
 
 residualiseStack :: IdSupply -> Stack -> Out FVedTerm -> (Out [(Var, FVedTerm)], Out FVedTerm)
 residualiseStack _   []     e = ([], e)

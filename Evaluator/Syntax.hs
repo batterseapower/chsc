@@ -65,12 +65,28 @@ toAnnedTerm = tagFVedTerm . reflect
 
 type State = (Heap, Stack, In AnnedTerm)
 
-type PureHeap = M.Map (Out Var) (In AnnedTerm)
+-- | We do not abstract the h functions over static variables. This helps typechecking and gives GHC a chance to inline the definitions.
+data HeapBinding = Environmental           -- ^ Corresponding variable is static and free in the original input, or the name of a h-function. No need to generalise either of these (remember that h-functions don't appear in the input).
+                 | Phantom (In AnnedTerm)  -- ^ Corresponding variable is static static and generated from residualising a term in the splitter. Can use the term information to generalise these.
+                 | Concrete (In AnnedTerm) -- ^ A genuine heap binding that we are actually allowed to look at.
+                 deriving (Show)
+type PureHeap = M.Map (Out Var) HeapBinding
 data Heap = Heap PureHeap IdSupply
           deriving (Show)
 
+instance NFData HeapBinding where
+    rnf Environmental = ()
+    rnf (Phantom a)   = rnf a
+    rnf (Concrete a)  = rnf a
+
 instance NFData Heap where
     rnf (Heap a b) = rnf a `seq` rnf b
+
+instance Pretty HeapBinding where
+    pPrintPrec _     _    Environmental   = angles empty
+    pPrintPrec level _    (Phantom in_e)  = angles (pPrintPrec level noPrec in_e)
+    pPrintPrec level prec (Concrete in_e) = pPrintPrec level prec in_e
+
 
 type Stack = [StackFrame]
 data StackFrame = Apply (Out (Anned Var))
@@ -93,6 +109,15 @@ instance Pretty StackFrame where
         Update x'                 -> pPrintPrecApp level prec (text "update") x'
 
 
+heapBindingNonConcrete :: HeapBinding -> Bool
+heapBindingNonConcrete (Concrete _) = False
+heapBindingNonConcrete _            = True
+
+heapBindingTerm :: HeapBinding -> Maybe (In AnnedTerm)
+heapBindingTerm Environmental   = Nothing
+heapBindingTerm (Phantom in_e)  = Just in_e
+heapBindingTerm (Concrete in_e) = Just in_e
+
 stackFrameTags :: StackFrame -> [Tag]
 stackFrameTags kf = case kf of
     Apply x'                -> [annedTag x']
@@ -100,10 +125,14 @@ stackFrameTags kf = case kf of
     PrimApply _ in_vs in_es -> map (annedTag . snd) in_vs ++ map (annedTag . snd) in_es
     Update x'               -> [annedTag x']
 
+releaseHeapBindingDeeds :: Deeds -> HeapBinding -> Deeds
+releaseHeapBindingDeeds deeds (Concrete (_, e)) = releaseDeedDeep deeds (annedTag e)
+releaseHeapBindingDeeds deeds _                 = deeds
+
 releaseStateDeed :: Deeds -> State -> Deeds
 releaseStateDeed deeds (Heap h _, k, (_, e))
   = foldl' (\deeds kf -> foldl' releaseDeedDeep deeds (stackFrameTags kf))
-           (foldl' (\deeds (_, e) -> releaseDeedDeep deeds (annedTag e))
+           (foldl' releaseHeapBindingDeeds
                    (releaseDeedDeep deeds (annedTag e))
                    (M.elems h))
            k

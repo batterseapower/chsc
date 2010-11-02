@@ -35,7 +35,7 @@ matchInTerm' ids (rn_l, Value v_l)         (rn_r, Value v_r)         = matchInVa
 matchInTerm' ids (rn_l, App e_l x_l)       (rn_r, App e_r x_r)       = matchInTerm ids (rn_l, e_l) (rn_r, e_r) >>= \eqs -> return (matchAnned matchInVar (rn_l, x_l) (rn_r, x_r) : eqs)
 matchInTerm' ids (rn_l, PrimOp pop_l es_l) (rn_r, PrimOp pop_r es_r) = guard (pop_l == pop_r) >> matchInList (matchInTerm ids) (rn_l, es_l) (rn_r, es_r)
 matchInTerm' ids (rn_l, Case e_l alts_l)   (rn_r, Case e_r alts_r)   = liftM2 (++) (matchInTerm ids (rn_l, e_l) (rn_r, e_r)) (matchInAlts ids (rn_l, alts_l) (rn_r, alts_r))
-matchInTerm' ids (rn_l, LetRec xes_l e_l)  (rn_r, LetRec xes_r e_r)  = matchInTerm ids'' (rn_l', e_l) (rn_r', e_r) >>= \eqs -> matchPureHeapExact ids'' [] eqs (M.fromList xes_l') (M.fromList xes_r')
+matchInTerm' ids (rn_l, LetRec xes_l e_l)  (rn_r, LetRec xes_r e_r)  = matchInTerm ids'' (rn_l', e_l) (rn_r', e_r) >>= \eqs -> matchPureHeapExact ids'' [] eqs (M.map Concrete $ M.fromList xes_l') (M.map Concrete $ M.fromList xes_r')
   where (ids',  rn_l', xes_l') = renameBounds (\_ x' -> x') ids  rn_l xes_l
         (ids'', rn_r', xes_r') = renameBounds (\_ x' -> x') ids' rn_r xes_r
 matchInTerm' _ _ _ = Nothing
@@ -151,8 +151,7 @@ matchPureHeap :: IdSupply -> [(Var, Var)] -> [(Var, Var)] -> PureHeap -> PureHea
 matchPureHeap ids bound_eqs free_eqs init_h_l init_h_r = go bound_eqs free_eqs init_h_l init_h_r
   where
     -- Utility function used to deal with work-duplication issues when matching
-    deleteExpensive x m | Just (_, e) <- M.lookup x m, not (isCheap (annee e)) = M.delete x m
-                        | otherwise = m
+    deleteExpensive x (_, e) h = if isCheap (annee e) then h else M.delete x h
     
     -- NB: must respect work-sharing for non-values
     --  x |-> e1, y |-> e1; (x, y) `match` x |-> e1; (x, x) == Nothing
@@ -162,13 +161,22 @@ matchPureHeap ids bound_eqs free_eqs init_h_l init_h_r = go bound_eqs free_eqs i
     -- TODO: look through variables on both sides
     --  x |-> e1; (x, x) `match` x |-> e1; y |-> x `match` (x, y) /= Nothing
     --  x |-> e1, y |-> x; (x, y) `match` x |-> e1 `match` (x, x) /= Nothing
+    -- NB: allow us to instantiate a dynamic variable with a static variable.
+    -- FIXME: import the reason for why this is from the commentary in local-hs-termination-simple
     go known [] _ _ = Just known
     go known ((x_l, x_r):free_eqs) h_l h_r
        -- Perhaps we have already assumed this equality is true?
       | (x_l, x_r) `elem` known = go known free_eqs h_l h_r
        -- Perhaps the left side is bound, so we need to match it against a corresponding right?
-      | Just in_e_l <- M.lookup x_l h_l = M.lookup x_r h_r >>= \in_e_r -> matchInTerm ids in_e_l in_e_r >>= \extra_free_eqs -> go ((x_l, x_r) : known) (extra_free_eqs ++ free_eqs) (deleteExpensive x_l h_l) (deleteExpensive x_r h_r)
+      | Just hb_l <- M.lookup x_l h_l = M.lookup x_r h_r >>= matchHeapBinding x_l hb_l x_r >>= \(alter_h_l, alter_h_r, extra_free_eqs) -> go ((x_l, x_r) : known) (extra_free_eqs ++ free_eqs) (alter_h_l h_l) (alter_h_r h_r)
        -- Perhaps the left side was originally bound, but we already matched it against something else?
       | M.member x_l init_h_l = Nothing
        -- The left side is free, so assume that we can instantiate x_l to x_r (x_l may be bound above, x_r may be bound here or above):
       | otherwise = go ((x_l, x_r) : known) free_eqs h_l h_r
+
+     -- Environental heap bindings (i.e. input FVs) must match *exactly* since we know nothing about them
+    matchHeapBinding x_l Environmental                    x_r Environmental                    = guard (x_l == x_r) >> return (id, id, [])
+     -- We can match other possibilities "semantically", by peeking into ther definitions
+    matchHeapBinding x_l (heapBindingTerm -> Just in_e_l) x_r (heapBindingTerm -> Just in_e_r) = fmap (\extra_free_eqs -> (deleteExpensive x_l in_e_l, deleteExpensive x_r in_e_r, extra_free_eqs)) $ matchInTerm ids in_e_l in_e_r
+     -- Environment variables match *only* against themselves, not against anything other heap binding at all
+    matchHeapBinding _ _ _ _ = Nothing

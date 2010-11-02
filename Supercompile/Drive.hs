@@ -41,9 +41,9 @@ wQO | not tERMINATION_CHECK                        = postcomp (const generaliseN
                                          TagSet   -> embedWithTagSets
 
 supercompile :: Term -> Term
-supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ runScpM $ fmap snd $ sc (mkHistory (extra wQO)) (deeds, mkTopLevelStatics input_fvs, state)
+supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ runScpM $ fmap snd $ sc (mkHistory (extra wQO)) (deeds, state)
   where input_fvs = annedTermFreeVars anned_e
-        state = (Heap M.empty reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, anned_e))
+        state = (Heap (setToMap Environmental input_fvs) reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, anned_e))
         anned_e = toAnnedTerm e
         
         deeds = mkDeeds (bLOAT_FACTOR - 1) (t, pPrint . rb)
@@ -238,20 +238,20 @@ catchScpM f_try f_abort = ScpM $ \e s k -> unScpM (f_try (\c -> ScpM $ \_ _ _ ->
 
 newtype SCRollback = SCRB { rollbackWith :: Generaliser -> ScpM (Deeds, Out FVedTerm) }
 
-sc, sc' :: History (State, SCRollback) (Generaliser, SCRollback) -> (Deeds, Statics, State) -> ScpM (Deeds, Out FVedTerm)
+sc, sc' :: History (State, SCRollback) (Generaliser, SCRollback) -> (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
 sc  hist = memo (sc' hist)
-sc' hist (deeds, statics, state) = (\raise -> check (SCRB raise)) `catchScpM` \gen -> stop gen hist -- TODO: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
+sc' hist (deeds, state) = (\raise -> check (SCRB raise)) `catchScpM` \gen -> stop gen hist -- TODO: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
   where
     check mb_rb = case terminate hist (state, mb_rb) of
                     Continue hist' -> continue hist'
                     Stop (gen, rb) -> maybe (stop gen hist) (`rollbackWith` gen) $ guard sC_ROLLBACK >> Just rb
-    stop gen hist = trace "sc-stop" $ split gen               (sc hist) (deeds, statics, state)
-    continue hist =                   split generaliseNothing (sc hist) ((\res@(_, _, state') -> traceRender ("reduce end", residualiseState state') res) $
-                                                                         case reduce (deeds, state) of (deeds, state) -> (deeds, statics, state)) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
+    stop gen hist = trace "sc-stop" $ split gen               (sc hist) (deeds, state)
+    continue hist =                   split generaliseNothing (sc hist) ((\res@(_, state') -> traceRender ("reduce end", residualiseState state') res) $
+                                                                         reduce (deeds, state)) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
 
-memo :: ((Deeds, Statics, State) -> ScpM (Deeds, Out FVedTerm))
-     ->  (Deeds, Statics, State) -> ScpM (Deeds, Out FVedTerm)
-memo opt (deeds, statics, state) = do
+memo :: ((Deeds, State) -> ScpM (Deeds, Out FVedTerm))
+     ->  (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
+memo opt (deeds, state) = do
     ps <- getPromises
     case [ (fun p, (releaseStateDeed deeds state, fun p `varApps` tb_dynamic_vs))
          | p <- ps
@@ -259,7 +259,9 @@ memo opt (deeds, statics, state) = do
                            match (meaning p) state]
          , let rn_fvs = map (safeRename ("tieback: FVs " ++ pPrintRender (fun p)) rn_lr) -- NB: If tb contains a dead PureHeap binding (hopefully impossible) then it may have a free variable that I can't rename, so "rename" will cause an error. Not observed in practice yet.
                tb_dynamic_vs = rn_fvs (abstracted p)
-               tb_static_vs  = rn_fvs (lexical p)
+               -- tb_static_vs  = rn_fvs (lexical p)
+          -- FIXME: this comment is outdated
+          --
           -- Check that all of the things that were dynamic last time are dynamic this time.
           -- This is an issue of *performance* and *typeability*. If we omit this check, the generated code may
           -- be harder for GHC to chew on because we will apply static variables to dynamic positions in the tieback.
@@ -272,26 +274,26 @@ memo opt (deeds, statics, state) = do
           --  * "Generalise away" a variables staticness if this check fails so that:
           --     a) The termination criteria does not immediately fire
           --     b) We have a chance to build a loop where that variable is dynamic
-         , (\res -> if res then True else traceRender ("memo: rejected by dynamics", statics, tb_dynamic_vs) False) $
-           all (`isStatic` statics) tb_dynamic_vs
+          -- , (\res -> if res then True else traceRender ("memo: rejected by dynamics", statics, tb_dynamic_vs) False) $
+          --   all (`isStatic` statics) tb_dynamic_vs
           -- Check that all of the things that were static last time are static this time *and refer to exactly the same thing*.
           -- This is an issue of *correctness*. If we omit this check, we may tie back to a version of the function where a FV
           -- actually referred to a different let binding than that which we intend to refer tos.
-         , (\res -> if res then True else traceRender ("memo: rejected by statics", lexical p, tb_static_vs) False) $
-           and $ zipWith (\x x' -> x' == x && x' `isStatic` statics) (lexical p) tb_static_vs
-         , traceRender ("memo'", statics, stateFreeVars state, rn_lr, (fun p, lexical p, abstracted p)) True
+          -- , (\res -> if res then True else traceRender ("memo: rejected by statics", lexical p, tb_static_vs) False) $
+          --   and $ zipWith (\x x' -> x' == x && x' `isStatic` statics) (lexical p) tb_static_vs
+          -- , traceRender ("memo'", statics, stateFreeVars state, rn_lr, (fun p, lexical p, abstracted p)) True
          ] of
       (_x, res):_ -> {- traceRender ("tieback", residualiseState state, fst res) $ -} do
         traceRenderM ("=sc", _x, residualiseState state, deeds, res)
         return res
       [] -> {- traceRender ("new drive", residualiseState state) $ -} do
-        let vs = stateFreeVars state
-            (static_vs_list, dynamic_vs_list) = partition (`isStatic` statics) (S.toList vs)
+        let vs_list = S.toList $ stateFreeVars state
+            static_vs_list = M.keys (M.filter heapBindingNonConcrete (case state of (Heap h _, _, _) -> h))
     
         -- NB: promises are lexically scoped because they may refer to FVs
         x <- freshHName
-        promise P { fun = x, abstracted = dynamic_vs_list, lexical = static_vs_list, meaning = state } $ do
+        promise P { fun = x, abstracted = vs_list, lexical = static_vs_list, meaning = state } $ do
             traceRenderM (">sc", x, residualiseState state, deeds)
-            res <- opt (deeds, statics `extendStatics` S.singleton x, state)
+            res <- opt (deeds, case state of (Heap h ids, k, in_e) -> (Heap (M.insert x Environmental h) ids, k, in_e)) -- TODO: should I just put "h" functions into a different set of statics??
             traceRenderM ("<sc", x, residualiseState state, res)
             return res

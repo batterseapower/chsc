@@ -1,6 +1,6 @@
 module Evaluator.FreeVars (
     inFreeVars,
-    pureHeapFreeVars, pureHeapOpenFreeVars,
+    heapBindingFreeVars, pureHeapFreeVars, pureHeapOpenFreeVars,
     stackFreeVars, stackFrameFreeVars,
     stateFreeVars
   ) where
@@ -19,12 +19,15 @@ import qualified Data.Set as S
 inFreeVars :: (a -> FreeVars) -> In a -> FreeVars
 inFreeVars thing_fvs (rn, thing) = renameFreeVars rn (thing_fvs thing)
 
+heapBindingFreeVars :: HeapBinding -> FreeVars
+heapBindingFreeVars = maybe S.empty (inFreeVars annedTermFreeVars) . heapBindingTerm
+
 pureHeapFreeVars :: PureHeap -> (BoundVars, FreeVars) -> FreeVars
 pureHeapFreeVars h (bvs, fvs) = fvs' S.\\ bvs'
   where (bvs', fvs') = pureHeapOpenFreeVars h (bvs, fvs)
 
 pureHeapOpenFreeVars :: PureHeap -> (BoundVars, FreeVars) -> (BoundVars, FreeVars)
-pureHeapOpenFreeVars = flip $ M.foldWithKey (\x' in_e (bvs, fvs) -> (S.insert x' bvs, fvs `S.union` inFreeVars annedTermFreeVars in_e))
+pureHeapOpenFreeVars = flip $ M.foldWithKey (\x' hb (bvs, fvs) -> (S.insert x' bvs, fvs `S.union` heapBindingFreeVars hb))
 
 stackFreeVars :: Stack -> FreeVars -> (BoundVars, FreeVars)
 stackFreeVars k fvs = (S.unions *** (S.union fvs . S.unions)) . unzip . map stackFrameFreeVars $ k
