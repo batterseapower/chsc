@@ -22,7 +22,7 @@ residualisePureHeap :: IdSupply -> PureHeap -> Out [(Var, FVedTerm)]
 residualisePureHeap ids h = [(x', e') | (x', hb) <- M.toList h, Just e' <- [residualiseHeapBinding ids hb]]
 
 residualiseHeapBinding :: IdSupply -> HeapBinding -> Maybe (Out FVedTerm)
-residualiseHeapBinding ids hb = fmap (detagAnnedTerm . renameIn renameAnnedTerm ids) $ heapBindingTerm hb
+residualiseHeapBinding ids hb = do { Concrete in_e <- return hb; return (detagAnnedTerm $ renameIn renameAnnedTerm ids in_e) }
 
 residualiseStack :: IdSupply -> Stack -> Out FVedTerm -> (Out [(Var, FVedTerm)], Out FVedTerm)
 residualiseStack _   []     e = ([], e)
