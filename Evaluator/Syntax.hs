@@ -87,6 +87,9 @@ instance Pretty HeapBinding where
     pPrintPrec level _    (Phantom in_e)  = angles (pPrintPrec level noPrec in_e)
     pPrintPrec level prec (Concrete in_e) = pPrintPrec level prec in_e
 
+instance Pretty Heap where
+    pPrintPrec level prec (Heap h _) = pPrintPrec level prec h
+
 
 type Stack = [StackFrame]
 data StackFrame = Apply (Out (Anned Var))

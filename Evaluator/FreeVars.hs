@@ -4,9 +4,9 @@ module Evaluator.FreeVars (
     mkConcreteLiveness, mkPhantomLiveness, emptyLiveness, plusLiveness, plusLivenesses, whyLive, keepAlive,
 
     inFreeVars,
-    heapBindingLiveness, pureHeapOpenLiveness, pureHeapFreeVars,
+    heapBindingLiveness, pureHeapOpenLiveness,
     stackFreeVars, stackFrameFreeVars,
-    stateFreeVars
+    stateFreeVars, stateStaticFreeVars
   ) where
 
 import Core.Syntax
@@ -74,11 +74,11 @@ pureHeapOpenLiveness :: PureHeap -> (BoundVars, FreeVars) -> (BoundVars, Livenes
 pureHeapOpenLiveness h (bvs, fvs) = M.foldWithKey (\x' hb (bvs, fvs) -> (S.insert x' bvs, fvs `plusLiveness` heapBindingLiveness hb)) (bvs, mkConcreteLiveness fvs) h
 
 pureHeapFreeVars :: PureHeap -> (BoundVars, FreeVars) -> FreeVars
-pureHeapFreeVars h (bvs, fvs) = fvs' S.\\ bvs'
-  where (bvs', fvs') = pureHeapOpenFreeVars h (bvs, fvs)
+pureHeapFreeVars h (bvs, fvs) = fvs' S.\\ bvs_static' S.\\ bvs_nonstatic'
+  where ((bvs_static', bvs_nonstatic'), fvs') = pureHeapOpenFreeVars h (bvs, fvs)
 
-pureHeapOpenFreeVars :: PureHeap -> (BoundVars, FreeVars) -> (BoundVars, FreeVars)
-pureHeapOpenFreeVars = flip $ M.foldWithKey (\x' hb (bvs, fvs) -> case hb of Concrete in_e -> (S.insert x' bvs, fvs `S.union` inFreeVars annedTermFreeVars in_e); _ -> (bvs, fvs))
+pureHeapOpenFreeVars :: PureHeap -> (BoundVars, FreeVars) -> ((BoundVars, BoundVars), FreeVars)
+pureHeapOpenFreeVars h (bvs, fvs) = M.foldWithKey (\x' hb ((bvs_static, bvs_nonstatic), fvs) -> case hb of Concrete in_e -> ((bvs_static, S.insert x' bvs_nonstatic), fvs `S.union` inFreeVars annedTermFreeVars in_e); _ -> ((S.insert x' bvs_static, bvs_nonstatic), fvs)) ((S.empty, bvs), fvs) h
 
 stackFreeVars :: Stack -> FreeVars -> (BoundVars, FreeVars)
 stackFreeVars k fvs = (S.unions *** (S.union fvs . S.unions)) . unzip . map stackFrameFreeVars $ k
@@ -92,3 +92,7 @@ stackFrameFreeVars kf = case kf of
 
 stateFreeVars :: State -> FreeVars
 stateFreeVars (Heap h _, k, in_e) = pureHeapFreeVars h (stackFreeVars k (inFreeVars annedTermFreeVars in_e))
+
+stateStaticFreeVars :: State -> (BoundVars, FreeVars)
+stateStaticFreeVars (Heap h _, k, in_e) = (bvs_static', fvs' S.\\ bvs_nonstatic')
+  where ((bvs_static', bvs_nonstatic'), fvs') = pureHeapOpenFreeVars h (stackFreeVars k (inFreeVars annedTermFreeVars in_e))

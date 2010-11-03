@@ -257,7 +257,8 @@ memo opt (deeds, state) = do
          | p <- ps
          , Just rn_lr <- [-- (\res -> if isNothing res then traceRender ("no match:", fun p) res else res) $
                            match (meaning p) state]
-         , let rn_fvs = map (safeRename ("tieback: FVs " ++ pPrintRender (fun p)) rn_lr) -- NB: If tb contains a dead PureHeap binding (hopefully impossible) then it may have a free variable that I can't rename, so "rename" will cause an error. Not observed in practice yet.
+         , let rn_fvs = map (safeRename ("tieback: FVs for " ++ render (pPrint (fun p) $$ text "Us:" $$ pPrint state $$ text "Them:" $$ pPrint (meaning p)))
+                                        rn_lr) -- NB: If tb contains a dead PureHeap binding (hopefully impossible) then it may have a free variable that I can't rename, so "rename" will cause an error. Not observed in practice yet.
                tb_dynamic_vs = rn_fvs (abstracted p)
                -- tb_static_vs  = rn_fvs (lexical p)
           -- FIXME: this comment is outdated
@@ -287,12 +288,11 @@ memo opt (deeds, state) = do
         traceRenderM ("=sc", fun _p, residualiseState state, deeds, res)
         return res
       [] -> {- traceRender ("new drive", residualiseState state) $ -} do
-        let vs_list = S.toList $ stateFreeVars state
-            static_vs_list = M.keys (M.filter heapBindingNonConcrete (case state of (Heap h _, _, _) -> h))
+        let (static_vs, vs) = stateStaticFreeVars state
     
         -- NB: promises are lexically scoped because they may refer to FVs
         x <- freshHName
-        promise P { fun = x, abstracted = vs_list, lexical = static_vs_list, meaning = state } $ do
+        promise P { fun = x, abstracted = S.toList (vs S.\\ static_vs), lexical = S.toList static_vs, meaning = state } $ do
             traceRenderM (">sc", x, residualiseState state, deeds)
             res <- opt (deeds, case state of (Heap h ids, k, in_e) -> (Heap (M.insert x Environmental h) ids, k, in_e)) -- TODO: should I just put "h" functions into a different set of statics??
             traceRenderM ("<sc", x, residualiseState state, res)

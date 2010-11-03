@@ -728,7 +728,7 @@ splitStackFrame ids kf scruts bracketed_hole
     altConToValue (DefaultAlt _)  = Nothing
 
 splitUpdate :: [Out Var] -> Anned Var -> Bracketed (Entered, IdSupply -> State)
-            -> ([Out Var], M.Map (Out Var) (In AnnedTerm, Bracketed (Entered, IdSupply -> State)), Bracketed (Entered, IdSupply -> State))
+            -> ([Out Var], M.Map (Out Var) (In AnnedTerm, Bracketed (Entered, IdSupply -> State)), Bracketed (Entered, IdSupply -> State)) -- FIXME: the AnnedTerm coming out is, like, totally bustido
 splitUpdate scruts x' bracketed_hole = (annee x' : scruts, M.singleton (annee x') ((mkIdentityRenaming [annee x'], annedTerm (annedTag x') (Var (annee x'))), bracketed_hole), noneBracketed (var (annee x')) (S.singleton (annee x')))
 
 splitValue :: IdSupply -> In AnnedValue -> Bracketed (Entered, IdSupply -> State)
