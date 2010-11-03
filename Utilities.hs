@@ -338,7 +338,7 @@ pPrintRender :: Pretty a => a -> String
 pPrintRender = render . pPrint
 
 panic :: String -> Doc -> a
-panic s d = error $ s ++ ": " ++ render d
+panic s d = error $ "PANIC!\n" ++ s ++ ": " ++ render d
 
 
 traceRender :: Pretty a => a -> b -> b
@@ -351,7 +351,7 @@ traceRenderM x = traceRender x (return ())
 assertRender :: Pretty a => a -> Bool -> b -> b
 assertRender _ _ x | not aSSERTIONS = x
 assertRender _ True  x = x
-assertRender a False _ = error (pPrintRender a)
+assertRender a False _ = error (render $ text "ASSERT FAILED!" $$ pPrint a)
 
 assertRenderM :: (Pretty a, Monad m) => a -> Bool -> m ()
 assertRenderM a b = assertRender a b (return ())
