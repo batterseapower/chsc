@@ -17,11 +17,12 @@ import Size.Deeds
 
 import Termination.Generaliser (Generaliser(..))
 
-import Algebra.Lattice
 import Name
 import Renaming
 import StaticFlags
 import Utilities hiding (tails)
+
+import Algebra.Lattice
 
 import qualified Data.Foldable as Foldable
 import qualified Data.Traversable as Traversable
@@ -100,7 +101,7 @@ simplify gen (init_deeds, init_s)
          -- If we can find some fraction of the stack or heap to drop that looks like it will be admissable, just residualise those parts and continue
         | Just split_from <- seekAdmissable h named_k, (ids', ctxt_id) <- stepIdSupply ids  = splitt split_from (deeds, (Heap h ids', named_k, ([],                                                     oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], (rn, e))))))
          -- Otherwise, keep dropping stuff until one of the two conditions above holds
-        | Just (_, deeds', s') <- step (const id) S.empty (emptyLosers, deeds, s)           = trace ("simplify: dropping " ++ droppingWhat (annee (snd (thd3 s))) ++ " piece :(") $ go (deeds', s')
+        | Just (_, deeds', s') <- step (const id) emptyLiveness (emptyLosers, deeds, s)     = trace ("simplify: dropping " ++ droppingWhat (annee (snd (thd3 s))) ++ " piece :(") $ go (deeds', s')
          -- Even if we can never find some admissable fragment of the input, we *must* eventually reach a variable or value
         | otherwise                                                                         = error "simplify: could not stop or step!"
       where named_k = [0..] `zip` k
@@ -575,14 +576,23 @@ type FreeVarPaths = M.Map (Out Var) [Path]
 transitiveInline :: Deeds -> PureHeap -> (Entered, State) -> (Deeds, FreeVarPaths, EnteredEnv, State)
 transitiveInline deeds h_inlineable (ent, (Heap h ids, k, in_e))
     = -- (if not (S.null not_inlined_vs') then traceRender ("transitiveInline: generalise", not_inlined_vs') else id) $
+      -- traceRender ("transitiveInline", M.keysSet h_inlineable, "before", h, "after", h') $
       (deeds', paths, mkEnteredEnv ent (M.keysSet h' S.\\ M.keysSet h), (Heap h' ids, k, in_e))
   where
-    (deeds', paths, h') = go 0 deeds (h_inlineable `M.union` h) M.empty (setToMap [[]] (stateFreeVars (Heap M.empty ids, k, in_e))) S.empty
+    state_fvs = stateFreeVars (Heap M.empty ids, k, in_e)
+    (deeds', paths, h') = go 0 deeds (h_inlineable `M.union` h) M.empty (setToMap [[]] state_fvs) (mkConcreteLiveness state_fvs)
     
-    go :: Int -> Deeds -> PureHeap -> PureHeap -> FreeVarPaths -> FreeVars -> (Deeds, M.Map (Out Var) [Path], PureHeap)
-    go n deeds h_inlineable h_output fvs_paths non_concrete_fvs = -- traceRender ("go", n, M.keysSet h_inlineable, M.keysSet h_output, fvs) $
-                                                                  if M.null h_inline then (deeds', fvs_paths, h_output)
-                                                                                     else go (n + 1) deeds' (h_inlineable' `M.union` h_not_inlined) (h_output `M.union` h_inline) fvs_paths' non_concrete_fvs'
+    -- NB: in the presence of phantoms, this loop gets weird.
+    --  1. We want to inline phantoms if they occur as free variables of the state, so we get staticness
+    --  2. We want to inline phantoms if they ocucr as free variables of inlined phantoms, so we get to see chains of staticness
+    --    arising from e.g. foldl', hence allowing us to do intelligent staticness generalisation
+    --  3. We want to inline phantom versions of non-phantom definitions if they occur as free variables of inlined phantoms
+    --  4. If we inlined something according to criteria 3. and that definition later becomes a free variable of a non-phantom,
+    --     we need to make sure that phantom definition is replaced with a real one
+    go :: Int -> Deeds -> PureHeap -> PureHeap -> FreeVarPaths -> Liveness -> (Deeds, M.Map (Out Var) [Path], PureHeap)
+    go n deeds h_inlineable h_output fvs_paths live = -- traceRender ("go", n, M.keysSet h_inlineable, M.keysSet h_output, fvs) $
+                                                      if M.null h_inline then (deeds', M.map (filter (any (\x' -> maybe True heapBindingNonConcrete $ x' `M.lookup` h_output))) fvs_paths, h_output)
+                                                                         else go (n + 1) deeds' (h_inlineable' `M.union` h_not_inlined) (h_output `M.union` h_inline) fvs_paths' live'
       where -- Generalisation heuristic: only inline those members of the heap which do not cause us to blow the whistle
             --
             -- NB: we rely here on the fact that our caller will still be able to fill in bindings for stuff from h_inlineable
@@ -591,13 +601,31 @@ transitiveInline deeds h_inlineable (ent, (Heap h ids, k, in_e))
             --
             -- NB: we rely here on the fact that the original h contains "optional" bindings in the sense that they are shadowed
             -- by something bound above.
-            consider_inlining x' hb (deeds, h_inline, h_not_inlined) = case (case hb of Concrete (_, e) -> claimDeed deeds (annedTag e); _ -> Just deeds) of
-                Nothing    -> traceRender ("transitiveInline: deed claim failure", x') (deeds,                h_inline, M.insert x' hb h_not_inlined)
-                Just deeds ->                                                          (deeds, M.insert x' hb h_inline,                h_not_inlined)
+            consider_inlining x' (why_live, hb) (deeds, h_inline, h_not_inlined) = case mb_deeds' of
+                Nothing    -> traceRender ("transitiveInline: deed claim failure", x') (deeds,           h_inline, M.insert x' hb h_not_inlined)
+                Just deeds ->                                                          (deeds, insert_it h_inline,                h_not_inlined)
+              where mb_deeds' | Concrete (_, e) <- hb
+                              , ConcreteLive <- why_live
+                              = claimDeed deeds (annedTag e)
+                              | otherwise
+                              = Just deeds
+                    -- NB: we want to inline only a *phantom* version if the binding is demanded by phantoms only, or madness ensues
+                    -- NB: it is important we insert rather than union, because we want to overwrite an existing phantom binding (if any) with the concrete one
+                    insert_it | Concrete in_e <- hb = keepAlive (Just why_live) x' in_e
+                              | otherwise           = M.insert x' hb
             (deeds', h_inline, h_not_inlined) = M.foldWithKey consider_inlining (deeds, M.empty, M.empty) h_inline_candidates
-            (h_inline_candidates, h_inlineable') = M.partitionWithKey (\x' _ -> x' `M.member` fvs_paths || x' `S.member` non_concrete_fvs) h_inlineable
+            (h_inline_candidates, h_inlineable') = M.mapEitherWithKey (\x' hb -> case x' `whyLive` live of Just why_live | live_is_inline_candidate x' why_live -> Left (why_live, hb); _ -> Right hb) h_inlineable
+            live_is_inline_candidate x' live = case M.lookup x' h_output of
+                Just (Concrete _)            -> False -- Never inline if we already inlined a concrete version, since we can't do better
+                Just _ | PhantomLive <- live -> False -- If we have inlined a phantom version, do not inline one again!
+                _                            -> True  -- Always inline if we inlined nothing at all, or if we are newly going to inline the concrete version over an existing phantom version
             
-            (fvs_paths', non_concrete_fvs') = M.foldWithKey (\x' hb (fvs_paths, non_concrete_fvs) -> case hb of Concrete in_e -> (M.unionWith (++) fvs_paths (setToMap (map (x' :) (fromJust (M.lookup x' fvs_paths))) (inFreeVars annedTermFreeVars in_e)), non_concrete_fvs); _ -> (fvs_paths, non_concrete_fvs `S.union` heapBindingFreeVars hb)) (fvs_paths, non_concrete_fvs) h_inline
+            -- NB: we even add phantoms to the FV paths, even though they don't cause work duplication. This is because any binding may become non-phantoms in a later
+            -- iteration of go. If we didn't add phantoms we would have to ripple through the effect of that new binding becoming non-phantom into all of the other things
+            -- whose path went through it. It is simpler to just filter out all paths that go through a binding that is phantom in the *output heap* just before we return.
+            add_to_paths x' hb (fvs_paths, live) = (M.unionWith (++) fvs_paths (setToMap (map (x' :) (fromJust (M.lookup x' fvs_paths))) (livenessAllFreeVars hb_lives)), live `plusLiveness` hb_lives)
+              where hb_lives = heapBindingLiveness hb
+            (fvs_paths', live') = M.foldWithKey add_to_paths (fvs_paths, live) h_inline
 
 
 -- TODO: replace with a genuine evaluator. However, think VERY hard about the termination implications of this!

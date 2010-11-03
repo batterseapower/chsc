@@ -17,7 +17,6 @@ import Utilities
 
 import qualified Data.IntSet as IS
 import qualified Data.Map as M
-import qualified Data.Set as S
 
 
 type Losers = IS.IntSet
@@ -104,10 +103,8 @@ step reduce live (losers, deeds, _state@(h, k, (rn, e))) =
         -- TODO: could GC cycles as well (i.e. don't consider stuff from the Heap that was only referred to by the thing being removed as "GC roots")
         linear | not sTEP_GARBAGE_COLLECTION
                = Just ConcreteLive
-               | annee x' `S.notMember` pureHeapFreeVars h (stackFreeVars k (inFreeVars annedValueFreeVars' (rn, v)))
-               = Nothing
                | otherwise
-               = annee x' `whyLive` live
+               = annee x' `whyLive` (live `plusLiveness` snd (pureHeapOpenLiveness h (stackFreeVars k (inFreeVars annedValueFreeVars' (rn, v)))))
 
     allocate :: Deeds -> Heap -> Stack -> In ([(Var, AnnedTerm)], AnnedTerm) -> (Losers, Deeds, State) -- FIXME: I suspect we should accumulate Losers across the boundary of sc
     allocate deeds (Heap h ids) k (rn, (xes, e)) = (losers', deeds', (heap', k, (rn', e)))

@@ -1,10 +1,10 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Evaluator.FreeVars (
-    WhyLive(..), Liveness,
+    WhyLive(..), Liveness, livenessAllFreeVars,
     mkConcreteLiveness, mkPhantomLiveness, emptyLiveness, plusLiveness, plusLivenesses, whyLive, keepAlive,
 
     inFreeVars,
-    heapBindingLiveness, heapBindingFreeVars {- FIXME: remove export -}, pureHeapFreeVars, pureHeapOpenFreeVars,
+    heapBindingLiveness, pureHeapOpenLiveness, pureHeapFreeVars,
     stackFreeVars, stackFrameFreeVars,
     stateFreeVars
   ) where
@@ -40,6 +40,10 @@ mkConcreteLiveness, mkPhantomLiveness :: FreeVars -> Liveness
 mkConcreteLiveness fvs = Liveness $ setToMap ConcreteLive fvs
 mkPhantomLiveness fvs = Liveness $ setToMap PhantomLive fvs
 
+-- | Warning: you almost never actually want to use this function, since this function also reports free variables of phantoms.
+livenessAllFreeVars :: Liveness -> FreeVars
+livenessAllFreeVars = M.keysSet . unLiveness
+
 emptyLiveness :: Liveness
 emptyLiveness = bottom
 
@@ -66,15 +70,15 @@ heapBindingLiveness Environmental   = emptyLiveness
 heapBindingLiveness (Phantom in_e)  = mkPhantomLiveness  (inFreeVars annedTermFreeVars in_e)
 heapBindingLiveness (Concrete in_e) = mkConcreteLiveness (inFreeVars annedTermFreeVars in_e)
 
-heapBindingFreeVars :: HeapBinding -> FreeVars
-heapBindingFreeVars = maybe S.empty (inFreeVars annedTermFreeVars) . heapBindingTerm
+pureHeapOpenLiveness :: PureHeap -> (BoundVars, FreeVars) -> (BoundVars, Liveness)
+pureHeapOpenLiveness h (bvs, fvs) = M.foldWithKey (\x' hb (bvs, fvs) -> (S.insert x' bvs, fvs `plusLiveness` heapBindingLiveness hb)) (bvs, mkConcreteLiveness fvs) h
 
 pureHeapFreeVars :: PureHeap -> (BoundVars, FreeVars) -> FreeVars
 pureHeapFreeVars h (bvs, fvs) = fvs' S.\\ bvs'
   where (bvs', fvs') = pureHeapOpenFreeVars h (bvs, fvs)
 
 pureHeapOpenFreeVars :: PureHeap -> (BoundVars, FreeVars) -> (BoundVars, FreeVars)
-pureHeapOpenFreeVars = flip $ M.foldWithKey (\x' hb (bvs, fvs) -> (S.insert x' bvs, fvs `S.union` heapBindingFreeVars hb))
+pureHeapOpenFreeVars = flip $ M.foldWithKey (\x' hb (bvs, fvs) -> case hb of Concrete in_e -> (S.insert x' bvs, fvs `S.union` inFreeVars annedTermFreeVars in_e); _ -> (bvs, fvs))
 
 stackFreeVars :: Stack -> FreeVars -> (BoundVars, FreeVars)
 stackFreeVars k fvs = (S.unions *** (S.union fvs . S.unions)) . unzip . map stackFrameFreeVars $ k
