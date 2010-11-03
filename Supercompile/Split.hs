@@ -324,6 +324,7 @@ optimiseSplit opt deeds bracketeds_heap bracketed_focus = do -- FIXME: use gen_x
     let stateSize (h, k, in_e) = heapSize h + stackSize k + termSize (snd in_e)
           where heapBindingSize hb = case hb of
                     Environmental   -> 0
+                    Updated _ _     -> 0
                     Phantom _       -> 0
                     Concrete (_, e) -> termSize e
                 heapSize (Heap h _) = sum (map heapBindingSize (M.elems h))
@@ -445,7 +446,7 @@ splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (sp
         
         -- 2) Build a splitting for those elements of the heap we propose to residualise in resid_xs
         (h_residualised, h_not_residualised) = M.partitionWithKey (\x' _ -> x' `S.member` resid_xs) h
-        bracketeds_nonupdated = M.mapMaybeWithKey (\x' hb -> do { Concrete in_e <- return hb; return (in_e, oneBracketed (Once (fromJust (name_id x')), (Heap M.empty ids_brack, [], in_e))) }) h_residualised
+        bracketeds_nonupdated = M.mapMaybeWithKey (\x' hb -> do { Concrete in_e <- return hb; return (Concrete in_e, oneBracketed (Once (fromJust (name_id x')), (Heap M.empty ids_brack, [], in_e))) }) h_residualised
         bracketeds_heap = bracketeds_updated `M.union` bracketeds_nonupdated
         
         -- 3) Inline as much of the Heap as possible into the candidate splitting
@@ -469,7 +470,7 @@ splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (sp
         --   that *concrete residualised stuff* is recorded as a phantom even if it was explicitly residualised in the initial iteration (since
         --   anything residualised in the first iteration is certainly in bracketeds_heap).
         h_cheap = M.filter (\hb -> case hb of Concrete (_, e) -> isCheap (annee e); _ -> True) h
-                    `M.union` M.map (\(in_e, _) -> Phantom in_e) bracketeds_heap -- This is where I mark things residualised here which are not explicitly generalised as static
+                    `M.union` M.map fst bracketeds_heap -- This is where I mark things residualised here which are not explicitly generalised as static
         h_inlineable = (h_not_residualised `M.union` h_cheap) `exclude` snd split_from -- FIXME: reduce hack value and explain?? (Astonishingly, this does the right thing for staticness as well)
         
         -- Generalising the final proposed floats may cause some bindings that we *thought* were going to be inlined to instead be
@@ -657,7 +658,7 @@ pushStack :: IdSupply
           -> [(Bool, StackFrame)]
           -> Bracketed (Entered, IdSupply -> State)
           -> (Deeds,
-              M.Map (Out Var) (In AnnedTerm, Bracketed (Entered, IdSupply -> State)),
+              M.Map (Out Var) (HeapBinding, Bracketed (Entered, IdSupply -> State)),
               Bracketed (Entered, IdSupply -> State))
 pushStack _   deeds _      []                 bracketed_hole = (deeds, M.empty, bracketed_hole)
 pushStack ids deeds scruts ((may_push, kf):k) bracketed_hole = second3 (`M.union` bracketed_heap') $ pushStack ids2 deeds' scruts' k bracketed_hole'
@@ -689,7 +690,7 @@ splitStackFrame :: IdSupply
                 -> [Out Var]
                 -> Bracketed (Entered, IdSupply -> State)
                 -> ([Out Var],
-                    M.Map (Out Var) (In AnnedTerm, Bracketed (Entered, IdSupply -> State)),
+                    M.Map (Out Var) (HeapBinding, Bracketed (Entered, IdSupply -> State)),
                     Bracketed (Entered, IdSupply -> State))
 splitStackFrame ids kf scruts bracketed_hole
   | Update x' <- kf = splitUpdate scruts x' bracketed_hole
@@ -728,8 +729,16 @@ splitStackFrame ids kf scruts bracketed_hole
     altConToValue (DefaultAlt _)  = Nothing
 
 splitUpdate :: [Out Var] -> Anned Var -> Bracketed (Entered, IdSupply -> State)
-            -> ([Out Var], M.Map (Out Var) (In AnnedTerm, Bracketed (Entered, IdSupply -> State)), Bracketed (Entered, IdSupply -> State)) -- FIXME: the AnnedTerm coming out is, like, totally bustido
-splitUpdate scruts x' bracketed_hole = (annee x' : scruts, M.singleton (annee x') ((mkIdentityRenaming [annee x'], annedTerm (annedTag x') (Var (annee x'))), bracketed_hole), noneBracketed (var (annee x')) (S.singleton (annee x')))
+            -> ([Out Var], M.Map (Out Var) (HeapBinding, Bracketed (Entered, IdSupply -> State)), Bracketed (Entered, IdSupply -> State))
+splitUpdate scruts x' bracketed_hole = (annee x' : scruts, M.singleton (annee x') (Updated (annedTag x') hole_fvs, bracketed_hole), noneBracketed (var (annee x')) (S.singleton (annee x')))
+  where hole_fvs = bracketedFreeVars (\(_, mk_state) -> stateFreeVars (mk_state matchIdSupply)) bracketed_hole
+  -- TODO: we get poor generalisation for variables bound by update frames because we don't record proper tags or whatever for them
+  --
+  -- We could make this work using the Phantom constructor by threading in a rebuilt version of the term being updated, but at the moment that is
+  -- tricky because stack frames are untagged, so rebuilding a tagged term is close to impossible.
+  --
+  -- So at the moment we do a "poor mans" thing and just keep track of the free variables and the tag in a new Updated constructor. As it turns out,
+  -- this is all that is actually required to make generalisation work properly, although it might pessimise the matcher a tiny bit.
 
 splitValue :: IdSupply -> In AnnedValue -> Bracketed (Entered, IdSupply -> State)
 splitValue ids (rn, Lambda x e) = zipBracketeds (\[e'] -> lambda x' e') (\[fvs'] -> fvs') (\[fvs'] -> S.delete x' fvs') (\_ -> Nothing) [oneBracketed (Many, \ids -> (Heap M.empty ids, [], (rn', e)))]

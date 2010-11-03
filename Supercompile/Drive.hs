@@ -184,7 +184,7 @@ instance MonadStatics ScpM where
 -- fulfilments and promises parts of the monadic-carried state.
 bindFloats :: (Promise -> Bool) -> ScpM a -> ScpM (Out [(Var, FVedTerm)], a)
 bindFloats p mx = ScpM $ \e s k -> unScpM mx (e { promises = map fst (fulfilments s) ++ promises e }) (s { fulfilments = [] })
-                                             (\x _e (s'@(ScpState { fulfilments = (partition (p . fst) -> (fs_now, fs_later)) })) -> traceRender ("bindFloats", [(fun p, lexical p, fvedTermFreeVars e) | (p, e) <- fs_now], [(fun p, lexical p, fvedTermFreeVars e) | (p, e) <- fs_later]) $
+                                             (\x _e (s'@(ScpState { fulfilments = (partition (p . fst) -> (fs_now, fs_later)) })) -> -- traceRender ("bindFloats", [(fun p, lexical p, fvedTermFreeVars e) | (p, e) <- fs_now], [(fun p, lexical p, fvedTermFreeVars e) | (p, e) <- fs_later]) $
                                                                                                                                      k (sortBy (comparing ((read :: String -> Int) . drop 1 . name_string . fst)) [(fun p, lambdas (abstracted p) e') | (p, e') <- fs_now], x)
                                                                                                                                        e (s' { fulfilments = fs_later ++ fulfilments s }))
 
@@ -293,7 +293,7 @@ memo opt (deeds, state) = do
         -- NB: promises are lexically scoped because they may refer to FVs
         x <- freshHName
         promise P { fun = x, abstracted = S.toList (vs S.\\ static_vs), lexical = S.toList static_vs, meaning = state } $ do
-            traceRenderM (">sc", x, residualiseState state, deeds)
+            traceRenderM (">sc", x, residualiseState state, case state of (Heap h _, _, _) -> M.filter heapBindingNonConcrete h, deeds)
             res <- opt (deeds, case state of (Heap h ids, k, in_e) -> (Heap (M.insert x Environmental h) ids, k, in_e)) -- TODO: should I just put "h" functions into a different set of statics??
             traceRenderM ("<sc", x, residualiseState state, res)
             return res

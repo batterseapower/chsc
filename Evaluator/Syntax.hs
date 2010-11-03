@@ -67,6 +67,7 @@ type State = (Heap, Stack, In AnnedTerm)
 
 -- | We do not abstract the h functions over static variables. This helps typechecking and gives GHC a chance to inline the definitions.
 data HeapBinding = Environmental           -- ^ Corresponding variable is static and free in the original input, or the name of a h-function. No need to generalise either of these (remember that h-functions don't appear in the input).
+                 | Updated Tag FreeVars    -- ^ Variable is bound by a residualised update frame. TODO: this is smelly and should really be Phantom.
                  | Phantom (In AnnedTerm)  -- ^ Corresponding variable is static static and generated from residualising a term in the splitter. Can use the term information to generalise these.
                  | Concrete (In AnnedTerm) -- ^ A genuine heap binding that we are actually allowed to look at.
                  deriving (Show)
@@ -76,6 +77,7 @@ data Heap = Heap PureHeap IdSupply
 
 instance NFData HeapBinding where
     rnf Environmental = ()
+    rnf (Updated a b) = rnf a `seq` rnf b
     rnf (Phantom a)   = rnf a
     rnf (Concrete a)  = rnf a
 
@@ -84,6 +86,7 @@ instance NFData Heap where
 
 instance Pretty HeapBinding where
     pPrintPrec _     _    Environmental   = angles empty
+    pPrintPrec level _    (Updated x' _)  = angles (text "update" <+> pPrintPrec level noPrec x')
     pPrintPrec level _    (Phantom in_e)  = angles (pPrintPrec level noPrec in_e)
     pPrintPrec level prec (Concrete in_e) = pPrintPrec level prec in_e
 
@@ -118,8 +121,15 @@ heapBindingNonConcrete _            = True
 
 heapBindingTerm :: HeapBinding -> Maybe (In AnnedTerm)
 heapBindingTerm Environmental   = Nothing
+heapBindingTerm (Updated _ _)   = Nothing
 heapBindingTerm (Phantom in_e)  = Just in_e
 heapBindingTerm (Concrete in_e) = Just in_e
+
+heapBindingTag :: HeapBinding -> Maybe Tag
+heapBindingTag Environmental     = Nothing
+heapBindingTag (Updated tg _)    = Just tg
+heapBindingTag (Phantom (_, e))  = Just (annedTag e)
+heapBindingTag (Concrete (_, e)) = Just (annedTag e)
 
 stackFrameTags :: StackFrame -> [Tag]
 stackFrameTags kf = case kf of

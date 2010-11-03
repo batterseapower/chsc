@@ -174,8 +174,8 @@ matchPureHeap ids bound_eqs free_eqs init_h_l init_h_r = go bound_eqs free_eqs i
        -- The left side is free, so assume that we can instantiate x_l to x_r (x_l may be bound above, x_r may be bound here or above):
       | otherwise = go ((x_l, x_r) : known) free_eqs h_l h_r
 
-     -- Environental heap bindings (i.e. input FVs) must match *exactly* since we know nothing about them
-    matchHeapBinding x_l Environmental                    x_r Environmental                    = guard (x_l == x_r) >> return (id, id, [])
+     -- Environental heap bindings (i.e. input FVs) / things bound by update frames must match *exactly* since we know nothing about them
+    matchHeapBinding x_l (heapBindingTerm -> Nothing)     x_r (heapBindingTerm -> Nothing)     = guard (x_l == x_r) >> return (id, id, [])
      -- We can match other possibilities "semantically", by peeking into ther definitions
     matchHeapBinding x_l (heapBindingTerm -> Just in_e_l) x_r (heapBindingTerm -> Just in_e_r) = fmap (\extra_free_eqs -> (deleteExpensive x_l in_e_l, deleteExpensive x_r in_e_r, extra_free_eqs)) $ matchInTerm ids in_e_l in_e_r
      -- Environment variables match *only* against themselves, not against anything other heap binding at all

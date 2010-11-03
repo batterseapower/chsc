@@ -20,7 +20,7 @@ embedWithTagSets = precomp stateTags $ postcomp (const generaliseNothing) equal
                                       pureHeapTagSet h `IS.union` stackTagSet k `IS.union` tagTagSet (focusedTermTag' e)
       where
         heapBindingTagSet :: HeapBinding -> TagSet
-        heapBindingTagSet = maybe IS.empty (tagTagSet . pureHeapBindingTag' . snd) . heapBindingTerm
+        heapBindingTagSet = maybe IS.empty (tagTagSet . pureHeapBindingTag') . heapBindingTag
         
         pureHeapTagSet :: PureHeap -> IS.IntSet
         pureHeapTagSet = IS.unions . map heapBindingTagSet . M.elems
@@ -32,8 +32,8 @@ embedWithTagSets = precomp stateTags $ postcomp (const generaliseNothing) equal
         tagTagSet = IS.singleton
 
 
-pureHeapBindingTag' :: AnnedTerm -> Tag
-pureHeapBindingTag' = injectTag 5 . annedTag
+pureHeapBindingTag' :: Tag -> Tag
+pureHeapBindingTag' = injectTag 5
 
 stackFrameTags' :: StackFrame -> [Tag]
 stackFrameTags' = map (injectTag 3) . stackFrameTags

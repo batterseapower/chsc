@@ -38,7 +38,7 @@ embedWithTagGraphs = precomp stateTags $ postcomp generaliserFromGrowing $ refin
                  `plusTagGraph` mkTermTagGraph (focusedTermTag' e) in_e
         
         heapBindingTagGraph :: HeapBinding -> TagGraph
-        heapBindingTagGraph = maybe (mkTagGraph [] S.empty) (\in_e@(_, e) -> mkTagGraph [pureHeapBindingTag' e] (inFreeVars annedTermFreeVars in_e)) . heapBindingTerm
+        heapBindingTagGraph hb = maybe (mkTagGraph [] S.empty) (\tg -> mkTagGraph [pureHeapBindingTag' tg] (livenessAllFreeVars (heapBindingLiveness hb))) $ heapBindingTag hb
         
         pureHeapTagGraph :: PureHeap -> TagGraph
         pureHeapTagGraph h = plusTagGraphs $ map heapBindingTagGraph (M.elems h)
@@ -52,7 +52,7 @@ embedWithTagGraphs = precomp stateTags $ postcomp generaliserFromGrowing $ refin
         
         -- Stores the tags associated with any bound name
         referants :: M.Map (Out Var) TagSet
-        referants = M.map (maybe IS.empty (\(_, e) -> IS.singleton (pureHeapBindingTag' e)) . heapBindingTerm) h `M.union` M.fromList [(annee x', IS.fromList (stackFrameTags' kf)) | kf@(Update x') <- k]
+        referants = M.map (maybe IS.empty (IS.singleton . pureHeapBindingTag') . heapBindingTag) h `M.union` M.fromList [(annee x', IS.fromList (stackFrameTags' kf)) | kf@(Update x') <- k]
         
         -- Find the *tags* referred to from the *names* referred to
         referrerEdges :: [Tag] -> FreeVars -> TagGraph
@@ -70,13 +70,13 @@ embedWithTagGraphs = precomp stateTags $ postcomp generaliserFromGrowing $ refin
     generaliserFromGrowing :: TagMap Bool -> Generaliser
     generaliserFromGrowing growing = Generaliser {
           generaliseStackFrame  = \kf   -> any strictly_growing (stackFrameTags' kf),
-          generaliseHeapBinding = \_ hb -> maybe False (strictly_growing . pureHeapBindingTag' . snd) (heapBindingTerm hb)
+          generaliseHeapBinding = \_ hb -> maybe False (strictly_growing . pureHeapBindingTag') (heapBindingTag hb)
         }  
       where strictly_growing tg = IM.findWithDefault False tg growing
 
 
-pureHeapBindingTag' :: AnnedTerm -> Tag
-pureHeapBindingTag' = injectTag 5 . annedTag
+pureHeapBindingTag' :: Tag -> Tag
+pureHeapBindingTag' = injectTag 5
 
 stackFrameTags' :: StackFrame -> [Tag]
 stackFrameTags' = map (injectTag 3) . stackFrameTags
