@@ -86,7 +86,7 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ run
 reduce :: (Deeds, State) -> (Deeds, State)
 reduce (deeds, orig_state) = (deeds', state')
   where
-    (_, deeds', state') = go (0 :: Int) (mkHistory (extra wQO)) S.empty (emptyLosers, deeds, orig_state)
+    (_, deeds', state') = go (0 :: Int) (mkHistory (extra wQO)) emptyLiveness (emptyLosers, deeds, orig_state)
       
     go depth hist lives (losers, deeds, state)
       -- | traceRender ("reduce.go", residualiseState state) False = undefined

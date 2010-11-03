@@ -26,7 +26,7 @@ emptyLosers :: Losers
 emptyLosers = IS.empty
 
 
-step :: (FreeVars -> (Losers, Deeds, State) -> (Losers, Deeds, State)) -> FreeVars -> (Losers, Deeds, State) -> Maybe (Losers, Deeds, State)
+step :: (Liveness -> (Losers, Deeds, State) -> (Losers, Deeds, State)) -> Liveness -> (Losers, Deeds, State) -> Maybe (Losers, Deeds, State)
 step reduce live (losers, deeds, _state@(h, k, (rn, e))) =
   (\mb_res -> assertRender (text "step: deeds lost or gained!") (maybe True (\(_, deeds', state') -> noChange (releaseStateDeed deeds _state) (releaseStateDeed deeds' state')) mb_res) mb_res) $
   case annee e of
@@ -82,14 +82,16 @@ step reduce live (losers, deeds, _state@(h, k, (rn, e))) =
     primop deeds h k tg_v  pop in_vs (rn, v) (in_e:in_es) = (deeds, (h, PrimApply pop (in_vs ++ [(rn, annedValue tg_v v)]) in_es : k, in_e))
 
     update :: Deeds -> Heap -> Stack -> Tag -> Anned (Out Var) -> In AnnedValue -> Maybe (Deeds, State)
-    update deeds (Heap h ids) k tg_v x' (rn, v)
-      | linear    = Just (deeds', (Heap h ids, k, (rn, annedTerm tg_v (Value v))))
-      | otherwise = case claimDeed deeds' tg_v of
-                      Nothing      -> traceRender ("update: deed claim FAILURE", annee x') Nothing
-                      Just deeds'' -> Just (deeds'', (Heap (M.insert (annee x') (Concrete (rn, annedTerm tg_v (Value v))) h) ids, k, (rn, annedTerm tg_v (Value v))))
+    update deeds (Heap h ids) k tg_v x' (rn, v) = case mb_deeds'' of
+        Nothing      -> traceRender ("update: deed claim FAILURE", annee x') Nothing
+        Just deeds'' -> Just (deeds'', (Heap (keepAlive linear (annee x') (rn, annedTerm tg_v (Value v)) h) ids, k, (rn, annedTerm tg_v (Value v))))
       where
         -- Unconditionally release the tag associated with the update frame
         deeds' = releaseDeedDeep deeds (annedTag x')
+        
+        -- Claim the deeds necessary to duplicate a live non-phantom
+        mb_deeds'' | Just ConcreteLive <- linear = claimDeed deeds' tg_v
+                   | otherwise                   = Just deeds'
 
         -- If we can GC the update frame (because it can't be referred to in the continuation) then:
         --  1) We don't have to actually update the heap or even claim a new deed
@@ -100,9 +102,12 @@ step reduce live (losers, deeds, _state@(h, k, (rn, e))) =
         --
         -- TODO: make finding FVs much cheaper (i.e. memoise it in the syntax functor construction)
         -- TODO: could GC cycles as well (i.e. don't consider stuff from the Heap that was only referred to by the thing being removed as "GC roots")
-        linear = sTEP_GARBAGE_COLLECTION &&
-                 annee x' `S.notMember` pureHeapFreeVars h (stackFreeVars k (inFreeVars annedValueFreeVars' (rn, v))) &&
-                 annee x' `S.notMember` live
+        linear | not sTEP_GARBAGE_COLLECTION
+               = Just ConcreteLive
+               | annee x' `S.notMember` pureHeapFreeVars h (stackFreeVars k (inFreeVars annedValueFreeVars' (rn, v)))
+               = Nothing
+               | otherwise
+               = annee x' `whyLive` live
 
     allocate :: Deeds -> Heap -> Stack -> In ([(Var, AnnedTerm)], AnnedTerm) -> (Losers, Deeds, State) -- FIXME: I suspect we should accumulate Losers across the boundary of sc
     allocate deeds (Heap h ids) k (rn, (xes, e)) = (losers', deeds', (heap', k, (rn', e)))
@@ -118,17 +123,17 @@ step reduce live (losers, deeds, _state@(h, k, (rn, e))) =
               -- speeds up supercompilation of that benchmark massively.
               (h_losers, h_winners) = M.partition (\hb -> case hb of Concrete in_e -> annedTag (snd in_e) `IS.member` losers; _ -> False) h
               
-              (final_losers, final_deeds, _final_live, final_h_losers, Heap final_h_winners final_ids) = foldl' speculate_one (losers, deeds, S.empty, h_losers, Heap h_winners ids') (xes' `zip` lives')
+              (final_losers, final_deeds, _final_live, final_h_losers, Heap final_h_winners final_ids) = foldl' speculate_one (losers, deeds, emptyLiveness, h_losers, Heap h_winners ids') (xes' `zip` lives')
                 
               -- Construct the live set for use when speculating each heap binding. This prevent us from accidentally GCing something that is live
               -- in the "continuation" when speculating a heap binding. We ensure that only those heap bindings that occur *strictly later* than
               -- the binding being speculated contribute to the live set -- this means that GC can still collect stuff that speculation truly makes dead.
-              makeLive live in_e = live `S.union` inFreeVars annedTermFreeVars in_e
-              (_, lives') = mapAccumR (\live (_x', hb) -> (live `makeLive` hb, live))
-                                      (M.fold (\hb live -> live `S.union` heapBindingFreeVars hb) (live `S.union` snd (stackFreeVars k (inFreeVars annedTermFreeVars (rn', e)))) h_losers) xes'
+              makeLive live in_e = live `plusLiveness` mkConcreteLiveness (inFreeVars annedTermFreeVars in_e)
+              (_, lives') = mapAccumR (\live (_x', in_e) -> (live `makeLive` in_e, live)) -- FIXME: phantoms keep things alive...
+                                      (M.fold (\hb live -> live `plusLiveness` heapBindingLiveness hb) (live `plusLiveness` mkConcreteLiveness (snd (stackFreeVars k (inFreeVars annedTermFreeVars (rn', e))))) h_losers) xes'
               
               speculate_one (losers, deeds, extra_live, h_losers, Heap h_winners ids) ((x', in_e), live')
-                = case reduce (live' `S.union` extra_live) (losers, deeds, (Heap h_winners ids, [], in_e)) of
+                = case reduce (live' `plusLiveness` extra_live) (losers, deeds, (Heap h_winners ids, [], in_e)) of
                     -- NB: commenting in this line is useful if you want to test whether speculation is causing
                     -- a benchmark to be slow due to the cost of the speculation OR due to the extra info. propagation
                     --(rnf -> ()) | False -> undefined
