@@ -163,6 +163,7 @@ matchPureHeap ids bound_eqs free_eqs init_h_l init_h_r = go bound_eqs free_eqs i
     --  x |-> e1, y |-> x; (x, y) `match` x |-> e1 `match` (x, x) /= Nothing
     -- NB: allow us to instantiate a dynamic variable with a static variable.
     -- FIXME: import the reason for why this is from the commentary in local-hs-termination-simple
+    --go known free_eqs h_l h_r | traceRender ("go", known, free_eqs, h_l, h_r) False = undefined
     go known [] _ _ = Just known
     go known ((x_l, x_r):free_eqs) h_l h_r
        -- Perhaps we have already assumed this equality is true?
