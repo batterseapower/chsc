@@ -5,6 +5,7 @@ import Core.Data (DataCon)
 
 import Name
 import Utilities
+import StaticFlags
 
 import qualified Data.Foldable as Foldable
 import Data.Monoid (Sum(..))
