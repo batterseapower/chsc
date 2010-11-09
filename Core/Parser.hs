@@ -63,7 +63,8 @@ buildWrappers ps
     | (c, f) <- M.toList (charWrappers ps) ] ++
     [ (f, lam (name "x1") $ lam (name "x2") $ primOp pop [var (name "x1"), var (name "x2")])
     | (pop, f) <- M.toList (primWrappers ps) ] ++
-    [ (name "error", lam (name "msg") $ scrutinise (var (name "prelude_error") `app` name "msg") []) ]
+    [ (name "error", lam (name "msg") $ scrutinise (var (name "prelude_error") `app` name "msg") []) ] ++
+    [ (name "uncoveredBranch", scrutinise (var (name "bAD")) []) ]
 
 newtype ParseM a = ParseM { unParseM :: ParseState -> (ParseState, a) }
 
@@ -87,8 +88,14 @@ nameIt e f = freshFloatName "a" e >>= \(mb_float, x) -> fmap (bind (maybeToList 
 nameThem :: [Term] -> ([Var] -> ParseM Term) -> ParseM Term
 nameThem es f = mapM (freshFloatName "a") es >>= \(unzip -> (mb_es, xs)) -> fmap (bind (catMaybes mb_es)) $ f xs
 
-list :: [Term] -> ParseM Term
-list es = nameThem es $ \es_xs -> replicateM (length es) (freshName "list") >>= \cons_xs -> return $ uncurry bind $ foldr (\(cons_x, e_x) (floats, tl) -> ((cons_x, tl) : floats, cons e_x cons_x)) ([], nil) (cons_xs `zip` es_xs)
+listCore :: [Term] -> ParseM Term
+listCore es = nameThem es $ \es_xs -> replicateM (length es) (freshName "list") >>= \cons_xs -> return $ uncurry bind $ foldr (\(cons_x, e_x) (floats, tl) -> ((cons_x, tl) : floats, cons e_x cons_x)) ([], nil) (cons_xs `zip` es_xs)
+
+charCore :: Char -> ParseM Term
+charCore c = fmap var $ charWrapper c
+
+stringCore :: String -> ParseM Term
+stringCore s = mapM charCore s >>= listCore
 
 appE :: Term -> Term -> ParseM Term
 appE e1 e2 = e2 `nameIt` \x2 -> return (e1 `app` x2)
@@ -153,7 +160,7 @@ expCore (LHE.If e1 e2 e3) = expCore e1 >>= \e1 -> liftM2 (if_ e1) (expCore e2) (
 expCore (LHE.Case e alts) = expCore e >>= \e -> fmap (scrutinise e) (mapM altCore alts)
 expCore (LHE.Tuple es) = mapM expCore es >>= flip nameThem (return . tuple)
 expCore (LHE.Paren e) = expCore e
-expCore (LHE.List es) = mapM expCore es >>= list
+expCore (LHE.List es) = mapM expCore es >>= listCore
 expCore (LHE.Lambda _ ps e) = patCores ps >>= \(xs, _bound_xs, build) -> expCore e >>= \e -> return $ lambdas xs $ build e
 expCore (LHE.LeftSection e1 eop) = expCore e1 >>= \e1 -> e1 `nameIt` \x1 -> qopCore eop >>= \eop -> return (eop `app` x1)
 expCore (LHE.RightSection eop e2) = expCore e2 >>= \e2 -> e2 `nameIt` \x2 -> qopCore eop >>= \eop -> eop `nameIt` \xop -> freshName "rsect" >>= \x1 -> return $ lambda x1 $ (var xop `app` x1) `app` x2  -- NB: careful about sharing!
@@ -169,8 +176,8 @@ qopCore (LHE.QConOp qn) = qNameCore qn
 
 literalCore :: LHE.Literal -> ParseM Term
 literalCore (LHE.Int i) = fmap var $ intWrapper i
-literalCore (LHE.Char c) = fmap var $ charWrapper c
-literalCore (LHE.String s) = mapM (literalCore . LHE.Char) s >>= list
+literalCore (LHE.Char c) = charCore c
+literalCore (LHE.String s) = stringCore s
 
 altCore :: LHE.Alt -> ParseM Alt
 altCore (LHE.Alt _loc pat (LHE.UnGuardedAlt e) (LHE.BDecls binds)) = do
@@ -197,7 +204,7 @@ dataAlt dcon (names, _bound_ns, build) = (DataAlt dcon names, build)
 listCompCore :: LHE.Exp -> [LHE.Stmt] -> ParseM Term
 listCompCore e_inner stmts = go stmts
   where
-    go [] = expCore e_inner >>= \e_inner -> list [e_inner]
+    go [] = expCore e_inner >>= \e_inner -> listCore [e_inner]
     go (stmt:stmts) = case stmt of
         -- concatMap (\pat -> [[go stmts]]) e
         LHE.Generator _loc pat e -> do
@@ -206,7 +213,7 @@ listCompCore e_inner stmts = go stmts
             arg2 <- expCore e
             var (name "concatMap") `appE` arg1 >>= (`appE` arg2)
         -- if e then [[go stmts]] else []
-        LHE.Qualifier e -> liftM3 if_ (expCore e) (go stmts) (list [])
+        LHE.Qualifier e -> liftM3 if_ (expCore e) (go stmts) (listCore [])
         -- let [[binds]] in [[go stmts]]
         LHE.LetStmt (LHE.BDecls binds) -> liftM2 bind (declsCore binds) (go stmts)
 
@@ -275,26 +282,35 @@ bind :: [(Var, Term)] -> Term -> Term
 bind = letRecSmart
 
 scrutinise :: Term -> [(AltCon, Term)] -> Term
-scrutinise e alts = case_ e (expanded_alts `orElse` alts)
+scrutinise e alts = case_ e expanded_alts
   where
-    expanded_alts :: Maybe [(AltCon, Term)]
-    expanded_alts = do
-        guard eXPAND_CASE
-        
+    expanded_alts :: [(AltCon, Term)]
+    expanded_alts = fromMaybe alts $ do
         -- We can only expand cases if we can guess the other members of the family (we have no type information)
         let covered_dcs = [dc | (DataAlt dc _xs, _e) <- alts]
         siblings <- listToMaybe $ map dataConSiblings covered_dcs
+        let uncovered_siblings = [ (dc, xs)
+                                 | (dc, arity) <- siblings
+                                 , dc `notElem` covered_dcs
+                                   -- We replace the arity with a list of names to which to bind the sibling.
+                                   -- NB: use supply of totally fresh names to avoid introducing shadowing
+                                 , let xs = snd $ freshNames expandIdSupply (replicate arity "xpand")
+                                 ]
         
-        -- We should only bother expanding cases with default alternatives
         let (def_alts, other_alts) = extractJusts (\alt -> do { (DefaultAlt mb_x, e) <- Just alt; return (mb_x, e) }) alts
-            uncovered_siblings = filter (\(sibling_dc, _) -> sibling_dc `notElem` covered_dcs) siblings
-        (def_mb_x, def_e) <- listToMaybe def_alts
-        
-        return $ other_alts ++ [ (DataAlt uncovered_dc uncovered_xs,
-                                  bind [ (x, data_ uncovered_dc uncovered_xs)
-                                       | Just x <- [def_mb_x]
-                                       ] def_e)
-                               | (uncovered_dc, uncovered_arity) <- uncovered_siblings
-                                 -- NB: use supply of totally fresh names to avoid introducing shadowing
-                               , let uncovered_xs = snd $ freshNames expandIdSupply (replicate uncovered_arity "xpand")
-                               ]
+        fmap (other_alts ++) $ case def_alts of
+            -- We only need to expand defaults if we have a default (which also means that everything is covered)
+            [(def_mb_x, def_e)] | eXPAND_CASE_DEFAULTS
+              -> return [ (DataAlt uncovered_dc uncovered_xs,
+                           bind [ (x, data_ uncovered_dc uncovered_xs)
+                                | Just x <- [def_mb_x]
+                                ] def_e)
+                        | (uncovered_dc, uncovered_xs) <- uncovered_siblings
+                        ]
+            -- We only need to expand uncovereds if we don't have a default (and even then we might find that the case is exhaustive)
+            [] | eXPAND_CASE_UNCOVEREDS
+              -> return [ (DataAlt uncovered_dc uncovered_xs, var (name "uncoveredBranch"))
+                        | (uncovered_dc, uncovered_xs) <- uncovered_siblings
+                        ]
+            -- Nothing needs to be expanded in any other case
+            _ -> Nothing

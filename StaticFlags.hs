@@ -128,6 +128,11 @@ sTEP_GARBAGE_COLLECTION = not $ "--no-step-gc" `elem` unsafePerformIO getArgs
 sC_ROLLBACK :: Bool
 sC_ROLLBACK = not $ "--no-sc-rollback" `elem` unsafePerformIO getArgs
 
-{-# NOINLINE eXPAND_CASE #-}
-eXPAND_CASE :: Bool
-eXPAND_CASE = "--expand-case" `elem` unsafePerformIO getArgs
+{-# NOINLINE eXPAND_CASE_DEFAULTS #-}
+eXPAND_CASE_DEFAULTS :: Bool
+eXPAND_CASE_DEFAULTS = "--expand-case-defaults" `elem` unsafePerformIO getArgs
+
+{-# NOINLINE eXPAND_CASE_UNCOVEREDS #-}
+eXPAND_CASE_UNCOVEREDS :: Bool
+eXPAND_CASE_UNCOVEREDS = "--expand-case-uncovereds" `elem` unsafePerformIO getArgs
+
