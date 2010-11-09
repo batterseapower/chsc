@@ -175,10 +175,11 @@ isValue _         = False
 termIsValue :: Term -> Bool
 termIsValue = isValue . unI
 
-isCheap :: TermF ann -> Bool
-isCheap (Var _)   = True
-isCheap (Value _) = True
-isCheap _         = False
+isCheap :: Copointed ann => TermF ann -> Bool
+isCheap (Var _)     = True
+isCheap (Value _)   = True
+isCheap (Case e []) = isCheap (extract e) -- NB: important for pushing down let-bound applications of ``error''
+isCheap _           = False
 
 termIsCheap :: Term -> Bool
 termIsCheap = isCheap . unI
