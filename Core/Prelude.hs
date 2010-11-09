@@ -1,5 +1,6 @@
 module Core.Prelude where
 
+import Core.Data
 import Core.Syntax
 
 import Utilities

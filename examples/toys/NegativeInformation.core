@@ -1,0 +1,7 @@
+root x = case x of True -> case x of True -> False; False -> True
+                   _    -> case x of True -> True; False -> False
+
+tests = [
+    (root True,  False),
+    (root False, False)
+  ]

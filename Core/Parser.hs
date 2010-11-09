@@ -1,6 +1,7 @@
 {-# LANGUAGE PatternGuards, TupleSections, ViewPatterns #-}
 module Core.Parser (parse) where
 
+import Core.Data
 import Core.Syntax
 import Core.Prelude
 
@@ -62,37 +63,7 @@ buildWrappers ps
     | (c, f) <- M.toList (charWrappers ps) ] ++
     [ (f, lam (name "x1") $ lam (name "x2") $ primOp pop [var (name "x1"), var (name "x2")])
     | (pop, f) <- M.toList (primWrappers ps) ] ++
-    [ (name "error", lam (name "msg") $ case_ (var (name "prelude_error") `app` name "msg") []) ]
-  where
-    dataConArity :: String -> Int
-    dataConArity "()"      = 0
-    dataConArity "(,)"     = 2
-    dataConArity "(,,)"    = 3
-    dataConArity "(,,,)"   = 4
-    dataConArity "[]"      = 0
-    dataConArity "(:)"     = 2
-    dataConArity "Left"    = 1
-    dataConArity "Right"   = 1
-    dataConArity "True"    = 0
-    dataConArity "False"   = 0
-    dataConArity "Just"    = 1
-    dataConArity "Nothing" = 0
-    dataConArity "MkU"     = 1 -- GHCBug
-    dataConArity "Z"       = 0 -- Exp3_8
-    dataConArity "S"       = 1 -- Exp3_8
-    dataConArity "Leaf"    = 1 -- SumTree
-    dataConArity "Branch"  = 2 -- SumTree
-    dataConArity "Empty"   = 0 -- ZipTreeMaps
-    dataConArity "Node"    = 3 -- ZipTreeMaps
-    dataConArity "Wheel1"  = 2 -- Wheel-Sieve1
-    dataConArity "Wheel2"  = 3 -- Wheel-Sieve2
-    dataConArity "A"       = 0 -- KMP
-    dataConArity "B"       = 0 -- KMP
-    dataConArity "H"       = 0 -- Paraffins
-    dataConArity "C"       = 3 -- Paraffins
-    dataConArity "BCP"     = 2 -- Paraffins
-    dataConArity "CCP"     = 4 -- Paraffins
-    dataConArity s = panic "dataConArity" (text s)
+    [ (name "error", lam (name "msg") $ scrutinise (var (name "prelude_error") `app` name "msg") []) ]
 
 newtype ParseM a = ParseM { unParseM :: ParseState -> (ParseState, a) }
 
@@ -179,7 +150,7 @@ expCore (LHE.Let (LHE.BDecls binds) e) = do
     xes <- declsCore binds
     fmap (bind xes) $ expCore e
 expCore (LHE.If e1 e2 e3) = expCore e1 >>= \e1 -> liftM2 (if_ e1) (expCore e2) (expCore e3)
-expCore (LHE.Case e alts) = expCore e >>= \e -> fmap (case_ e) (mapM altCore alts)
+expCore (LHE.Case e alts) = expCore e >>= \e -> fmap (scrutinise e) (mapM altCore alts)
 expCore (LHE.Tuple es) = mapM expCore es >>= flip nameThem (return . tuple)
 expCore (LHE.Paren e) = expCore e
 expCore (LHE.List es) = mapM expCore es >>= list
@@ -292,13 +263,38 @@ patCore (LHE.PInfixApp p1 qinfix p2) = do
     n' <- freshName "infx"
     (n1', bound_ns1, build1) <- patCore p1
     (n2', bound_ns2, build2) <- patCore p2
-    return (n', bound_ns1 ++ bound_ns2, \e -> case_ (var n') [(DataAlt (qNameDataCon qinfix) [n1', n2'], build1 (build2 e))])
+    return (n', bound_ns1 ++ bound_ns2, \e -> scrutinise (var n') [(DataAlt (qNameDataCon qinfix) [n1', n2'], build1 (build2 e))])
 patCore p = panic "patCore" (text $ show p)
 
 tuplePatCore :: DataCon -> [LHE.Pat] -> ParseM (Var, [Var], Term -> Term)
 tuplePatCore dc ps = do
     (ns', bound_ns', build) <- patCores ps
-    freshName "tup" >>= \n' -> return (n', bound_ns', \e -> case_ (var n') [(DataAlt dc ns', build e)])
+    freshName "tup" >>= \n' -> return (n', bound_ns', \e -> scrutinise (var n') [(DataAlt dc ns', build e)])
 
 bind :: [(Var, Term)] -> Term -> Term
 bind = letRecSmart
+
+scrutinise :: Term -> [(AltCon, Term)] -> Term
+scrutinise e alts = case_ e (expanded_alts `orElse` alts)
+  where
+    expanded_alts :: Maybe [(AltCon, Term)]
+    expanded_alts = do
+        guard eXPAND_CASE
+        
+        -- We can only expand cases if we can guess the other members of the family (we have no type information)
+        let covered_dcs = [dc | (DataAlt dc _xs, _e) <- alts]
+        siblings <- listToMaybe $ map dataConSiblings covered_dcs
+        
+        -- We should only bother expanding cases with default alternatives
+        let (def_alts, other_alts) = extractJusts (\alt -> do { (DefaultAlt mb_x, e) <- Just alt; return (mb_x, e) }) alts
+            uncovered_siblings = filter (\(sibling_dc, _) -> sibling_dc `notElem` covered_dcs) siblings
+        (def_mb_x, def_e) <- listToMaybe def_alts
+        
+        return $ other_alts ++ [ (DataAlt uncovered_dc uncovered_xs,
+                                  bind [ (x, data_ uncovered_dc uncovered_xs)
+                                       | Just x <- [def_mb_x]
+                                       ] def_e)
+                               | (uncovered_dc, uncovered_arity) <- uncovered_siblings
+                                 -- NB: use supply of totally fresh names to avoid introducing shadowing
+                               , let uncovered_xs = snd $ freshNames expandIdSupply (replicate uncovered_arity "xpand")
+                               ]

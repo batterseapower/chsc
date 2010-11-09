@@ -127,3 +127,7 @@ sTEP_GARBAGE_COLLECTION = not $ "--no-step-gc" `elem` unsafePerformIO getArgs
 {-# NOINLINE sC_ROLLBACK #-}
 sC_ROLLBACK :: Bool
 sC_ROLLBACK = not $ "--no-sc-rollback" `elem` unsafePerformIO getArgs
+
+{-# NOINLINE eXPAND_CASE #-}
+eXPAND_CASE :: Bool
+eXPAND_CASE = "--expand-case" `elem` unsafePerformIO getArgs

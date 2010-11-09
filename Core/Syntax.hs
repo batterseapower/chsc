@@ -1,6 +1,8 @@
 {-# LANGUAGE PatternGuards, ViewPatterns, TypeSynonymInstances, FlexibleInstances, Rank2Types, NoMonoPatBinds, NoMonomorphismRestriction #-}
 module Core.Syntax where
 
+import Core.Data (DataCon)
+
 import Name
 import Utilities
 
@@ -9,8 +11,6 @@ import Data.Monoid (Sum(..))
 
 
 type Var = Name
-
-type DataCon = String
 
 data PrimOp = Add | Subtract | Multiply | Divide | Modulo | Equal | LessThan | LessThanEqual
             deriving (Eq, Ord, Show)

@@ -284,6 +284,10 @@ combineIntMaps l r both im1 im2 = IM.map (finishCombining l r both) $ IM.interse
 parseIdSupply :: IdSupply
 parseIdSupply = unsafePerformIO $ initIdSupply 'a'
 
+{-# NOINLINE expandIdSupply #-}
+expandIdSupply :: IdSupply
+expandIdSupply = unsafePerformIO $ initIdSupply 'e'
+
 {-# NOINLINE reduceIdSupply #-}
 reduceIdSupply :: IdSupply
 reduceIdSupply = unsafePerformIO $ initIdSupply 'u'
@@ -487,10 +491,17 @@ takeFirst :: (a -> Bool) -> [a] -> (Maybe a, [a])
 takeFirst p = takeFirstJust (\x -> guard (p x) >> return x)
 
 takeFirstJust :: (a -> Maybe b) -> [a] -> (Maybe b, [a])
-takeFirstJust _ [] = (Nothing, [])
-takeFirstJust p (x:xs)
-  | Just y <- p x = (Just y, xs)
-  | otherwise     = second (x:) $ takeFirstJust p xs
+takeFirstJust p = go
+  where
+    go [] = (Nothing, [])
+    go (x:xs)
+      | Just y <- p x = (Just y, xs)
+      | otherwise     = second (x:) $ go xs
+
+extractJusts :: (a -> Maybe b) -> [a] -> ([b], [a])
+extractJusts p = foldr step ([], [])
+  where step x rest | Just y <- p x = first  (y:) rest
+                    | otherwise     = second (x:) rest
 
 expectJust :: String -> Maybe a -> a
 expectJust _ (Just x) = x
