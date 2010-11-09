@@ -136,3 +136,6 @@ eXPAND_CASE_DEFAULTS = "--expand-case-defaults" `elem` unsafePerformIO getArgs
 eXPAND_CASE_UNCOVEREDS :: Bool
 eXPAND_CASE_UNCOVEREDS = "--expand-case-uncovereds" `elem` unsafePerformIO getArgs
 
+{-# NOINLINE cALL_BY_NAME #-}
+cALL_BY_NAME :: Bool
+cALL_BY_NAME = "--call-by-name" `elem` unsafePerformIO getArgs

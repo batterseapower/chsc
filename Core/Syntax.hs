@@ -176,6 +176,7 @@ termIsValue :: Term -> Bool
 termIsValue = isValue . unI
 
 isCheap :: Copointed ann => TermF ann -> Bool
+isCheap _ | cALL_BY_NAME = True -- A cunning hack. I think this is all that should be required...
 isCheap (Var _)     = True
 isCheap (Value _)   = True
 isCheap (Case e []) = isCheap (extract e) -- NB: important for pushing down let-bound applications of ``error''
