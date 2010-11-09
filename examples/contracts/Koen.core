@@ -1,0 +1,20 @@
+sameLength xs ys = case xs of
+                     [] -> case ys of
+                             [] -> True
+                             b:bs -> False
+                     a:as -> case ys of
+                               [] -> False
+                               b:bs -> sameLength as bs
+
+zipp xs ys = case xs of
+                     [] -> case ys of
+                             [] -> []
+                     a:as -> case ys of
+                               b:bs -> (a,b) : zipp as bs
+
+zipp_wrap xs ys = zipp xs (case sameLength xs ys of True -> ys; False -> error "UNR")
+
+root = zipp_wrap
+
+tests = [ (zipp_wrap [1,2,3] [4,5,6], zipp [1,2,3] [4,5,6]) ]
+
