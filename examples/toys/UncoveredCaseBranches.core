@@ -1,0 +1,5 @@
+root x = case x of True -> False
+
+tests = [
+    (root True, False)
+  ]
