@@ -1,0 +1,101 @@
+sameLength xs ys = case xs of
+                     [] -> case ys of
+                             [] -> True
+                             b:bs -> False
+                     a:as -> case ys of
+                               [] -> False
+                               b:bs -> sameLength as bs
+
+zip xs ys = case xs of
+                     [] -> case ys of
+                             [] -> []
+                     a:as -> case ys of
+                               b:bs -> (a,b) : zip as bs
+
+zip_wrap xs ys = zip xs (case sameLength xs ys of True -> ys; False -> error "UNR")
+
+root = zip_wrap
+
+tests = [ (zip_wrap [1,2,3] [4,5,6], zip [1,2,3] [4,5,6]) ]
+
+{-
+
+h0 xs ys = zipp xs (case sameLength xs ys of True -> ys; False -> error "UNR")
+         => case xs of
+              []   -> h1 ys = case (case sameLength [] ys of True -> ys; False -> error "UNR") of
+                                [] -> []
+                            => case (case (case ys of
+                                             [] -> True
+                                             b:bs -> False) of True -> ys; False -> error "UNR") of
+                                 [] -> []
+                            => case ys of
+                                 []   -> h2 = case (case True of True  -> []; False -> error "UNR") of [] -> []
+                                            => []
+                                 b:bs -> h3 b bs = case (case False of True -> b:bs; False -> error "UNR") of [] -> []
+                                                 => error "UNR"
+              a:as -> h4 a as ys = case (case sameLength (a:as) ys of True -> ys; False -> error "UNR") of
+                                     b:bs -> (a,b) : zipp as bs
+                                 => case (case (case ys of [] -> False
+                                                           b:bs -> sameLength as bs) of True -> ys; False -> error "UNR") of
+                                      b:bs -> (a,b) : zipp as bs
+                                 => case ys of [] -> h5 a as = case (case False of True -> []; False -> error "UNR") of
+                                                                 b:bs -> (a,b) : zipp as bs
+                                                             => case (error "UNR") of
+                                                                  b:bs -> (a,b) : zipp as bs
+                                                             => error "UNR"
+                                               b:bs -> h6 a as b bs = ... ctd at left margin ...
+
+-- NB: I renamed the as and bs variables at this point for convenience
+h6 a xs b ys = case (case sameLength xs ys of True -> b:ys; False -> error "UNR") of
+                 b:ys -> (a,b) : zipp xs ys
+             => case (case sameLength xs ys of True -> b:ys; False -> error "UNR") of
+                  b:ys -> (a,b) : zipp xs ys
+             => case (case (case xs of
+                              [] -> case ys of
+                                      [] -> True
+                                      b:bs -> False
+                              a:as -> case ys of
+                                        [] -> False
+                                        b:bs -> sameLength as bs) of True -> b:ys; False -> error "UNR") of
+                  b:ys -> (a,b) : zipp xs ys
+             => case xs of
+                  [] -> h7 a b ys = case (case (case ys of
+                                                  [] -> True
+                                                  b:bs -> False) of True -> b:ys; False -> error "UNR") of
+                                      b:ys -> (a,b) : zipp [] ys
+                                  => case ys of
+                                       [] -> h8 a xs b = case (case True of True -> b:[]; False -> error "UNR") of
+                                                           b:ys -> (a,b) : zipp [] []
+                                                       => (a,b) : zipp [] []
+                                                       => (a,b) : []
+                                       b':bs -> h9 a xs b b' bs = case (case False of True -> b:b':bs; False -> error "UNR") of
+                                                                    b:ys -> (a,b) : zipp xs (b':bs)
+                                                                => error "UNR"
+                  a':as -> h10 a a' as b ys = case (case (case ys of
+                                                            [] -> False
+                                                            b:bs -> sameLength as bs) of True -> b:ys; False -> error "UNR") of
+                                                b:ys -> (a,b) : zipp (a':as) ys
+                                            => case ys of
+                                                 [] -> h11 a a' as b = case (case False of True -> b:[]; False -> error "UNR") of
+                                                                         b:ys -> (a,b) : zipp (a':as) []
+                                                                     => error "UNR"
+                                                 b':bs -> h12 a a' as b b' bs = ... ctd at left margin ...
+
+-- NB: I renamed as and bs again
+h12 a a' xs b b' ys = case (case sameLength xs ys of True -> b:b':ys; False -> error "UNR") of
+                        b:ys -> (a,b) : zipp (a':xs) ys
+
+-- Now we are here, it is clear what the problem is. We are generating one specialisation of zipp_wrap for each possible length of
+-- the twin lists passed in. There is no bound to this number, so the specialisation process will not terminate. Drat!
+--
+-- This happens because every time we unwrap sameLength we gain knowledge about another layer of the input lists, which accumulates
+-- as we get deeper into the list (we can never throw it away because we don't actually pattern match on it until we evaluate the
+-- thing in the outermost case -- the zipp call.. its kind of a space leak thing?).
+
+-- Interestingly, we could tie back at h12 if we REALLY smart about matching (NB: in reality would probably tie back a bit earlier?):
+--  h12 a a' xs b b' ys = h6 a (a':xs) b (b':ys)
+-- Note that making this tieback requires us to spot that:
+--  sameLength xs ys <==> sameLength (a':xs) (b':ys)
+-- This is hardly realistic! But if we could do it we would close the loop and would prove the proposition.
+
+-}

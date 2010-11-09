@@ -1,0 +1,23 @@
+sameLength xs ys = case xs of
+    []     -> case ys of []     -> True
+                         (_:_)  -> False
+    (_:as) -> case ys of []     -> False
+                         (_:bs) -> sameLength as bs
+
+-- idList : xs -> {rs | sameLength xs rs}
+idList_rec idList xs = case xs of
+   []   -> []
+   y:ys -> y:idList ys
+
+idList_check idList xs
+  = let rs = idList_rec idList_ok xs
+    in case sameLength xs rs of True -> rs
+  where idList_ok xs = if sameLength xs rs then rs else error "UNR"
+          where rs = idList xs
+
+root = idList_check
+
+tests = [
+    (idList [1, 2], [1, 2])
+  ]
+  where idList = root idList

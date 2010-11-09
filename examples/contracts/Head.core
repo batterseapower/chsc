@@ -1,0 +1,18 @@
+null xs = case xs of
+            _:_ -> False
+            []  -> True
+
+not b = if b then False else True
+
+-- head : {xs | not (null xs)} -> Ok
+head xs = case xs of y:_ -> y
+
+head_check xs = head (case not (null xs) of
+                        True  -> xs
+                        False -> error "UNR")
+
+root = head_check
+
+tests = [
+    (root [1], 1)
+  ]
