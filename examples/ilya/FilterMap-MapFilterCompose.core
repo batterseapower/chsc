@@ -7,5 +7,5 @@ filter p = foldr (\x xs -> if p x then x : xs else xs) []
 root p f xs = (filter p (map f xs), map f (filter (p . f) xs))
 
 tests = [
-    (root (> 2) (+1) [1, 2, 3, 4], ([3, 4, 5], [3, 4, 5]))
+    (root (<= 2) (+1) [1, 2, 3, 4], ([2], [2]))
   ]
