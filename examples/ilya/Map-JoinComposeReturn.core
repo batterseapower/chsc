@@ -1,0 +1,11 @@
+foldr c n xs = case xs of [] -> n; (y:ys) -> c y (foldr c n ys)
+map f = foldr [] (\x xs -> f x : xs)
+(.) f g x = f (g x)
+return x = [x]
+join m k = foldr [] (append . k) m
+
+root f xs = (map f xs, join xs (return . f))
+
+tests = [
+    (root (+1) [1, 2, 3], ([2, 3, 4], [2, 3, 4]))
+  ]

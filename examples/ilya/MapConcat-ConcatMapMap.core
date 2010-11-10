@@ -1,0 +1,10 @@
+foldr c n xs = case xs of [] -> n; (y:ys) -> c y (foldr c n ys)
+(++) xs ys = foldr ys (:) xs
+concat = foldr [] (++)
+map f = foldr [] (\x xs -> f x : xs)
+
+root f xs = (map f (concat xs), concat (map (map f) xs))
+
+tests = [
+    (root (+1), [[1, 2], [3, 4]], ([2, 3, 4, 5], [2, 3, 4, 5]))
+  ]

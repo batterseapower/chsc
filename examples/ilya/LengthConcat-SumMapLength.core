@@ -1,0 +1,12 @@
+foldr c n xs = case xs of [] -> n; (y:ys) -> c y (foldr c n ys)
+length = foldr Z (\_ -> S)
+(++) xs ys = foldr ys (:) xs
+concat xs = foldr [] (++)
+plus n m = case n of Z -> m; S o -> S (plus o m)
+sum = foldr Z plus
+
+root xs = (length (concat xs), sum (map length xs))
+
+tests = [
+    (root ["A", "BC"], (S (S (S Z)), S (S (S Z))))
+  ]
