@@ -9,11 +9,17 @@ idList_rec idList xs = case xs of
    []   -> []
    y:ys -> y:idList ys
 
+-- Programatically generated version:
+-- idList_check idList xs
+--   = let rs = idList_rec idList_ok xs
+--     in case sameLength xs rs of True -> rs
+--   where idList_ok xs = if sameLength xs rs then rs else error "UNR"
+--           where rs = idList xs
+
+-- An example with less work sharing but exactly the same issues:
 idList_check idList xs
-  = let rs = idList_rec idList_ok xs
-    in case sameLength xs rs of True -> rs
-  where idList_ok xs = if sameLength xs rs then rs else error "UNR"
-          where rs = idList xs
+  = case sameLength xs (idList_rec idList_ok xs) of True -> idList_rec idList_ok xs
+  where idList_ok xs = if sameLength xs (idList xs) then idList xs else error "UNR"
 
 root = idList_check
 
@@ -21,3 +27,138 @@ tests = [
     (idList [1, 2], [1, 2])
   ]
   where idList = root idList
+
+{-
+
+-- Here is why this doesn't work. First, the above program in g-function form:
+
+sameLength xs ys = case xs of
+    []     -> case ys of []     -> True
+                         (_:_)  -> False
+    (_:as) -> case ys of []     -> False
+                         (_:bs) -> sameLength as bs
+
+sameLength []     ys = sameLengthNil ys
+sameLength (_:as) ys = sameLengthCons as ys
+
+sameLengthNil []    = True
+sameLengthNil (_:_) = False
+
+sameLengthCons as []     = False
+sameLengthCons as (_:bs) = sameLength as bs
+
+idList_rec idList []     = []
+idList_rec idList (y:ys) = y:idList ys
+
+idList_ok idList xs = let rs_ok = idList xs in if sameLength xs rs_ok then rs_ok else error "UNR"
+
+idList_check idList xs
+  = let rs_rec = idList_rec (idList_ok idList) xs
+    in case sameLength xs rs_rec of True -> rs_rec
+
+-- Now the drive sequence:
+
+h0 idList xs = let rs_rec = idList_rec (idList_ok idList) xs
+               in case sameLength xs rs_rec of True -> rs_rec
+             => case xs of
+                  [] -> h1 idList = let rs_rec = idList_rec (idList_ok idList) []
+                                    in case sameLength [] rs_rec of True -> rs_rec
+                                  => []
+                  (a:as) -> h2 idList a as = let rs_rec = idList_rec (idList_ok idList) (a:as)
+                                             in case sameLength (a:as) rs_rec of True -> rs_rec
+                                           => let rs_rec = a : idList_ok idList as
+                                              in case sameLengthCons as rs_rec of True -> rs_rec
+                                           => let rs_rec1 = idList_ok idList as
+                                              in case sameLength as rs_rec1 of True -> a:rs_rec1
+                                           => case as of
+                                                [] -> h3 idList a = let rs_rec1 = idList_ok idList []
+                                                                    in case sameLength [] rs_rec1 of True -> a:rs_rec1
+                                                                  => let rs_rec1 = let rs_ok = idList [] in if sameLength [] rs_ok then rs_ok else error "UNR"
+                                                                     in case sameLengthNil rs_rec1 of True -> a:rs_rec1
+                                                                  => a:[]
+                                                (a1:as1) -> h4 idList a a1 as1 = let rs_rec1 = idList_ok idList (a1:as1)
+                                                                                 in case sameLength (a1:as1) rs_rec1 of True -> a:rs_rec1
+                                                                               => let rs_rec1 = let rs_ok = idList (a1:as1) in if sameLength (a1:as1) rs_ok then rs_ok else error "UNR"
+                                                                                  in case sameLengthCons as1 rs_rec1 of True -> a:rs_rec1
+                                                                               => let rs_rec1 = let rs_ok2 = idList as1 in if sameLength as1 rs_ok2 then (a1:rs_ok2) else error "UNR"
+                                                                                  in case sameLengthCons as1 rs_rec1 of True -> a:rs_rec1
+                                                                               => case as1 of
+                                                                                    [] -> h5 idList a a1 = let rs_rec1 = let rs_ok2 = idList [] in if sameLength [] rs_ok2 then (a1:rs_ok2) else error "UNR"
+                                                                                                           in case sameLengthCons [] rs_rec1 of True -> a:rs_rec1
+                                                                                                         => a:a1:[]
+                                                                                    (a2:as2) -> h6 idList a a1 a2 as2 = let rs_rec1 = let rs_ok2 = idList (a2:as2) in if sameLength (a2:as2) rs_ok2 then (a1:rs_ok2) else error "UNR"
+                                                                                                                        in case sameLengthCons (a2:as2) rs_rec1 of True -> a:rs_rec1
+                                                                                                                      => let rs_rec1 = let rs_ok3 = idList as2 in if sameLength as2 rs_ok3 then (a1:a2:rs_ok3) else error "UNR"
+                                                                                                                         in case sameLengthCons (a2:as2) rs_rec1 of True -> a:rs_rec1
+                                                                                                                      => case as2 of
+                                                                                                                           [] -> h7 idList a a1 a2 = ...
+                                                                                                                           (a3:as3) -> h8 idList a a1 a2 a3 as3 = let rs_rec1 = let rs_ok3 = idList (a3:as3) in if sameLength (a3:as3) rs_ok3 then (a1:a2:rs_ok3) else error "UNR"
+                                                                                                                                                                  in case sameLengthCons (a2:a3:as3) rs_rec1 of True -> a:rs_rec1
+
+-- Interesting stuff. You can see that we don't get tieback due to growing things:
+-- Zeroeth time around (ish, this is a bit of a lie as the zeroeth time we haven't unfolded idList_ok yet):
+let rs_rec1 = let rs_ok = idList (a1:as1) in if sameLength (a1:as1) rs_ok then rs_ok else error "UNR"
+in case sameLengthCons as1 rs_rec1 of True -> a:rs_rec1
+
+-- First time around:
+let rs_rec1 = let rs_ok2 = idList (a2:as2) in if sameLength (a2:as2) rs_ok2 then (a1:rs_ok2) else error "UNR"
+in case sameLengthCons (a2:as2) rs_rec1 of True -> a:rs_rec1
+
+-- Second time around: 
+let rs_rec1 = let rs_ok3 = idList (a3:as3) in if sameLength (a3:as3) rs_ok3 then (a1:a2:rs_ok3) else error "UNR"
+in case sameLengthCons (a2:a3:as3) rs_rec1 of True -> a:rs_rec1
+
+
+-- The same thing, without let:
+-- Zeroeth time around (ish, this is a bit of a lie as the zeroeth time we haven't unfolded idList_ok yet):
+case sameLengthCons as1         (if sameLength (a1:as1) (idList (a1:as1)) then idList (a1:as1)         else error "UNR") of
+  True -> a:if sameLength (a1:as1) (idList (a1:as1)) then idList (a1:as1)         else error "UNR"
+
+-- First time around:
+case sameLengthCons (a2:as2)    (if sameLength (a2:as2) (idList (a2:as2)) then (a1:idList (a2:as2))    else error "UNR") of
+  True -> a:if sameLength (a2:as2) (idList (a2:as2)) then (a1:idList (a2:as2))    else error "UNR"
+
+-- Second time around: 
+case sameLengthCons (a2:a3:as3) (if sameLength (a3:as3) (idList (a3:as3)) then (a1:a2:idList (a3:as3)) else error "UNR") of
+  True -> a:if sameLength (a3:as3) (idList (a3:as3)) then (a1:a2:idList (a3:as3)) else error "UNR"
+
+
+-- Voightlander story:
+let rs_rec1 = let rs_ok = idList (a1:as1) in if sameLength (a1:as1) rs_ok then rs_ok else error "UNR"
+in case sameLengthCons as1 rs_rec1 of True -> a:rs_rec1
+
+-- 1) Generalise:
+gen1 = rs_ok
+gen2 = as1
+
+let rs_rec1 = let rs_ok = idList (a1:as1) in if sameLength (a1:as1) rs_ok then gen1 else error "UNR"
+in case sameLengthCons gen2 rs_rec1 of True -> a:rs_rec1
+
+-- 2) Evaluate:
+let rs_rec1 = let rs_ok1 = idList as1 in if sameLength as1 rs_ok1 then a1:gen1 else error "UNR"
+in case sameLengthCons gen2 rs_rec1 of True -> a:rs_rec1
+
+-- 3) We are stuck, so case split on as1:
+-- 3a) Evaluate nil case normally
+=> case sameLengthCons gen2 (a1:gen1) of True -> a:a1:gen1
+=> case sameLength gen2 gen1 of True -> a:a1:gen1
+
+-- 3ai) Generate gen2 based float
+case sameLength <_> gen1 of True -> a:a1:gen1
+
+-- 3b) Generalise the cons case
+gen1' = a1:gen1
+
+let rs_rec1 = let rs_ok1 = idList (a2:as2) in if sameLength (a2:as2) rs_ok1 then gen1' else error "UNR"
+in case sameLengthCons gen2 rs_rec1 of True -> a:rs_rec1
+
+-- 3bi) Tie back to the generalised verson, with:
+gen2 = gen2
+gen1 = gen1'
+a1 = a2
+as1 = as2
+
+-- 3bii) Expand float:
+case sameLength gen2 (a1:gen1) of True -> a:a2:gen1'
+??? seems wrong
+-}
