@@ -56,20 +56,24 @@ plusLivenesses = joins
 whyLive :: Out Var -> Liveness -> Maybe WhyLive
 whyLive x' live = x' `M.lookup` unLiveness live
 
-keepAlive :: Maybe WhyLive -> Out Var -> In AnnedTerm -> PureHeap -> PureHeap
-keepAlive Nothing             _  _    h = h
-keepAlive (Just PhantomLive)  x' in_e h = M.insert x' (Phantom in_e) h
-keepAlive (Just ConcreteLive) x' in_e h = M.insert x' (Concrete in_e) h
+keepAlive :: Maybe WhyLive -> Out Var -> ConcreteHeapBinding -> PureHeap -> PureHeap
+keepAlive Nothing             _  _   h = h
+keepAlive (Just PhantomLive)  x' chb h = M.insert x' (Phantom (concreteHeapBindingTerm chb)) h
+keepAlive (Just ConcreteLive) x' chb h = M.insert x' (Concrete chb) h
 
 
 inFreeVars :: (a -> FreeVars) -> In a -> FreeVars
 inFreeVars thing_fvs (rn, thing) = renameFreeVars rn (thing_fvs thing)
 
+concreteHeapBindingFreeVars :: ConcreteHeapBinding -> FreeVars
+concreteHeapBindingFreeVars (Above in_v) = inFreeVars annedValueFreeVars in_v
+concreteHeapBindingFreeVars (Here  in_e) = inFreeVars annedTermFreeVars in_e
+
 heapBindingLiveness :: HeapBinding -> Liveness
 heapBindingLiveness Environmental   = emptyLiveness
 heapBindingLiveness (Updated _ fvs) = mkPhantomLiveness fvs
 heapBindingLiveness (Phantom in_e)  = mkPhantomLiveness  (inFreeVars annedTermFreeVars in_e)
-heapBindingLiveness (Concrete in_e) = mkConcreteLiveness (inFreeVars annedTermFreeVars in_e)
+heapBindingLiveness (Concrete chb)  = mkConcreteLiveness (concreteHeapBindingFreeVars chb)
 
 pureHeapOpenLiveness :: PureHeap -> (BoundVars, FreeVars) -> (BoundVars, Liveness)
 pureHeapOpenLiveness h (bvs, fvs) = M.foldWithKey (\x' hb (bvs, fvs) -> (S.insert x' bvs, fvs `plusLiveness` heapBindingLiveness hb)) (bvs, mkConcreteLiveness fvs) h
@@ -79,7 +83,7 @@ pureHeapFreeVars h (bvs, fvs) = fvs' S.\\ bvs_static' S.\\ bvs_nonstatic'
   where ((bvs_static', bvs_nonstatic'), fvs') = pureHeapOpenFreeVars h (bvs, fvs)
 
 pureHeapOpenFreeVars :: PureHeap -> (BoundVars, FreeVars) -> ((BoundVars, BoundVars), FreeVars)
-pureHeapOpenFreeVars h (bvs, fvs) = M.foldWithKey (\x' hb ((bvs_static, bvs_nonstatic), fvs) -> case hb of Concrete in_e -> ((bvs_static, S.insert x' bvs_nonstatic), fvs `S.union` inFreeVars annedTermFreeVars in_e); _ -> ((S.insert x' bvs_static, bvs_nonstatic), fvs)) ((S.empty, bvs), fvs) h
+pureHeapOpenFreeVars h (bvs, fvs) = M.foldWithKey (\x' hb ((bvs_static, bvs_nonstatic), fvs) -> case hb of Concrete (Here in_e) -> ((bvs_static, S.insert x' bvs_nonstatic), fvs `S.union` inFreeVars annedTermFreeVars in_e); _ -> ((S.insert x' bvs_static, bvs_nonstatic), fvs)) ((S.empty, bvs), fvs) h
 
 stackFreeVars :: Stack -> FreeVars -> (BoundVars, FreeVars)
 stackFreeVars k fvs = (S.unions *** (S.union fvs . S.unions)) . unzip . map stackFrameFreeVars $ k

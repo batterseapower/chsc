@@ -165,7 +165,9 @@ data Promise = P {
 
 instance MonadStatics ScpM where
      -- NB: it's important we still use bindFloats if (not lOCAL_TIEBACKS) because h functions are static
-    bindCapturedFloats extra_statics mx = bindFloats (any (\x -> x `S.member` extra_statics) . lexical) mx
+     -- FIXME: static floats are getting bound way too early. We should check extra_statics against the *final* lexical variables (if available)
+    bindCapturedFloats extra_statics mx = traceRender ("bindCapturedFloats", extra_statics) $
+                                          bindFloats (any (\x -> x `S.member` extra_statics) . lexical) mx
 
 -- NB: be careful of this subtle problem:
 --
@@ -293,7 +295,7 @@ memo opt (deeds, state) = do
         -- NB: promises are lexically scoped because they may refer to FVs
         x <- freshHName
         promise P { fun = x, abstracted = S.toList (vs S.\\ static_vs), lexical = S.toList static_vs, meaning = state } $ do
-            traceRenderM (">sc", x, residualiseState state, case state of (Heap h _, _, _) -> M.filter heapBindingNonConcrete h, deeds)
+            traceRenderM (">sc", x, residualiseState state, case state of (Heap h _, _, _) -> M.filter (\hb -> case hb of Concrete (Here _) -> False; _ -> True) h, {- vs, static_vs, -} deeds)
             res <- opt (deeds, case state of (Heap h ids, k, in_e) -> (Heap (M.insert x Environmental h) ids, k, in_e)) -- TODO: should I just put "h" functions into a different set of statics??
             traceRenderM ("<sc", x, residualiseState state, res)
             return res

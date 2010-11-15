@@ -35,7 +35,7 @@ matchInTerm' ids (rn_l, Value v_l)         (rn_r, Value v_r)         = matchInVa
 matchInTerm' ids (rn_l, App e_l x_l)       (rn_r, App e_r x_r)       = matchInTerm ids (rn_l, e_l) (rn_r, e_r) >>= \eqs -> return (matchAnned matchInVar (rn_l, x_l) (rn_r, x_r) : eqs)
 matchInTerm' ids (rn_l, PrimOp pop_l es_l) (rn_r, PrimOp pop_r es_r) = guard (pop_l == pop_r) >> matchInList (matchInTerm ids) (rn_l, es_l) (rn_r, es_r)
 matchInTerm' ids (rn_l, Case e_l alts_l)   (rn_r, Case e_r alts_r)   = liftM2 (++) (matchInTerm ids (rn_l, e_l) (rn_r, e_r)) (matchInAlts ids (rn_l, alts_l) (rn_r, alts_r))
-matchInTerm' ids (rn_l, LetRec xes_l e_l)  (rn_r, LetRec xes_r e_r)  = matchInTerm ids'' (rn_l', e_l) (rn_r', e_r) >>= \eqs -> matchPureHeapExact ids'' [] eqs (M.map Concrete $ M.fromList xes_l') (M.map Concrete $ M.fromList xes_r')
+matchInTerm' ids (rn_l, LetRec xes_l e_l)  (rn_r, LetRec xes_r e_r)  = matchInTerm ids'' (rn_l', e_l) (rn_r', e_r) >>= \eqs -> matchPureHeapExact ids'' [] eqs (M.map (Concrete . Here) $ M.fromList xes_l') (M.map (Concrete . Here) $ M.fromList xes_r')
   where (ids',  rn_l', xes_l') = renameBounds (\_ x' -> x') ids  rn_l xes_l
         (ids'', rn_r', xes_r') = renameBounds (\_ x' -> x') ids' rn_r xes_r
 matchInTerm' _ _ _ = Nothing

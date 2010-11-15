@@ -40,7 +40,15 @@ step reduce live (losers, deeds, _state@(h, k, (rn, e))) =
     deeds' = releaseDeedDescend_ deeds tg
 
     force :: Deeds -> Heap -> Stack -> Tag -> Out Var -> Maybe (Deeds, State)
-    force deeds (Heap h ids) k tg x' = do { Concrete in_e <- M.lookup x' h; return (deeds, (Heap (M.delete x' h) ids, Update (annedVar tg x') : k, in_e)) }
+    force deeds (Heap h ids) k tg x' = do
+        Concrete chb <- M.lookup x' h
+        case chb of
+           -- If we have a genuine binding, we can just reduce to a state where that binding is in the heap
+          Here  in_e    -> return (deeds, (Heap (M.delete x' h) ids, Update (annedVar tg x') : k, in_e))
+           -- If we have a binding only bound above, it is imperative that we immediately reduce it against the
+           -- corresponding stack frame binding. If we don't we might potentially duplicate an allocation!
+          Above (rn, v) -> claimDeed (releaseDeedDescend_ deeds tg) v_tg >>= \deeds -> unwind deeds (Heap h ids) k v_tg (rn, annee v)
+            where v_tg = annedTag v -- TODO: GC any Above stuff becoming dead here, and do so before we claim the deed?
 
     unwind :: Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> Maybe (Deeds, State)
     unwind deeds h k tg_v in_v = uncons k >>= \(kf, k) -> case kf of
@@ -64,7 +72,7 @@ step reduce live (losers, deeds, _state@(h, k, (rn, e))) =
     scrutinise deeds (Heap h ids) k tg_v (rn_v, v)          (rn_alts, alts)
       | ((alt_x, alt_e), rest):_ <- [((alt_x, alt_e), rest) | ((DefaultAlt (Just alt_x), alt_e), rest) <- bagContexts alts]
       , (ids', rn_alts', alt_x') <- renameBinder ids rn_alts alt_x
-      = Just (releaseAltDeeds rest deeds, (Heap (M.insert alt_x' (Concrete (rn_v, annedTerm tg_v $ Value v)) h) ids', k, (rn_alts', alt_e)))
+      = Just (releaseAltDeeds rest deeds, (Heap (M.insert alt_x' (Concrete (Here (rn_v, annedTerm tg_v $ Value v))) h) ids', k, (rn_alts', alt_e)))
       | otherwise
       = Nothing -- This can legitimately occur, e.g. when supercompiling (if x then (case x of False -> 1) else 2)
 
@@ -83,7 +91,7 @@ step reduce live (losers, deeds, _state@(h, k, (rn, e))) =
     update :: Deeds -> Heap -> Stack -> Tag -> Anned (Out Var) -> In AnnedValue -> Maybe (Deeds, State)
     update deeds (Heap h ids) k tg_v x' (rn, v) = case mb_deeds'' of
         Nothing      -> traceRender ("update: deed claim FAILURE", annee x') Nothing
-        Just deeds'' -> Just (deeds'', (Heap (keepAlive linear (annee x') (rn, annedTerm tg_v (Value v)) h) ids, k, (rn, annedTerm tg_v (Value v))))
+        Just deeds'' -> Just (deeds'', (Heap (keepAlive linear (annee x') (Here (rn, annedTerm tg_v (Value v))) h) ids, k, (rn, annedTerm tg_v (Value v))))
       where
         -- Unconditionally release the tag associated with the update frame
         deeds' = releaseDeedDeep deeds (annedTag x')
@@ -111,14 +119,14 @@ step reduce live (losers, deeds, _state@(h, k, (rn, e))) =
       where
         (ids', rn', xes') = renameBounds (\_ x' -> x') ids rn xes
         (losers', deeds', heap')
-          | not sPECULATION = (losers, deeds, Heap (h `M.union` M.map Concrete (M.fromList xes')) ids')
+          | not sPECULATION = (losers, deeds, Heap (h `M.union` M.map (Concrete . Here) (M.fromList xes')) ids')
           | otherwise       = (final_losers, final_deeds, Heap (final_h_losers `M.union` final_h_winners) final_ids)
             where
               -- It is *very important* that we prevent speculation from forcing heap-carried things that have proved
               -- to be losers in the past. This prevents us discovering speculation failure of some head binding, and
               -- then forcing several thunks that are each strict in it. This change was motivated by DigitsOfE2 -- it
               -- speeds up supercompilation of that benchmark massively.
-              (h_losers, h_winners) = M.partition (\hb -> case hb of Concrete in_e -> annedTag (snd in_e) `IS.member` losers; _ -> False) h
+              (h_losers, h_winners) = M.partition (\hb -> case hb of Concrete chb -> concreteHeapBindingTag chb `IS.member` losers; _ -> False) h
               
               (final_losers, final_deeds, _final_live, final_h_losers, Heap final_h_winners final_ids) = foldl' speculate_one (losers, deeds, emptyLiveness, h_losers, Heap h_winners ids') (xes' `zip` lives')
                 
@@ -134,7 +142,7 @@ step reduce live (losers, deeds, _state@(h, k, (rn, e))) =
                     -- NB: commenting in this line is useful if you want to test whether speculation is causing
                     -- a benchmark to be slow due to the cost of the speculation OR due to the extra info. propagation
                     --(rnf -> ()) | False -> undefined
-                    _ | not sPECULATE_ON_LOSERS, tg `IS.member` losers                 -> (losers,              deeds,  extra_live `makeLive` in_e, M.insert x' (Concrete in_e) h_losers, Heap h_winners  ids)                         -- Heuristic: don't speculate if it has failed before
-                    (losers', deeds', (Heap h' ids', [], in_e'@(_, annee -> Value _))) -> (losers',             deeds', extra_live,                 h_losers,                             Heap (M.insert x' (Concrete in_e') h') ids') -- Speculation: if we can evaluate to a value "quickly" then use that value,
-                    _                                                                  -> (IS.insert tg losers, deeds,  extra_live `makeLive` in_e, M.insert x' (Concrete in_e) h_losers, Heap h_winners  ids)                         -- otherwise throw away the half-evaluated mess that we reach
+                    _ | not sPECULATE_ON_LOSERS, tg `IS.member` losers                 -> (losers,              deeds,  extra_live `makeLive` in_e, M.insert x' (Concrete (Here in_e)) h_losers, Heap h_winners  ids)                                -- Heuristic: don't speculate if it has failed before
+                    (losers', deeds', (Heap h' ids', [], in_e'@(_, annee -> Value _))) -> (losers',             deeds', extra_live,                 h_losers,                                    Heap (M.insert x' (Concrete (Here in_e')) h') ids') -- Speculation: if we can evaluate to a value "quickly" then use that value,
+                    _                                                                  -> (IS.insert tg losers, deeds,  extra_live `makeLive` in_e, M.insert x' (Concrete (Here in_e)) h_losers, Heap h_winners  ids)                                -- otherwise throw away the half-evaluated mess that we reach
                 where tg = annedTag (snd in_e)

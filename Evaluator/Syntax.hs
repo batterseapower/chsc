@@ -65,15 +65,24 @@ toAnnedTerm = tagFVedTerm . reflect
 
 type State = (Heap, Stack, In AnnedTerm)
 
+-- | Concrete things bound above are used for values whose allocation might be duplicated.
+data ConcreteHeapBinding = Here (In AnnedTerm)
+                         | Above (In (Anned AnnedValue))
+                         deriving (Show)
+
 -- | We do not abstract the h functions over static variables. This helps typechecking and gives GHC a chance to inline the definitions.
-data HeapBinding = Environmental           -- ^ Corresponding variable is static and free in the original input, or the name of a h-function. No need to generalise either of these (remember that h-functions don't appear in the input).
-                 | Updated Tag FreeVars    -- ^ Variable is bound by a residualised update frame. TODO: this is smelly and should really be Phantom.
-                 | Phantom (In AnnedTerm)  -- ^ Corresponding variable is static static and generated from residualising a term in the splitter. Can use the term information to generalise these.
-                 | Concrete (In AnnedTerm) -- ^ A genuine heap binding that we are actually allowed to look at.
+data HeapBinding = Environmental                -- ^ Corresponding variable is static and free in the original input, or the name of a h-function. No need to generalise either of these (remember that h-functions don't appear in the input).
+                 | Updated Tag FreeVars         -- ^ Variable is bound by a residualised update frame. TODO: this is smelly and should really be Phantom.
+                 | Phantom (In AnnedTerm)       -- ^ Corresponding variable is static static and generated from residualising a term in the splitter. Can use the term information to generalise these.
+                 | Concrete ConcreteHeapBinding -- ^ A genuine heap binding that we are actually allowed to look at.
                  deriving (Show)
 type PureHeap = M.Map (Out Var) HeapBinding
 data Heap = Heap PureHeap IdSupply
           deriving (Show)
+
+instance NFData ConcreteHeapBinding where
+    rnf (Here a)  = rnf a
+    rnf (Above a) = rnf a
 
 instance NFData HeapBinding where
     rnf Environmental = ()
@@ -84,11 +93,15 @@ instance NFData HeapBinding where
 instance NFData Heap where
     rnf (Heap a b) = rnf a `seq` rnf b
 
+instance Pretty ConcreteHeapBinding where
+    pPrintPrec level prec (Here in_e)  = pPrintPrec level prec in_e
+    pPrintPrec level prec (Above in_v) = braces (pPrintPrec level prec in_v)
+
 instance Pretty HeapBinding where
-    pPrintPrec _     _    Environmental   = angles empty
-    pPrintPrec level _    (Updated x' _)  = angles (text "update" <+> pPrintPrec level noPrec x')
-    pPrintPrec level _    (Phantom in_e)  = angles (pPrintPrec level noPrec in_e)
-    pPrintPrec level prec (Concrete in_e) = pPrintPrec level prec in_e
+    pPrintPrec _     _    Environmental  = angles empty
+    pPrintPrec level _    (Updated x' _) = angles (text "update" <+> pPrintPrec level noPrec x')
+    pPrintPrec level _    (Phantom in_e) = angles (pPrintPrec level noPrec in_e)
+    pPrintPrec level prec (Concrete chb) = pPrintPrec level prec chb
 
 instance Pretty Heap where
     pPrintPrec level prec (Heap h _) = pPrintPrec level prec h
@@ -115,21 +128,29 @@ instance Pretty StackFrame where
         Update x'                 -> pPrintPrecApp level prec (text "update") x'
 
 
+concreteHeapBindingTag :: ConcreteHeapBinding -> Tag
+concreteHeapBindingTag (Above (_, v)) = annedTag v
+concreteHeapBindingTag (Here  (_, e)) = annedTag e
+
+concreteHeapBindingTerm :: ConcreteHeapBinding -> In AnnedTerm
+concreteHeapBindingTerm (Above (rn, v)) = (rn, fmap Value v)
+concreteHeapBindingTerm (Here  in_e)    = in_e
+
 heapBindingNonConcrete :: HeapBinding -> Bool
 heapBindingNonConcrete (Concrete _) = False
 heapBindingNonConcrete _            = True
 
 heapBindingTerm :: HeapBinding -> Maybe (In AnnedTerm)
-heapBindingTerm Environmental   = Nothing
-heapBindingTerm (Updated _ _)   = Nothing
-heapBindingTerm (Phantom in_e)  = Just in_e
-heapBindingTerm (Concrete in_e) = Just in_e
+heapBindingTerm Environmental  = Nothing
+heapBindingTerm (Updated _ _)  = Nothing
+heapBindingTerm (Phantom in_e) = Just in_e
+heapBindingTerm (Concrete chb) = Just (concreteHeapBindingTerm chb)
 
 heapBindingTag :: HeapBinding -> Maybe Tag
 heapBindingTag Environmental     = Nothing
 heapBindingTag (Updated tg _)    = Just tg
 heapBindingTag (Phantom (_, e))  = Just (annedTag e)
-heapBindingTag (Concrete (_, e)) = Just (annedTag e)
+heapBindingTag (Concrete chb)    = Just (concreteHeapBindingTag chb)
 
 stackFrameTags :: StackFrame -> [Tag]
 stackFrameTags kf = case kf of
@@ -139,8 +160,8 @@ stackFrameTags kf = case kf of
     Update x'               -> [annedTag x']
 
 releaseHeapBindingDeeds :: Deeds -> HeapBinding -> Deeds
-releaseHeapBindingDeeds deeds (Concrete (_, e)) = releaseDeedDeep deeds (annedTag e)
-releaseHeapBindingDeeds deeds _                 = deeds
+releaseHeapBindingDeeds deeds (Concrete chb) = releaseDeedDeep deeds (concreteHeapBindingTag chb)
+releaseHeapBindingDeeds deeds _              = deeds
 
 releaseStateDeed :: Deeds -> State -> Deeds
 releaseStateDeed deeds (Heap h _, k, (_, e))

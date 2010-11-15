@@ -323,10 +323,10 @@ optimiseSplit opt deeds bracketeds_heap bracketed_focus = do -- FIXME: use gen_x
     -- 0) The "process tree" splits at this point. We can choose to distribute the deeds between the children in a number of ways
     let stateSize (h, k, in_e) = heapSize h + stackSize k + termSize (snd in_e)
           where heapBindingSize hb = case hb of
-                    Environmental   -> 0
-                    Updated _ _     -> 0
-                    Phantom _       -> 0
-                    Concrete (_, e) -> termSize e
+                    Environmental -> 0
+                    Updated _ _   -> 0
+                    Phantom _     -> 0
+                    Concrete chb  -> termSize (snd (concreteHeapBindingTerm chb))
                 heapSize (Heap h _) = sum (map heapBindingSize (M.elems h))
                 stackSize = sum . map stackFrameSize
                 stackFrameSize kf = 1 + case kf of
@@ -446,7 +446,7 @@ splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (sp
         
         -- 2) Build a splitting for those elements of the heap we propose to residualise in resid_xs
         (h_residualised, h_not_residualised) = M.partitionWithKey (\x' _ -> x' `S.member` resid_xs) h
-        bracketeds_nonupdated = M.mapMaybeWithKey (\x' hb -> do { Concrete in_e <- return hb; return (Concrete in_e, oneBracketed (Once (fromJust (name_id x')), (Heap M.empty ids_brack, [], in_e))) }) h_residualised
+        bracketeds_nonupdated = M.mapMaybeWithKey (\x' hb -> do { Concrete (Here in_e) <- return hb; return (Concrete (Here in_e), oneBracketed (Once (fromJust (name_id x')), (Heap M.empty ids_brack, [], in_e))) }) h_residualised
         bracketeds_heap = bracketeds_updated `M.union` bracketeds_nonupdated
         
         -- 3) Inline as much of the Heap as possible into the candidate splitting
@@ -469,8 +469,12 @@ splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (sp
         --   It important that we do not mark residualised things as phantoms just because they are in bracketeds_heap. If we did, it would mean
         --   that *concrete residualised stuff* is recorded as a phantom even if it was explicitly residualised in the initial iteration (since
         --   anything residualised in the first iteration is certainly in bracketeds_heap).
-        h_cheap = M.filter (\hb -> case hb of Concrete (_, e) -> isCheap (annee e); _ -> True) h
-                    `M.union` M.map fst bracketeds_heap -- This is where I mark things residualised here which are not explicitly generalised as static
+        make_cheap hb@(Concrete (Here (rn, e))) = case annee e of Value v -> return (Concrete (Above (rn, annedValue (annedTag e) v)))
+                                                                  _       -> guard (isCheap (annee e)) >> return hb -- FIXME: we duplicate a little allocation if we have a cheap non-value :(
+        make_cheap hb                           = Just hb
+        h_cheap = M.mapMaybe make_cheap h
+                    `M.union` M.map fst bracketeds_heap -- This is where I mark things residualised here which are not explicitly generalised as both static and bound Here (rather than Above)
+                                                        -- The second point is important when optimising e.g: let f = (\y -> case x of \Delta) in if x then Just f else Just f
         h_inlineable = (h_not_residualised `M.union` h_cheap) `exclude` snd split_from -- FIXME: reduce hack value and explain?? (Astonishingly, this does the right thing for staticness as well)
         
         -- Generalising the final proposed floats may cause some bindings that we *thought* were going to be inlined to instead be
@@ -503,10 +507,22 @@ splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (sp
         entered_resid_substep x' paths no_change@(newly_resid, not_newly_resid)
           = -- If *all* the paths leading here certainly don't contain something we are going to change our mind about residualising...
             if all (all (`S.member` not_newly_resid)) paths
-            then -- ...and the binding is cheap or linear
-                 if x' `M.member` h_cheap || maybe True isOnce (M.lookup x' entered)
+            then -- ...and the binding is linear
+                 if maybe True isOnce (M.lookup x' entered)
                  then (newly_resid,             S.insert x' not_newly_resid) -- ...the binding is certainly not going to be residualised
                  else (S.insert x' newly_resid, not_newly_resid)             -- Otherwise, it certainly should be residualised to make a new root
+                  -- NB: this might be surprising. Why do we residualise even if x' `M.member` h_heap? The reason is that if the value is
+                  -- used non-linearly, just pushing it down would duplicate allocation. This is bad. Instead, we record it as residualised,
+                  -- but take no action to exclude it from h_cheap the next time around. This means that it gets recorded in h_cheap as something
+                  -- bound Above rather than Here, which avoids duplicating allocation.
+                  --
+                  -- Why do we push linear value bindings down at all, rather than marking them as Above in the same way? The answer is that we
+                  -- want to optimise examples like this one to only case-decompose x once:
+                  --
+                  --  let f x = if x then e1 else e2 in if x then Left f else Right f
+                  --
+                  -- To get this optimisation, we need to duplicate the allocation of f into both case branches. This is only certainly safe when
+                  -- f is linear, so at most one of the allocation sites will be reached.
             else no_change -- Can't decide yet
         entered_resid_step (nr, nnr) = -- traceRender ("entered_resid_step", (nr, nnr)) $
                                        M.foldWithKey entered_resid_substep (nr, nnr) fvs_paths'
@@ -605,15 +621,15 @@ transitiveInline deeds h_inlineable (ent, (Heap h ids, k, in_e))
             consider_inlining x' (why_live, hb) (deeds, h_inline, h_not_inlined) = case mb_deeds' of
                 Nothing    -> traceRender ("transitiveInline: deed claim failure", x') (deeds,           h_inline, M.insert x' hb h_not_inlined)
                 Just deeds ->                                                          (deeds, insert_it h_inline,                h_not_inlined)
-              where mb_deeds' | Concrete (_, e) <- hb
+              where mb_deeds' | Concrete chb <- hb
                               , ConcreteLive <- why_live
-                              = claimDeed deeds (annedTag e)
+                              = claimDeed deeds (concreteHeapBindingTag chb)
                               | otherwise
                               = Just deeds
                     -- NB: we want to inline only a *phantom* version if the binding is demanded by phantoms only, or madness ensues
                     -- NB: it is important we insert rather than union, because we want to overwrite an existing phantom binding (if any) with the concrete one
-                    insert_it | Concrete in_e <- hb = keepAlive (Just why_live) x' in_e
-                              | otherwise           = M.insert x' hb
+                    insert_it | Concrete chb <- hb = keepAlive (Just why_live) x' chb
+                              | otherwise          = M.insert x' hb
             (deeds', h_inline, h_not_inlined) = M.foldWithKey consider_inlining (deeds, M.empty, M.empty) h_inline_candidates
             (h_inline_candidates, h_inlineable') = M.mapEitherWithKey (\x' hb -> case x' `whyLive` live of Just why_live | live_is_inline_candidate x' why_live -> Left (why_live, hb); _ -> Right hb) h_inlineable
             live_is_inline_candidate x' live = case M.lookup x' h_output of
@@ -633,9 +649,9 @@ transitiveInline deeds h_inlineable (ent, (Heap h ids, k, in_e))
 -- I think we can only do it when the splitter is being invoked by a non-whistling invocation of sc.
 cheapifyHeap :: (Deeds, Heap) -> (Deeds, Heap)
 cheapifyHeap deedsheap | not sPLITTER_CHEAPIFICATION = deedsheap
-cheapifyHeap (deeds, Heap h (splitIdSupply -> (ids, ids'))) = (deeds', Heap (M.map Concrete (M.fromList floats) `M.union` h') ids')
+cheapifyHeap (deeds, Heap h (splitIdSupply -> (ids, ids'))) = (deeds', Heap (M.map (Concrete . Here) (M.fromList floats) `M.union` h') ids')
   where
-    ((deeds', _, floats), h') = M.mapAccum (\(deeds, ids, floats0) hb -> case hb of Concrete in_e -> (case cheapify deeds ids in_e of (deeds, ids, floats1, in_e') -> ((deeds, ids, floats0 ++ floats1), Concrete in_e')); _ -> ((deeds, ids, floats0), hb)) (deeds, ids, []) h
+    ((deeds', _, floats), h') = M.mapAccum (\(deeds, ids, floats0) hb -> case hb of Concrete (Here in_e) -> (case cheapify deeds ids in_e of (deeds, ids, floats1, in_e') -> ((deeds, ids, floats0 ++ floats1), Concrete (Here in_e'))); _ -> ((deeds, ids, floats0), hb)) (deeds, ids, []) h
     
     -- TODO: make cheapification more powerful (i.e. deal with case bindings)
     cheapify :: Deeds -> IdSupply -> In AnnedTerm -> (Deeds, IdSupply, [(Out Var, In AnnedTerm)], In AnnedTerm)
@@ -711,7 +727,7 @@ splitStackFrame ids kf scruts bracketed_hole
             -- ===>
             --  case x of C -> let unk = C; z = C in ...
             alt_in_es = alt_rns `zip` alt_es
-            alt_hs = zipWith3 (\alt_rn alt_con alt_tg -> M.fromList $ do { Just scrut_v <- [altConToValue alt_con]; scrut <- scruts; return (scrut, Concrete (alt_rn, annedTerm alt_tg (Value scrut_v))) }) alt_rns alt_cons (map annedTag alt_es)
+            alt_hs = zipWith3 (\alt_rn alt_con alt_tg -> M.fromList $ do { Just scrut_v <- [altConToValue alt_con]; scrut <- scruts; return (scrut, Concrete (Here (alt_rn, annedTerm alt_tg (Value scrut_v)))) }) alt_rns alt_cons (map annedTag alt_es) -- FIXME: use Above here as a neat trick to avoid allocating more in case branches. The problem is that we might be case-scrutinising a variable we haven't marked as static (e.g. becaues its lambda bound), so the resulting float goes to top level rather than being resid just above the case.
             alt_bvss = map (\alt_con' -> fst $ altConOpenFreeVars alt_con' (S.empty, S.empty)) alt_cons'
             bracketed_alts = zipWith (\alt_h alt_in_e -> oneBracketed (Once ctxt_id, \ids -> (Heap alt_h ids, [], alt_in_e))) alt_hs alt_in_es
     PrimApply pop in_vs in_es -> zipBracketeds (primOp pop) S.unions S.unions (\_ -> Nothing) (bracketed_vs ++ bracketed_hole : bracketed_es)
