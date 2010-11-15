@@ -78,14 +78,14 @@ data HeapBinding = Environmental                -- ^ Corresponding variable is s
                  deriving (Show)
 
 
--- Binding        | Abstract over var? | Use in evaluation? | Examine in matcher? | Generalise?
--- ===============+====================+====================+=====================+============
--- Environmental  | N                  | N                  | N                   | N
--- Updated        | N                  | N                  | N :(                | Y
--- Phantom        | N                  | N                  | Y                   | Y
--- Concrete:Here  | N (Y sometimes..)  | Y (special)        | Y                   | Y
--- Concrete:Above | N                  | Y                  | Y                   | Y
--- (none)         | Y                  | N                  | N                   | N
+-- Binding        | Abstract over var? | Use in evaluation? | Examine in matcher? | Generalise? | Residualise?
+-- ===============+====================+====================+=====================+=============+=============
+-- Environmental  | N                  | N                  | N                   | N           | N
+-- Updated        | N                  | N                  | N :(                | Y           | N
+-- Phantom        | N                  | N                  | Y                   | Y           | N
+-- Concrete:Above | N (Y sometimes..)  | Y (special)        | Y                   | Y           | N
+-- Concrete:Here  | N                  | Y                  | Y                   | Y           | Y
+-- (none)         | Y                  | N                  | N                   | N           | N
 --
 -- FIXME: when supercompiling
 --
