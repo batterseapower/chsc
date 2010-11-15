@@ -35,7 +35,7 @@ matchInTerm' ids (rn_l, Value v_l)         (rn_r, Value v_r)         = matchInVa
 matchInTerm' ids (rn_l, App e_l x_l)       (rn_r, App e_r x_r)       = matchInTerm ids (rn_l, e_l) (rn_r, e_r) >>= \eqs -> return (matchAnned matchInVar (rn_l, x_l) (rn_r, x_r) : eqs)
 matchInTerm' ids (rn_l, PrimOp pop_l es_l) (rn_r, PrimOp pop_r es_r) = guard (pop_l == pop_r) >> matchInList (matchInTerm ids) (rn_l, es_l) (rn_r, es_r)
 matchInTerm' ids (rn_l, Case e_l alts_l)   (rn_r, Case e_r alts_r)   = liftM2 (++) (matchInTerm ids (rn_l, e_l) (rn_r, e_r)) (matchInAlts ids (rn_l, alts_l) (rn_r, alts_r))
-matchInTerm' ids (rn_l, LetRec xes_l e_l)  (rn_r, LetRec xes_r e_r)  = matchInTerm ids'' (rn_l', e_l) (rn_r', e_r) >>= \eqs -> matchPureHeapExact ids'' [] eqs (M.map (Concrete . Here) $ M.fromList xes_l') (M.map (Concrete . Here) $ M.fromList xes_r')
+matchInTerm' ids (rn_l, LetRec xes_l e_l)  (rn_r, LetRec xes_r e_r)  = matchInTerm ids'' (rn_l', e_l) (rn_r', e_r) >>= \eqs -> matchPureHeapExact ids'' [] eqs (M.map concrete $ M.fromList xes_l') (M.map concrete $ M.fromList xes_r')
   where (ids',  rn_l', xes_l') = renameBounds (\_ x' -> x') ids  rn_l xes_l
         (ids'', rn_r', xes_r') = renameBounds (\_ x' -> x') ids' rn_r xes_r
 matchInTerm' _ _ _ = Nothing
@@ -176,8 +176,8 @@ matchPureHeap ids bound_eqs free_eqs init_h_l init_h_r = go bound_eqs free_eqs i
       | otherwise = go ((x_l, x_r) : known) free_eqs h_l h_r
 
      -- Environental heap bindings (i.e. input FVs) / things bound by update frames must match *exactly* since we know nothing about them
-    matchHeapBinding x_l (heapBindingTerm -> Nothing)     x_r (heapBindingTerm -> Nothing)     = guard (x_l == x_r) >> return (id, id, [])
+    matchHeapBinding x_l (matchMeaning -> Nothing)     x_r (matchMeaning -> Nothing)     = guard (x_l == x_r) >> return (id, id, [])
      -- We can match other possibilities "semantically", by peeking into ther definitions
-    matchHeapBinding x_l (heapBindingTerm -> Just in_e_l) x_r (heapBindingTerm -> Just in_e_r) = fmap (\extra_free_eqs -> (deleteExpensive x_l in_e_l, deleteExpensive x_r in_e_r, extra_free_eqs)) $ matchInTerm ids in_e_l in_e_r
+    matchHeapBinding x_l (matchMeaning -> Just in_e_l) x_r (matchMeaning -> Just in_e_r) = fmap (\extra_free_eqs -> (deleteExpensive x_l in_e_l, deleteExpensive x_r in_e_r, extra_free_eqs)) $ matchInTerm ids in_e_l in_e_r
      -- Environment variables match *only* against themselves, not against anything other heap binding at all
     matchHeapBinding _ _ _ _ = Nothing

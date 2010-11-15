@@ -23,6 +23,59 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 
 
+-- | Corresponding variable is static and free in the original input, or the name of a h-function.
+-- No need to generalise either of these (remember that h-functions don't appear in the input).
+environmental :: HeapBinding
+environmental = HB {
+    static             = True,
+    evaluateMeaning    = Nothing,
+    matchMeaning       = Nothing,
+    terminateMeaning   = Nothing,
+    residualiseMeaning = Nothing
+  }
+
+-- | Variable is bound by a residualised update frame. TODO: this is smelly and should really be Phantom.
+updated :: Tag -> FreeVars -> HeapBinding
+updated tg fvs = HB {
+    static             = True,
+    evaluateMeaning    = Nothing,
+    matchMeaning       = Nothing,
+    terminateMeaning   = Just (tg, fvs),
+    residualiseMeaning = Nothing
+  }
+
+-- | Corresponding variable is static static and generated from residualising a term in the splitter.
+-- Can use the term information to generalise these.
+phantom :: In AnnedTerm -> HeapBinding
+phantom in_e@(_, e) = HB {
+    static             = True,
+    evaluateMeaning    = Nothing,
+    matchMeaning       = Just in_e,
+    terminateMeaning   = Just (annedTag e, inFreeVars annedTermFreeVars in_e),
+    residualiseMeaning = Nothing
+  }
+
+-- | A genuine heap binding that we are actually allowed to look at, but which we don't have a binding for.
+unfolding :: In (Anned AnnedValue) -> HeapBinding
+unfolding in_v@(_, v) = HB {
+    static             = True,
+    evaluateMeaning    = Just (Above in_v),
+    matchMeaning       = Just (second (fmap Value) in_v),
+    terminateMeaning   = Just (annedTag v, inFreeVars annedValueFreeVars in_v),
+    residualiseMeaning = Nothing
+  }
+
+-- | A genuine heap binding that we are actually allowed to look at.
+concrete :: In AnnedTerm -> HeapBinding
+concrete in_e@(_, e) = HB {
+    static             = False,
+    evaluateMeaning    = Just (Here in_e),
+    matchMeaning       = Just in_e,
+    terminateMeaning   = Just (annedTag e, inFreeVars annedTermFreeVars in_e),
+    residualiseMeaning = Just in_e
+  }
+
+
 data WhyLive = PhantomLive | ConcreteLive
 
 instance JoinSemiLattice WhyLive where
@@ -56,10 +109,10 @@ plusLivenesses = joins
 whyLive :: Out Var -> Liveness -> Maybe WhyLive
 whyLive x' live = x' `M.lookup` unLiveness live
 
-keepAlive :: Maybe WhyLive -> Out Var -> ConcreteHeapBinding -> PureHeap -> PureHeap
-keepAlive Nothing             _  _   h = h
-keepAlive (Just PhantomLive)  x' chb h = M.insert x' (Phantom (concreteHeapBindingTerm chb)) h
-keepAlive (Just ConcreteLive) x' chb h = M.insert x' (Concrete chb) h
+keepAlive :: Maybe WhyLive -> Out Var -> BoundWhere -> PureHeap -> PureHeap
+keepAlive Nothing             _  _  h = h
+keepAlive (Just PhantomLive)  x' bw h = M.insert x' (phantom (boundWhereTerm bw)) h
+keepAlive (Just ConcreteLive) x' bw h = M.insert x' (case bw of Here in_e -> concrete in_e; Above in_v -> unfolding in_v) h
 
 
 inFreeVars :: (a -> FreeVars) -> In a -> FreeVars
