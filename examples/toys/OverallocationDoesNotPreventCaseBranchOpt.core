@@ -1,0 +1,8 @@
+-- Should not do a "case" on "x" within the "f" (i.e. the body of f should be duplicated)
+root x = if x then Just f else Just f
+  where f y = if x then Left y else Right y
+
+tests = [
+    (case root True of Just f -> f 10, Left 10),
+    (case root False of Just f -> f 10, Right 10)
+  ]

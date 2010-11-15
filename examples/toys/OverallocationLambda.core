@@ -1,0 +1,7 @@
+-- Should not duplicate the allocation of shared_value every time the lambda is forced
+root x = \g -> g shared_value
+  where shared_value = Just x
+
+tests = [
+    (root 10 id, Just 10)
+  ]

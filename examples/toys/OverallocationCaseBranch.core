@@ -1,0 +1,7 @@
+-- Should not allocate a "True" or "False" in the Left/Right branches
+root unk = case unk of True -> Left unk; False -> Right unk
+
+tests = [
+    (root True, Left True),
+    (root False, Right False)
+  ]
