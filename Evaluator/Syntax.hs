@@ -76,6 +76,30 @@ data HeapBinding = Environmental                -- ^ Corresponding variable is s
                  | Phantom (In AnnedTerm)       -- ^ Corresponding variable is static static and generated from residualising a term in the splitter. Can use the term information to generalise these.
                  | Concrete ConcreteHeapBinding -- ^ A genuine heap binding that we are actually allowed to look at.
                  deriving (Show)
+
+
+-- Binding        | Abstract over var? | Use in evaluation? | Examine in matcher? | Generalise?
+-- ===============+====================+====================+=====================+============
+-- Environmental  | N                  | N                  | N                   | N
+-- Updated        | N                  | N                  | N :(                | Y
+-- Phantom        | N                  | N                  | Y                   | Y
+-- Concrete:Here  | N (Y sometimes..)  | Y (special)        | Y                   | Y
+-- Concrete:Above | N                  | Y                  | Y                   | Y
+-- (none)         | Y                  | N                  | N                   | N
+--
+-- FIXME: when supercompiling
+--
+--   if x then e1[x] else e2[x]
+--
+-- I want the h-functions for e1 and e2 to be abstracted over x only if x is not a static. If x is a static, I want them to be able
+-- to just throw away their Concrete:Here binding for x (from the if) and refer to the lexically bound shared allocation of x.
+-- Currently, this is impossible because it requires a binding to be both ((none) or Phantom -- to record the staticness), and
+-- Concrete:Here -- to record the value learnt from the case.
+--
+-- An alternative is to supercompile e1 and e2 with x static and then ensure that we mark x static when it gets introduced. This means
+-- the h-functions for e1/e2 will float to the lambda or whatever it is that introduces x, but no further. This is a bit less good, and
+-- means that we have to awkwardly plumb around any newly introducedn binders so we can explicitly mark them as "non-static".
+
 type PureHeap = M.Map (Out Var) HeapBinding
 data Heap = Heap PureHeap IdSupply
           deriving (Show)
