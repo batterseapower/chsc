@@ -47,20 +47,21 @@ mkTag rec = term tagIdSupply
     alternative ids (con, e) = (con, term ids e)
 
 
-(taggedVarToVar,         taggedTermToTerm,         taggedAltsToAlts,         taggedValueToValue,         taggedValue'ToValue')         = mkDetag (\f e -> I (f (tagee e)))
-(fVedVarToVar,           fVedTermToTerm,           fVedAltsToAlts,           fVedValueToValue,           fVedValue'ToValue')           = mkDetag (\f e -> I (f (fvee e)))
-(taggedFVedVarToVar,     taggedFVedTermToTerm,     taggedFVedAltsToAlts,     taggedFVedValueToValue,     taggedFVedValue'ToValue')     = mkDetag (\f e -> I (f (fvee (tagee (unComp e)))))
-(taggedFVedVarToFVedVar, taggedFVedTermToFVedTerm, taggedFVedAltsToFVedAlts, taggedFVedValueToFVedValue, taggedFVedValue'ToFVedValue') = mkDetag (\f e -> FVed (freeVars (tagee (unComp e))) (f (fvee (tagee (unComp e)))))
+(taggedVarToVar,         taggedTermToTerm,         taggedTerm'ToTerm',         taggedAltsToAlts,         taggedValueToValue,         taggedValue'ToValue')         = mkDetag (\f e -> I (f (tagee e)))
+(fVedVarToVar,           fVedTermToTerm,           fVedTerm'ToTerm',           fVedAltsToAlts,           fVedValueToValue,           fVedValue'ToValue')           = mkDetag (\f e -> I (f (fvee e)))
+(taggedFVedVarToVar,     taggedFVedTermToTerm,     taggedFVedTerm'ToTerm',     taggedFVedAltsToAlts,     taggedFVedValueToValue,     taggedFVedValue'ToValue')     = mkDetag (\f e -> I (f (fvee (tagee (unComp e)))))
+(taggedFVedVarToFVedVar, taggedFVedTermToFVedTerm, taggedFVedTerm'ToFVedTerm', taggedFVedAltsToFVedAlts, taggedFVedValueToFVedValue, taggedFVedValue'ToFVedValue') = mkDetag (\f e -> FVed (freeVars (tagee (unComp e))) (f (fvee (tagee (unComp e)))))
 
 
 {-# INLINE mkDetag #-}
 mkDetag :: (forall a b. (a -> b) -> ann a -> ann' b)
         -> (ann Var          -> ann' Var,
             ann (TermF ann)  -> ann' (TermF ann'),
+            TermF ann        -> TermF ann',
             [AltF ann]       -> [AltF ann'],
             ann (ValueF ann) -> ann' (ValueF ann'),
             ValueF ann       -> ValueF ann')
-mkDetag rec = (var, term, alternatives, value, value')
+mkDetag rec = (var, term, term', alternatives, value, value')
   where
     var = rec var'
     var' x = x

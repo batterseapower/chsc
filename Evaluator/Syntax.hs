@@ -44,6 +44,7 @@ renameAnnedAlts = renameTaggedFVedAlts
 
 detagAnnedVar = taggedFVedVarToFVedVar
 detagAnnedTerm = taggedFVedTermToFVedTerm
+detagAnnedTerm' = taggedFVedTerm'ToFVedTerm'
 detagAnnedValue = taggedFVedValueToFVedValue
 detagAnnedValue' = taggedFVedValue'ToFVedValue'
 detagAnnedAlts = taggedFVedAltsToFVedAlts
