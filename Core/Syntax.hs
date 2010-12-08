@@ -73,7 +73,7 @@ type AltF ann = (AltCon, ann (TermF ann))
 type Value = ValueF Identity
 type TaggedValue = ValueF Tagged
 type CountedValue = ValueF Counted
-data ValueF ann = Lambda Var (ann (TermF ann)) | Data DataCon [Var] | Literal Literal
+data ValueF ann = Indirect Var | Lambda Var (ann (TermF ann)) | Data DataCon [Var] | Literal Literal
                 deriving (Eq, Show)
 
 instance NFData PrimOp
@@ -96,6 +96,7 @@ instance NFData1 ann => NFData (TermF ann) where
     rnf (LetRec a b) = rnf a `seq` rnf b
 
 instance NFData1 ann => NFData (ValueF ann) where
+    rnf (Indirect a) = rnf a
     rnf (Lambda a b) = rnf a `seq` rnf b
     rnf (Data a b) = rnf a `seq` rnf b
     rnf (Literal a) = rnf a
@@ -155,6 +156,7 @@ pPrintPrecLetRec level prec xes e_body
 
 instance Pretty1 ann => Pretty (ValueF ann) where
     pPrintPrec level prec v = case v of
+        Indirect x    -> pPrintPrec level prec x
         -- Unfortunately, this nicer pretty-printing doesn't work for general (TermF ann):
         --Lambda x e    -> pPrintPrecLam level prec (x:xs) e'
         --  where (xs, e') = collectLambdas e
@@ -212,6 +214,7 @@ valueSize' :: Foldable.Foldable ann => ValueF ann -> Int
     value = rec value'
     
     value' v = case v of
+        Indirect _ -> 0
         Lambda _ e -> term e
         Data _ _ -> 0
         Literal _ -> 0
@@ -242,6 +245,7 @@ reify = id
 reflect :: Term -> (forall ann. Symantics ann => ann (TermF ann))
 reflect (I e) = case e of
     Var x              -> var x
+    Value (Indirect x) -> value (Indirect x)
     Value (Lambda x e) -> value (Lambda x (reflect e))
     Value (Data dc xs) -> value (Data dc xs)
     Value (Literal l)  -> value (Literal l)
@@ -250,6 +254,9 @@ reflect (I e) = case e of
     Case e alts        -> case_ (reflect e) (map (second reflect) alts)
     LetRec xes e       -> letRec (map (second reflect) xes) (reflect e)
 
+
+indirect :: Symantics ann => Var -> ann (TermF ann)
+indirect = value . Indirect
 
 literal :: Symantics ann => Literal -> ann (TermF ann)
 literal = value . Literal

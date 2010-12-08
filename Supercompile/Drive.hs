@@ -65,6 +65,7 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ run
             term = rec term'
             term' e = case e of
               Var x              -> ([], \[] -> Var x)
+              Value (Indirect x) -> ([], \[] -> Value (Indirect x))
               Value (Lambda x e) -> ([t], \[t'] -> Value (Lambda x (rb t')))
                 where (t, rb) = term e
               Value (Data dc xs) -> ([], \[] -> Value (Data dc xs))

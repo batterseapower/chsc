@@ -70,6 +70,8 @@ mkEnteredEnv = setToMap
 --
 
 
+-- FIXME: make non-linear values be Phantom rather than Concrete, and give them a residual binding
+
 {-# INLINE split #-}
 split :: MonadStatics m
       => Generaliser
@@ -724,9 +726,9 @@ splitStackFrame ids kf scruts bracketed_hole
             bracketed_es  = zipWith (\ctxt_id in_e -> oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], in_e))) ctxt_ids in_es)
   where
     altConToValue :: AltCon -> Maybe (ValueF ann)
-    altConToValue (DataAlt dc xs) = Just $ Data dc xs
-    altConToValue (LiteralAlt l)  = Just $ Literal l
-    altConToValue (DefaultAlt _)  = Nothing
+    altConToValue (DataAlt dc xs)   = Just $ Data dc xs
+    altConToValue (LiteralAlt l)    = Just $ Literal l
+    altConToValue (DefaultAlt mb_x) = fmap Indirect mb_x -- Doesn't really make a difference, but what the hell!
 
 splitUpdate :: [Out Var] -> Anned Var -> Bracketed (Entered, IdSupply -> State)
             -> ([Out Var], M.Map (Out Var) (HeapBinding, Bracketed (Entered, IdSupply -> State)), Bracketed (Entered, IdSupply -> State))
