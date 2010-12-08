@@ -41,6 +41,7 @@ matchInTerm' ids (rn_l, LetRec xes_l e_l)  (rn_r, LetRec xes_r e_r)  = matchInTe
 matchInTerm' _ _ _ = Nothing
 
 matchInValue :: IdSupply -> In AnnedValue -> In AnnedValue -> Maybe [(Var, Var)]
+matchInValue _   (rn_l, Indirect x_l)   (rn_r, Indirect x_r)   = Just [matchInVar (rn_l, x_l) (rn_r, x_r)]
 matchInValue ids (rn_l, Lambda x_l e_l) (rn_r, Lambda x_r e_r) = matchInTerm ids'' (rn_l', e_l) (rn_r', e_r) >>= \eqs -> matchRigidBinders [(x_l', x_r')] eqs
   where (ids',  rn_l', x_l') = renameBinder ids  rn_l x_l
         (ids'', rn_r', x_r') = renameBinder ids' rn_r x_r

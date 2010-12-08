@@ -38,6 +38,7 @@ mkTag rec = term tagIdSupply
                 idss' = splitIdSupplyL ids0'
 
     value ids v = case v of
+        Indirect x -> Indirect x
         Lambda x e -> Lambda x (term ids e)
         Data dc xs -> Data dc xs
         Literal l  -> Literal l
@@ -75,6 +76,7 @@ mkDetag rec = (var, term, alternatives, value, value')
         LetRec xes e  -> LetRec (map (second term) xes) (term e)
 
     value = rec value'
+    value' (Indirect x) = Indirect x
     value' (Lambda x e) = Lambda x (term e)
     value' (Data dc xs) = Data dc xs
     value' (Literal l)  = Literal l

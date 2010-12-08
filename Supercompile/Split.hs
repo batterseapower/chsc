@@ -117,6 +117,8 @@ mkEnteredEnv = setToMap
 -- because x wasn't free in it, but the fixed point will spot that h2/h3 are free in it and hence bind h1 as well.
 
 
+-- FIXME: make non-linear values be Phantom rather than Concrete, and give them a residual binding
+
 {-# INLINE split #-}
 split :: MonadStatics m
       => Generaliser
@@ -812,9 +814,9 @@ splitStackFrame ids kf scruts bracketed_hole
             bracketed_es  = zipWith (\ctxt_id in_e -> oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], in_e))) ctxt_ids in_es)
   where
     altConToValue :: AltCon -> Maybe (ValueF ann)
-    altConToValue (DataAlt dc xs) = Just $ Data dc xs
-    altConToValue (LiteralAlt l)  = Just $ Literal l
-    altConToValue (DefaultAlt _)  = Nothing
+    altConToValue (DataAlt dc xs)   = Just $ Data dc xs
+    altConToValue (LiteralAlt l)    = Just $ Literal l
+    altConToValue (DefaultAlt mb_x) = fmap Indirect mb_x -- Doesn't really make a difference, but what the hell!
 
 -- I'm making use of a clever trick: after splitting an update frame for x, instead of continuing to split the stack with a
 -- noneBracketed for x in the focus, I split the stack with a oneBracketed for it in the focus.
