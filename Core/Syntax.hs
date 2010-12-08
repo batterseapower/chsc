@@ -173,8 +173,8 @@ isValue :: TermF ann -> Bool
 isValue (Value _) = True
 isValue _         = False
 
-termIsValue :: Term -> Bool
-termIsValue = isValue . unI
+termIsValue :: Copointed ann => ann (TermF ann) -> Bool
+termIsValue = isValue . extract
 
 isCheap :: Copointed ann => TermF ann -> Bool
 isCheap _ | cALL_BY_NAME = True -- A cunning hack. I think this is all that should be required...
