@@ -1,4 +1,4 @@
 #!/bin/bash
 
-cabal build 1>2 || exit $?
+cabal build 1>&2 || exit $?
 dist/build/supercompile/supercompile $* -v0 --no-assertions || exit $?
