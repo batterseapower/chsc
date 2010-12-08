@@ -101,7 +101,7 @@ simplify gen (init_deeds, init_s)
          -- If we can find some fraction of the stack or heap to drop that looks like it will be admissable, just residualise those parts and continue
         | Just split_from <- seekAdmissable h named_k, (ids', ctxt_id) <- stepIdSupply ids  = splitt split_from (deeds, (Heap h ids', named_k, ([],                                                     oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], (rn, e))))))
          -- Otherwise, keep dropping stuff until one of the two conditions above holds
-        | Just (_, deeds', s') <- step (const id) emptyLiveness (emptyLosers, deeds, s)     = trace ("simplify: dropping " ++ droppingWhat (annee (snd (thd3 s))) ++ " piece :(") $ go (deeds', s')
+        | Just (deeds', s') <- step (deeds, s)                                              = trace ("simplify: dropping " ++ droppingWhat (annee (snd (thd3 s))) ++ " piece :(") $ go (deeds', s')
          -- Even if we can never find some admissable fragment of the input, we *must* eventually reach a variable or value
         | otherwise                                                                         = error "simplify: could not stop or step!"
       where named_k = [0..] `zip` k
