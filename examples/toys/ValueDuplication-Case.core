@@ -1,0 +1,10 @@
+-- Inspect the output code: if it contains any allocations for the True/False constructors
+-- values have been duplicated. We want to avoid the duplication while still contracting the
+-- redundant case re-analysis in each branch of the outer case.
+root x = case x of True -> if x then (case x of x' -> Left x') else Right x
+                   False -> if x then Left x else (case x of x' -> Right x')
+
+tests = [
+    (root True, Left True),
+    (root False, Right False)
+  ]
