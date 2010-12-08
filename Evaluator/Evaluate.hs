@@ -47,7 +47,9 @@ step (deeds, _state@(h, k, (rn, e))) =
     --
     -- Indirections do not change the deeds story much (at all). You have to pay a deed per indirection, which is released
     -- whenever the indirection dies in the process of evaluation (e.g. in the function position of an application). The deeds
-    -- that the indirection "points to" are not affected by any of this.
+    -- that the indirection "points to" are not affected by any of this. The exception is if we *retain* any subcomponent
+    -- of the dereferenced thing - in this case we have to be sure to claim some deeds for that subcomponent. For example, if we
+    -- dereference to get a lambda in our function application we had better claim deeds for the body.
     dereference :: Heap -> In AnnedValue -> In AnnedValue
     dereference h (rn, Indirect x) | Just (rn', v') <- lookupValue h (safeRename "dereference" rn x) = dereference h (rn', v')
     dereference _ in_v = in_v
@@ -75,8 +77,12 @@ step (deeds, _state@(h, k, (rn, e))) =
         Update x'                 -> update     deeds h k tg_v x' in_v
 
     apply :: Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> Out (Anned Var) -> Maybe (Deeds, State)
-    apply deeds h k tg_v (dereference h -> (rn, Lambda x e_body)) x2' = Just (deeds', (h, k, (insertRenaming x (annee x2') rn, e_body)))
-      where deeds' = releaseDeedDescend_ (releaseDeedDeep deeds (annedTag x2')) tg_v
+    apply deeds h k tg_v (dereference h -> (rn, Lambda x e_body)) x2' = fmap (\deeds'' -> (deeds'', (h, k, (insertRenaming x (annee x2') rn, e_body)))) $ claimDeed deeds' (annedTag e_body)
+      where
+        -- You might wonder why I don't just releaseDeedDescend_ the tg_v here rather than releasing it all and
+        -- then claiming a little bit back. The answer is that the tg_v might be the tag of an indirection, so I have
+        -- no guarantee that releaseDeedDescend_ will leave me with any deeds for the lambda body!
+        deeds' = releaseDeedDeep (releaseDeedDeep deeds (annedTag x2')) tg_v
     apply _     _ _ _    (_,  v)                                  _   = panic "apply" (pPrint v)
 
     scrutinise :: Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> In [AnnedAlt] -> Maybe (Deeds, State)
