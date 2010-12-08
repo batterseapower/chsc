@@ -1,7 +1,8 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, PatternGuards #-}
 module Evaluator.FreeVars (
     WhyLive(..), Liveness, livenessAllFreeVars,
-    mkConcreteLiveness, mkPhantomLiveness, emptyLiveness, plusLiveness, plusLivenesses, whyLive, keepAlive,
+    mkConcreteLiveness, mkPhantomLiveness, emptyLiveness, plusLiveness, plusLivenesses,
+    whyLive, keepAlive, demoteHeapBinding,
 
     inFreeVars,
     heapBindingLiveness, pureHeapOpenLiveness,
@@ -24,6 +25,7 @@ import qualified Data.Set as S
 
 
 data WhyLive = PhantomLive | ConcreteLive
+             deriving (Eq)
 
 instance JoinSemiLattice WhyLive where
     ConcreteLive `join` _            = ConcreteLive
@@ -34,7 +36,7 @@ instance BoundedJoinSemiLattice WhyLive where
     bottom = PhantomLive
 
 newtype Liveness = Liveness { unLiveness :: M.Map (Out Var) WhyLive }
-                 deriving (JoinSemiLattice, BoundedJoinSemiLattice)
+                 deriving (Eq, JoinSemiLattice, BoundedJoinSemiLattice)
 
 mkConcreteLiveness, mkPhantomLiveness :: FreeVars -> Liveness
 mkConcreteLiveness fvs = Liveness $ setToMap ConcreteLive fvs
@@ -60,6 +62,11 @@ keepAlive :: Maybe WhyLive -> Out Var -> In AnnedTerm -> PureHeap -> PureHeap
 keepAlive Nothing             _  _    h = h
 keepAlive (Just PhantomLive)  x' in_e h = M.insert x' (Phantom in_e) h
 keepAlive (Just ConcreteLive) x' in_e h = M.insert x' (Concrete in_e) h
+
+demoteHeapBinding :: WhyLive -> HeapBinding -> HeapBinding
+demoteHeapBinding PhantomLive hb | Just in_e <- heapBindingTerm hb = Phantom in_e
+demoteHeapBinding _           hb = hb
+  -- All HeapBindings that don't have expressions are necessarily already some sort of phantom.
 
 
 inFreeVars :: (a -> FreeVars) -> In a -> FreeVars
