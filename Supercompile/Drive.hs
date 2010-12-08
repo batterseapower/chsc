@@ -28,9 +28,12 @@ import Renaming
 import StaticFlags
 import Utilities
 
+import Algebra.Lattice
+
 import qualified Data.Map as M
 import Data.Ord
 import qualified Data.Set as S
+import qualified Data.IntSet as IS
 import Data.Tree
 
 
@@ -83,24 +86,67 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ run
 -- == Bounded multi-step reduction ==
 --
 
-reduce :: (Deeds, State) -> (Deeds, State)
-reduce (deeds, orig_state) = (deeds', state')
+gc :: (Deeds, State) -> (Deeds, State)
+gc (deeds, (Heap h ids, k, in_e)) = (M.fold (\(_, e) deeds -> releaseDeedDeep deeds (annedTag e)) deeds h_dead,
+                                     (Heap h_reachable ids, k, in_e))
   where
-    (_, deeds', state') = go (0 :: Int) (mkHistory (extra wQO)) S.empty (emptyLosers, deeds, orig_state)
-      
-    go depth hist lives (losers, deeds, state)
+    (h_reachable, h_dead) = M.partitionWithKey (\x' _ -> x' `S.member` reachable) h
+    reachable = lfpFrom (snd $ stackFreeVars k (inFreeVars annedTermFreeVars in_e)) go
+    go live = live `S.union` S.unions [inFreeVars annedTermFreeVars in_e | in_e <- M.elems (h `restrict` live)]
+    
+    -- TODO: fix this comment. It used to be attached to the update frame logic in the evaluator.
+    --
+    -- If we can GC the update frame (because it can't be referred to in the continuation) then:
+    --  1) We don't have to actually update the heap or even claim a new deed
+    --  2) We make the supercompiler less likely to terminate, because doing so tends to reduce TagBag sizes
+    --
+    -- NB: to prevent incorrectly garbage collecting bindings from the enclosing heap when we have speculation on,
+    -- we pass around an extra "live set" of parts of the heap that might be referred to later on
+    --
+    -- TODO: make finding FVs much cheaper (i.e. memoise it in the syntax functor construction)
+    -- TODO: could GC cycles as well (i.e. don't consider stuff from the Heap that was only referred to by the thing being removed as "GC roots")
+
+speculate :: ((Deeds, State) -> (Deeds, State))
+          -> (Deeds, State) -> (Deeds, State)
+speculate reduce = snd . go (0 :: Int) (mkHistory wQO) emptyLosers
+  where
+    go depth hist losers (deeds, state) = case terminate hist state of
+        Continue hist' | sPECULATION -> continue depth hist' losers (deeds, state)
+        _                            -> (losers, (deeds, state))
+    
+    continue depth hist losers (deeds, state@(Heap h _, _, _)) = (losers', (deeds'', (Heap (h'_winners' `M.union` h'_losers) ids'', k, in_e)))
+      where
+        (deeds', (Heap h' ids', k, in_e)) = reduce (deeds, state)
+        
+        -- It is *very important* that we prevent speculation from forcing heap-carried things that have proved
+        -- to be losers in the past. This prevents us discovering speculation failure of some head binding, and
+        -- then forcing several thunks that are each strict in it. This change was motivated by DigitsOfE2 -- it
+        -- speeds up supercompilation of that benchmark massively.
+        (h'_losers, h'_winners) = M.partition (\in_e -> annedTag (snd in_e) `IS.member` losers) h'
+        
+        -- NB: It is important that we accumulate losers across "go" invocations in a state-monady kind of way, or DigitsOfE2 blows out
+        -- even more than normal (it still takes 22s with this change).
+        -- TODO: I suspect we should accumulate Losers across the boundary of speculate as well
+        (deeds'', Heap h'_winners' ids'', losers') = M.foldWithKey speculate_one (deeds', Heap h'_winners ids', losers) (h'_winners M.\\ h)
+        speculate_one x' in_e (deeds, Heap h'_winners ids, losers)
+          -- | not (isValue (annee (snd in_e))), traceRender ("speculate", depth, residualiseState (Heap (h {- `exclude` M.keysSet base_h -}) ids, k, in_e)) False = undefined
+          | otherwise = case (go (depth + 1) hist losers) (deeds, (Heap (M.delete x' h'_winners) ids, [], in_e)) of
+            (losers', (deeds', (Heap h' ids', [], in_e'@(_, annee -> Value _)))) -> (deeds', Heap (M.insert x' in_e' h') ids', losers')
+            (losers', _)                                                         -> (deeds,  Heap h'_winners             ids,  IS.insert (annedTag (snd in_e)) losers')
+
+reduce :: (Deeds, State) -> (Deeds, State)
+reduce (deeds, orig_state) = go (mkHistory (extra wQO)) (deeds, orig_state)
+  where
+    go hist (deeds, state)
       -- | traceRender ("reduce.go", residualiseState state) False = undefined
-      | not eVALUATE_PRIMOPS, (_, _, (_, annee -> PrimOp _ _)) <- state = (losers, deeds, state)
-      | otherwise = fromMaybe (losers, deeds, state) $ either id id $ do
+      | not eVALUATE_PRIMOPS, (_, _, (_, annee -> PrimOp _ _)) <- state = (deeds, state)
+      | otherwise = fromMaybe (deeds, state) $ either id id $ do
           hist' <- case terminate hist (state, (deeds, state)) of
                       _ | intermediate state  -> Right hist
                       -- _ | traceRender ("reduce.go (non-intermediate)", residualiseState state) False -> undefined
                       Continue hist               -> Right hist
-                      Stop (_gen, (deeds, state)) -> trace "reduce-stop" $ Left (guard rEDUCE_ROLLBACK >> return (losers, deeds, state)) -- FIXME: generalise?
-          Right $ fmap (go depth hist' lives) $ step (speculate hist' state) lives (losers, deeds, state)
-      where speculate hist' (Heap base_h _, _, _) lives (losers, deeds, state@(Heap h ids, k, in_e))
-              | not (isValue (annee (snd in_e))), traceRender ("speculate", depth, residualiseState (Heap (h `exclude` M.keysSet base_h) ids, k, in_e)) False = undefined
-              | otherwise = go (depth + 1) hist' lives (losers, deeds, state)
+                      Stop (_gen, (deeds, state)) -> trace "reduce-stop" $ Left (guard rEDUCE_ROLLBACK >> return (deeds, state)) -- FIXME: generalise?
+          Right $ fmap (go hist') $ step (deeds, state)
     
     intermediate :: State -> Bool
     intermediate (_, _, (_, annee -> Var _)) = False
@@ -247,7 +293,7 @@ sc' hist (deeds, statics, state) = (\raise -> check (SCRB raise)) `catchScpM` \g
                     Stop (gen, rb) -> maybe (stop gen hist) (`rollbackWith` gen) $ guard sC_ROLLBACK >> Just rb
     stop gen hist = trace "sc-stop" $ split gen               (sc hist) (deeds, statics, state)
     continue hist =                   split generaliseNothing (sc hist) ((\res@(_, _, state') -> traceRender ("reduce end", residualiseState state') res) $
-                                                                         case reduce (deeds, state) of (deeds, state) -> (deeds, statics, state)) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
+                                                                         case gc (speculate reduce (deeds, state)) of (deeds, state) -> (deeds, statics, state)) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
 
 memo :: ((Deeds, Statics, State) -> ScpM (Deeds, Out FVedTerm))
      ->  (Deeds, Statics, State) -> ScpM (Deeds, Out FVedTerm)
