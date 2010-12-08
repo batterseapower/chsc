@@ -725,6 +725,12 @@ splitStackFrame ids kf scruts bracketed_hole
             -- We carefully add this to the heap as a phantom binding. This means that if we aren't able to
             -- actually supercompile away all uses of the value, we still won't create a spurious extra allocation
             -- of the alt-bound constructor.
+            --
+            -- FIXME: this is causing errors because if we scrutinise a FV that turns that FV into a static for some
+            -- new hN corresponding to the case branch. We should residualise that hN in the outermost enclosing scope
+            -- that binds that FV, but at the moment hN is getting floated right past that point. This happens because
+            -- we only do bindCapturedFloats with sets of statics that arise from *let-bound* variables being residualised,
+            -- *not* with sets of statics arising from residualised binding sites like case alternatives and lambdas.
             alt_in_es = alt_rns `zip` alt_es
             alt_hs = zipWith3 (\alt_rn alt_con alt_tg -> M.fromList $ do { Just scrut_v <- [altConToValue alt_con]; scrut <- scruts; return (scrut, (if dUPLICATE_VALUES then Concrete else Phantom) (alt_rn, annedTerm alt_tg (Value scrut_v))) }) alt_rns alt_cons (map annedTag alt_es)
             alt_bvss = map (\alt_con' -> fst $ altConOpenFreeVars alt_con' (S.empty, S.empty)) alt_cons'
