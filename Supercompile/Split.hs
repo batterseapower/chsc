@@ -296,7 +296,7 @@ zipBracketeds :: ([Out FVedTerm] -> Out FVedTerm)
               -> Bracketed a
 zipBracketeds a b c d bracketeds = Bracketed {
       rebuild  = \(splitManyBy xss -> ess') -> a (zipWith rebuild bracketeds ess'),
-      extraFvs = b (map extraFvs bracketeds),
+      extraFvs = b (map extraFvs bracketeds), -- TODO: could delete some extraFvs if they are shadowed by bvs? Haven't observed this as a problem in practice...
       extraBvs = concat $ zipWith (\c_fn extra_bvs -> map c_fn extra_bvs) c (map extraBvs bracketeds),
       fillers  = concat xss,
       tails    = d $ snd $ foldl (\(i, tailss) bracketed -> (i + length (fillers bracketed), tailss ++ [fmap (map (+ i)) (tails bracketed)])) (0, []) bracketeds
