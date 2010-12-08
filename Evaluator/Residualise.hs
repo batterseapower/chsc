@@ -1,5 +1,5 @@
 {-# LANGUAGE ViewPatterns #-}
-module Supercompile.Residualise where
+module Evaluator.Residualise where
 
 import Evaluator.Syntax
 

@@ -1,6 +1,7 @@
 {-# LANGUAGE TupleSections, PatternGuards, ViewPatterns #-}
 module Evaluator.Evaluate (Losers, emptyLosers, step) where
 
+import Evaluator.Residualise
 import Evaluator.Syntax
 
 import Core.FreeVars
@@ -25,7 +26,8 @@ emptyLosers = IS.empty
 
 step :: (Deeds, State) -> Maybe (Deeds, State)
 step (deeds, _state@(h, k, (rn, e))) =
-  (\mb_res -> assertRender (text "step: deeds lost or gained!") (maybe True (\(deeds', state') -> noChange (releaseStateDeed deeds _state) (releaseStateDeed deeds' state')) mb_res) mb_res) $
+  (\mb_res -> assertRender (hang (text "step: deeds lost or gained when stepping:") 2 (pPrint (residualiseState _state)))
+                           (maybe True (\(deeds', state') -> noChange (releaseStateDeed deeds _state) (releaseStateDeed deeds' state')) mb_res) mb_res) $
   case annee e of
     Var x             -> force  deeds h k tg (rename rn x)
     Value v           -> unwind deeds h k tg (rn, v)

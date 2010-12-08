@@ -3,14 +3,13 @@
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 module Supercompile.Split (MonadStatics(..), split) where
 
---import Supercompile.Residualise
-
 import Core.FreeVars
 import Core.Renaming
 import Core.Syntax
 
 import Evaluator.Evaluate
 import Evaluator.FreeVars
+--import Evaluator.Residualise
 import Evaluator.Syntax
 
 import Size.Deeds

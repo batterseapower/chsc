@@ -3,7 +3,6 @@
 module Supercompile.Drive (supercompile) where
 
 import Supercompile.Match
-import Supercompile.Residualise
 import Supercompile.Split
 
 import Core.FreeVars
@@ -13,6 +12,7 @@ import Core.Tag
 
 import Evaluator.Evaluate
 import Evaluator.FreeVars
+import Evaluator.Residualise
 import Evaluator.Syntax
 
 import Size.Deeds
