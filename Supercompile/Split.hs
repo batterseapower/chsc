@@ -257,8 +257,8 @@ zipBracketeds a b c d bracketeds = Bracketed {
   where xss = map fillers bracketeds
 
 bracketedFreeVars :: (a -> FreeVars) -> Bracketed a -> FreeVars
-bracketedFreeVars fvs bracketed = extraFvs bracketed `S.union` transfer bracketed (map fvs (fillers bracketed))
-  where transfer bracketed fvss = S.unions $ zipWith (S.\\) fvss (extraBvs bracketed)
+bracketedFreeVars fvs bracketed = extraFvs bracketed `S.union` transfer (map fvs (fillers bracketed))
+  where transfer fvss = S.unions (zipWith (S.\\) fvss (extraBvs bracketed))
 
 releaseBracketedDeeds :: (Deeds -> a -> Deeds) -> Deeds -> Bracketed a -> Deeds
 releaseBracketedDeeds release deeds b = foldl' release deeds (fillers b)
