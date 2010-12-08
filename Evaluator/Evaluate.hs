@@ -124,7 +124,7 @@ step (deeds, _state@(h, k, (rn, e))) =
     update :: Deeds -> Heap -> Stack -> Tag -> Anned (Out Var) -> In AnnedValue -> Maybe (Deeds, State)
     update deeds (Heap h ids) k tg_v x' (rn, v) = case claimDeed deeds' tg_v of
         Nothing      -> traceRender ("update: deed claim FAILURE", annee x') Nothing
-        Just deeds'' -> Just (deeds'', (Heap (M.insert (annee x') (Concrete (rn, annedTerm tg_v (Value v))) h) ids, k, (rn, annedTerm tg_v (Value (Indirect (annee x'))))))
+        Just deeds'' -> Just (deeds'', (Heap (M.insert (annee x') (Concrete (rn, annedTerm tg_v (Value v))) h) ids, k, (mkIdentityRenaming [annee x'], annedTerm tg_v (Value (Indirect (annee x')))))) -- TODO: might be cleaner if I had the update frame renaming?
       where
         -- Unconditionally release the tag associated with the update frame
         deeds' = releaseDeedDeep deeds (annedTag x')
