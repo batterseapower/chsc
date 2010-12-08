@@ -215,7 +215,7 @@ simplify gen (init_deeds, init_s)
 data Bracketed a = Bracketed {
     rebuild :: [Out FVedTerm] -> Out FVedTerm, -- Rebuild the full output term given outputs to plug into each hole
     extraFvs :: FreeVars,                      -- Maximum free variables added by the residual wrapped around the holes
-    transfer :: [FreeVars] -> FreeVars,        -- Strips any variables bound by the residual out of the hole FVs
+    extraBvs :: [BoundVars],                   -- Maximum bound variables added at each hole by the residual wrapped around the holes
     fillers :: [a],                            -- Hole-fillers themselves. Usually State
     tails :: Maybe [Int]                       -- The indexes of all holes in tail position. If this is not Nothing, this is an *exhaustive* list of possible tail positions.
   } deriving (Functor, Foldable.Foldable, Traversable.Traversable)
@@ -227,7 +227,7 @@ noneBracketed :: Out FVedTerm -> FreeVars -> Bracketed a
 noneBracketed a b = Bracketed {
     rebuild  = \[] -> a,
     extraFvs = b,
-    transfer = \[] -> S.empty,
+    extraBvs = [],
     fillers  = [],
     tails    = Nothing
   }
@@ -236,21 +236,21 @@ oneBracketed :: a -> Bracketed a
 oneBracketed x = Bracketed {
     rebuild  = \[e] -> e,
     extraFvs = S.empty,
-    transfer = \[fvs] -> fvs,
+    extraBvs = [S.empty],
     fillers  = [x],
     tails    = Just [0]
   }
 
 zipBracketeds :: ([Out FVedTerm] -> Out FVedTerm)
               -> ([FreeVars] -> FreeVars)
-              -> ([FreeVars] -> FreeVars)
+              -> [BoundVars -> BoundVars]
               -> ([Maybe [Int]] -> Maybe [Int])
               -> [Bracketed a]
               -> Bracketed a
 zipBracketeds a b c d bracketeds = Bracketed {
       rebuild  = \(splitManyBy xss -> ess') -> a (zipWith rebuild bracketeds ess'),
       extraFvs = b (map extraFvs bracketeds),
-      transfer = \(splitManyBy xss -> fvss) -> c (zipWith transfer bracketeds fvss),
+      extraBvs = concat $ zipWith (\c_fn extra_bvs -> map c_fn extra_bvs) c (map extraBvs bracketeds),
       fillers  = concat xss,
       tails    = d $ snd $ foldl (\(i, tailss) bracketed -> (i + length (fillers bracketed), tailss ++ [fmap (map (+ i)) (tails bracketed)])) (0, []) bracketeds
     }
@@ -258,6 +258,7 @@ zipBracketeds a b c d bracketeds = Bracketed {
 
 bracketedFreeVars :: (a -> FreeVars) -> Bracketed a -> FreeVars
 bracketedFreeVars fvs bracketed = extraFvs bracketed `S.union` transfer bracketed (map fvs (fillers bracketed))
+  where transfer bracketed fvss = S.unions $ zipWith (S.\\) fvss (extraBvs bracketed)
 
 releaseBracketedDeeds :: (Deeds -> a -> Deeds) -> Deeds -> Bracketed a -> Deeds
 releaseBracketedDeeds release deeds b = foldl' release deeds (fillers b)
@@ -266,7 +267,7 @@ modifyFillers :: ([a] -> [b]) -> Bracketed a -> Bracketed b
 modifyFillers f bracketed = Bracketed {
     rebuild = rebuild bracketed,
     extraFvs = extraFvs bracketed,
-    transfer = transfer bracketed,
+    extraBvs = extraBvs bracketed,
     fillers = f (fillers bracketed),
     tails = tails bracketed
   }
@@ -694,10 +695,10 @@ splitStackFrame :: IdSupply
 splitStackFrame ids kf scruts bracketed_hole
   | Update x' <- kf = splitUpdate scruts x' bracketed_hole
   | otherwise = ([], M.empty, case kf of
-    Apply (annee -> x2') -> zipBracketeds (\[e] -> e `app` x2') (\[fvs] -> S.insert x2' fvs) (\[fvs] -> fvs) (\_ -> Nothing) [bracketed_hole]
+    Apply (annee -> x2') -> zipBracketeds (\[e] -> e `app` x2') (\[fvs] -> S.insert x2' fvs) [id] (\_ -> Nothing) [bracketed_hole]
     Scrutinise (rn, unzip -> (alt_cons, alt_es)) -> -- (if null k_remaining then id else traceRender ("splitStack: FORCED SPLIT", M.keysSet entered_hole, [x' | Tagged _ (Update x') <- k_remaining])) $
                                                     -- (if not (null k_not_inlined) then traceRender ("splitStack: generalise", k_not_inlined) else id) $
-                                                    zipBracketeds (\(e_hole:es_alts) -> case_ e_hole (alt_cons' `zip` es_alts)) (\(fvs_hole:fvs_alts) -> fvs_hole `S.union` S.unions (zipWith (S.\\) fvs_alts alt_bvss)) (\(vs_hole:vs_alts) -> vs_hole `S.union` S.unions (zipWith (S.\\) vs_alts alt_bvss)) (\(_tails_hole:tailss_alts) -> liftM concat (sequence tailss_alts)) (bracketed_hole : bracketed_alts)
+                                                    zipBracketeds (\(e_hole:es_alts) -> case_ e_hole (alt_cons' `zip` es_alts)) (\(fvs_hole:fvs_alts) -> fvs_hole `S.union` S.unions (zipWith (S.\\) fvs_alts alt_bvss)) (id:[\bvs -> bvs S.\\ alt_bvs | alt_bvs <- alt_bvss]) (\(_tails_hole:tailss_alts) -> liftM concat (sequence tailss_alts)) (bracketed_hole : bracketed_alts)
       where -- 0) Manufacture context identifier
             (ids', state_ids) = splitIdSupply ids
             ctxt_id = idFromSupply state_ids
@@ -713,7 +714,7 @@ splitStackFrame ids kf scruts bracketed_hole
             alt_hs = zipWith3 (\alt_rn alt_con alt_tg -> M.fromList $ do { Just scrut_v <- [altConToValue alt_con]; scrut <- scruts; return (scrut, Concrete (alt_rn, annedTerm alt_tg (Value scrut_v))) }) alt_rns alt_cons (map annedTag alt_es)
             alt_bvss = map (\alt_con' -> fst $ altConOpenFreeVars alt_con' (S.empty, S.empty)) alt_cons'
             bracketed_alts = zipWith (\alt_h alt_in_e -> oneBracketed (Once ctxt_id, \ids -> (Heap alt_h ids, [], alt_in_e))) alt_hs alt_in_es
-    PrimApply pop in_vs in_es -> zipBracketeds (primOp pop) S.unions S.unions (\_ -> Nothing) (bracketed_vs ++ bracketed_hole : bracketed_es)
+    PrimApply pop in_vs in_es -> zipBracketeds (primOp pop) S.unions (repeat id) (\_ -> Nothing) (bracketed_vs ++ bracketed_hole : bracketed_es)
       where -- 0) Manufacture context identifier
             (ids', state_idss) = accumL splitIdSupply ids (length in_es)
             ctxt_ids = map idFromSupply state_idss
@@ -740,7 +741,7 @@ splitUpdate scruts x' bracketed_hole = (annee x' : scruts, M.singleton (annee x'
   -- this is all that is actually required to make generalisation work properly, although it might pessimise the matcher a tiny bit.
 
 splitValue :: IdSupply -> In AnnedValue -> Bracketed (Entered, IdSupply -> State)
-splitValue ids (rn, Lambda x e) = zipBracketeds (\[e'] -> lambda x' e') (\[fvs'] -> fvs') (\[fvs'] -> S.delete x' fvs') (\_ -> Nothing) [oneBracketed (Many, \ids -> (Heap M.empty ids, [], (rn', e)))]
+splitValue ids (rn, Lambda x e) = zipBracketeds (\[e'] -> lambda x' e') (\[fvs'] -> fvs') [S.insert x'] (\_ -> Nothing) [oneBracketed (Many, \ids -> (Heap M.empty ids, [], (rn', e)))]
   where (_ids', rn', x') = renameBinder ids rn x
 splitValue ids in_v             = noneBracketed (value v') (inFreeVars annedValueFreeVars' in_v)
   where v' = detagAnnedValue' $ renameIn renameAnnedValue' ids in_v
