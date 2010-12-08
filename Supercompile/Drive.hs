@@ -122,7 +122,8 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) emptyLosers
         -- to be losers in the past. This prevents us discovering speculation failure of some head binding, and
         -- then forcing several thunks that are each strict in it. This change was motivated by DigitsOfE2 -- it
         -- speeds up supercompilation of that benchmark massively.
-        (h'_losers, h'_winners) = M.partition (\hb -> maybe False (`IS.member` losers) (heapBindingTag hb)) h'
+        (h'_losers, h'_winners) | sPECULATE_ON_LOSERS = (M.empty, h')
+                                | otherwise           = M.partition (\hb -> maybe False (`IS.member` losers) (heapBindingTag hb)) h'
         
         -- NB: It is important that we accumulate losers across "go" invocations in a state-monady kind of way, or DigitsOfE2 blows out
         -- even more than normal (it still takes 22s with this change).
