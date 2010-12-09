@@ -76,8 +76,52 @@ split :: MonadStatics m
       -> ((Deeds, State) -> m (Deeds, Out FVedTerm))
       -> (Deeds, State)
       -> m (Deeds, Out FVedTerm) -- NB: it is very important that extra_statics go in the second argument of union, because we don't want them overriding real definitions in the heap!
-split gen opt (deeds, s) = optimiseSplit opt deeds' bracketeds_heap bracketed_focus
-  where (deeds', bracketeds_heap, bracketed_focus) = simplify gen (deeds, s)
+split gen opt (deeds, s) = optimiseSplit opt' deeds' bracketeds_heap bracketed_focus
+  where
+    (deeds', bracketeds_heap, bracketed_focus) = simplify gen (deeds, s)
+    
+    s_fvs = stateFreeVars s
+    opt' (nested_deeds, nested_s@(Heap h _, _, _)) = do
+      -- We use bindCapturedFloats here in case any floated things depend on things bound above the holes
+      -- by e.g. lambdas or case alternatives. All other uses of bindCapturedFloats deal with variables that
+      -- refer to things bound by residual let expressions.
+      --
+      -- What can happen is this. We supercompile:
+      --  h1 x = case x of True -> e1; False -> e2
+      --
+      -- Which leads to the two recursively-supercompiled components:
+      --  h2 = let <x = True> in e1
+      --  h3 = let <x = False> in e2
+      --
+      -- Note that x was not static in h1, but it is static in h2. This is the only place that a lexically
+      -- free variable changes to static!
+      --
+      -- When we evaluate optimiseBracketed for whoever originally binds the x (probably a lambda or case-alt --
+      -- since it was free in h1 we probably had no information about what it was), we will residualise h2 and
+      -- h3, because we can see that they mention x as a static.
+      --
+      -- However, we won't residualise h1 because when we created the promise for it we couldn't see that it
+      -- would eventually want x as a static. Indeed, we *shouldn't* residualise h1 here, because h1 is presumably
+      -- just as applicable to any x, not just this the one that happens to be bound here.
+      --
+      -- The right thing to do is to bind h2 and h3 just inside the case branches they originated from, as long
+      -- as they still refer to the scrutinee at all. Hence:
+      --
+      --  \x -> Just (case x of True -> e1; False -> e2)
+      -- ==>
+      --  let h1 x = Just (h2 x)
+      --      h2 x = case x of True -> let h2 = D[e1][x] in h2; False -> let h3 = D[e2][x] in h3
+      --  in \x -. h1 x
+      --
+      -- Note that if the scrutinee x is actually a static we could safely float h2/h3 up to the binding site for
+      -- that static, because h1 will *also* be residualised at that point. There fore the final test is:
+      --
+      --   Check if (initial_state_fvs_including_initial_phantom_bindings `S.intersection` vars_bound_to_phantom_in h)
+      --   intersects with the lexical FVs of the float: if it does, bind that float here
+      let fvs_that_became_phantom = s_fvs `S.intersection` M.keysSet (M.filter heapBindingNonConcrete h)
+      (xes, (nested_deeds', nested_e')) <- bindCapturedFloats fvs_that_became_phantom $ opt (nested_deeds, nested_s)
+      unless (null xes) $ traceRenderM ("split.opt", fvs_that_became_phantom, xes)
+      return (nested_deeds', letRecSmart xes nested_e')
 
 
 -- Non-expansive simplification that we can safely do just before splitting to make the splitter a bit simpler
