@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections, PatternGuards, ExistentialQuantification, DeriveFunctor, DeriveFoldable,
+{-# LANGUAGE TupleSections, PatternGuards, ExistentialQuantification, DeriveFunctor, DeriveFoldable, DeriveTraversable,
              TypeSynonymInstances, FlexibleInstances, IncoherentInstances, OverlappingInstances, TypeOperators #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Utilities (
@@ -167,6 +167,9 @@ instance (Functor f, Functor g) => Functor (f :.: g) where
 instance (Foldable.Foldable f, Foldable.Foldable g) => Foldable.Foldable (f :.: g) where
     foldMap f = Foldable.foldMap (Foldable.foldMap f) . unComp
 
+instance (Traversable.Traversable f, Traversable.Traversable g) => Traversable.Traversable (f :.: g) where
+    traverse f = fmap Comp . Traversable.traverse (Traversable.traverse f) . unComp
+
 
 newtype Down a = Down { unDown :: a }
 
@@ -185,7 +188,7 @@ injectTag :: Int -> Tag -> Tag
 injectTag cls tg = cls * tg
 
 data Tagged a = Tagged { tag :: !Tag, tagee :: !a }
-              deriving (Functor, Foldable.Foldable)
+              deriving (Functor, Foldable.Foldable, Traversable.Traversable)
 
 instance Copointed Tagged where
     extract = tagee
@@ -554,7 +557,8 @@ mapAccumM :: (Traversable.Traversable t, Monoid m) => (a -> (m, b)) -> t a -> (m
 mapAccumM f ta = Traversable.mapAccumL (\m a -> case f a of (m', b) -> (m `mappend` m', b)) mempty ta
 
 
-newtype Identity a = I { unI :: a } deriving (Functor, Foldable.Foldable)
+newtype Identity a = I { unI :: a }
+                   deriving (Functor, Foldable.Foldable, Traversable.Traversable)
 
 instance Show1 Identity where
     showsPrec1 prec (I x) = showParen (prec >= appPrec) (showString "Identity" . showsPrec appPrec x)

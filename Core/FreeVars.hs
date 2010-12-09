@@ -1,4 +1,4 @@
-{-# LANGUAGE Rank2Types, TypeOperators, FlexibleInstances, DeriveFunctor, DeriveFoldable #-}
+{-# LANGUAGE Rank2Types, TypeOperators, FlexibleInstances, DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 module Core.FreeVars where
 
 import Core.Syntax
@@ -7,6 +7,7 @@ import Utilities
 
 import qualified Data.Set as S
 import qualified Data.Foldable as Foldable
+import qualified Data.Traversable as Traversable
 
 
 type FreeVars = S.Set Var
@@ -61,7 +62,7 @@ altConFreeVars (DefaultAlt mb_x) = maybe id S.delete mb_x
 
 
 data FVed a = FVed { freeVars :: !FreeVars, fvee :: !a }
-            deriving (Functor, Foldable.Foldable)
+            deriving (Functor, Foldable.Foldable, Traversable.Traversable)
 
 instance Copointed FVed where
     extract = fvee
