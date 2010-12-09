@@ -1,9 +1,10 @@
 -- Inspect the output code: if it contains any allocations for the True constructor
 -- values have been duplicated. We want to avoid the duplication while still contracting the
 -- redundant case analysis within each component of the pair.
-root x = let x = True in (if x then Just x else Just True, if x then Just False else Just x)
+root = let x = True in (\_ -> if x then Just x else Just True, \_ -> if x then Just False else Just x)
+  -- NB: we make sure that speculation doesn't contract the if's for us (which would mask the bug)
+  -- by hiding the case analysis within a value
 
 tests = [
-    (root True, (Just True, Just False)),
-    (root False, (Just True, Just False))
+    (case root of (x, y) -> (x (), y ()), (Just True, Just False))
   ]
