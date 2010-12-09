@@ -86,6 +86,7 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ run
 -- == Bounded multi-step reduction ==
 --
 
+-- TODO: have the garbage collector collapse indirections to indirections (but unlike GHC, not further!)
 gc :: (Deeds, State) -> (Deeds, State)
 gc (deeds, (Heap h ids, k, in_e)) = (M.fold (flip releaseHeapBindingDeeds) deeds h_dead,
                                      (Heap h_reachable ids, k, in_e))
@@ -128,6 +129,8 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) emptyLosers
         -- NB: It is important that we accumulate losers across "go" invocations in a state-monady kind of way, or DigitsOfE2 blows out
         -- even more than normal (it still takes 22s with this change).
         -- TODO: I suspect we should accumulate Losers across the boundary of speculate as well
+        -- TODO: there is a difference between losers due to termination-halting and losers because we didn't have neough
+        -- information available to complete evaluation
         (deeds'', Heap h'_winners' ids'', losers') = M.foldWithKey speculate_one (deeds', Heap h'_winners ids', losers) (h'_winners M.\\ h)
         speculate_one x' (Concrete in_e) (deeds, Heap h'_winners ids, losers)
           -- | not (isValue (annee (snd in_e))), traceRender ("speculate", depth, residualiseState (Heap (h {- `exclude` M.keysSet base_h -}) ids, k, in_e)) False = undefined
