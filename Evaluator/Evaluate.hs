@@ -11,10 +11,12 @@ import Core.Prelude (trueDataCon, falseDataCon)
 import Size.Deeds
 
 import Renaming
+import StaticFlags
 import Utilities
 
 import qualified Data.IntSet as IS
 import qualified Data.Map as M
+import Data.Traversable (traverse)
 
 
 type Losers = IS.IntSet
@@ -28,7 +30,7 @@ step (deeds, _state@(h, k, (rn, e))) =
   (\mb_res -> assertRender (hang (text "step: deeds lost or gained when stepping:") 2 (pPrint (residualiseState _state)))
                            (maybe True (\(deeds', state') -> noChange (releaseStateDeed deeds _state) (releaseStateDeed deeds' state')) mb_res) mb_res) $
   case annee e of
-    Var x             -> force  deeds h k tg (rn, x)
+    Var x             -> force  deeds h k tg (safeRename "force" rn x)
     Value v           -> unwind deeds h k tg (rn, v)
     App e1 x2         -> Just (deeds', (h, Apply (renameAnnedVar rn x2)    : k, (rn, e1)))
     PrimOp _   []     -> error "Nullary primops are called literals :-)"
@@ -50,23 +52,23 @@ step (deeds, _state@(h, k, (rn, e))) =
     -- of the dereferenced thing - in this case we have to be sure to claim some deeds for that subcomponent. For example, if we
     -- dereference to get a lambda in our function application we had better claim deeds for the body.
     dereference :: Heap -> In AnnedValue -> In AnnedValue
-    dereference h (rn, Indirect x) | Just (rn', v') <- lookupValue h (safeRename "dereference" rn x) = dereference h (rn', v')
+    dereference h (rn, Indirect x) | Just (rn', anned_v') <- lookupValue h (safeRename "dereference" rn x) = dereference h (rn', annee anned_v')
     dereference _ in_v = in_v
 
-    lookupValue :: Heap -> Out Var -> Maybe (In AnnedValue)
+    lookupValue :: Heap -> Out Var -> Maybe (In (Anned AnnedValue))
     lookupValue (Heap h _) x' = do
         hb <- M.lookup x' h
         -- As a special concession, the evaluator can look into phantom bindings as long as they are already values.
         -- We also take care to residualise any non-linear values as phantoms in the splitter. This stops us from duplicating values.
-        (rn, annee -> Value v) <- heapBindingTerm hb
-        return (rn, v)
+        (rn, anned_e) <- heapBindingTerm hb
+        anned_v <- traverse (\e -> do { Value v <- return e; return v }) anned_e
+        return (rn, anned_v)
 
-    force :: Deeds -> Heap -> Stack -> Tag -> In Var -> Maybe (Deeds, State)
-    force deeds (Heap h ids) k tg (rn, x)
-      | Just _ <- lookupValue (Heap h ids) x' = Just (deeds, (Heap h               ids, k,                           (rn, annedTerm tg (Value (Indirect x)))))
-      | Just (Concrete in_e) <- M.lookup x' h = Just (deeds, (Heap (M.delete x' h) ids, Update (annedVar tg x') : k, in_e))
-      | otherwise                             = Nothing
-      where x' = safeRename "force" rn x
+    force :: Deeds -> Heap -> Stack -> Tag -> Out Var -> Maybe (Deeds, State)
+    force deeds (Heap h ids) k tg x'
+      | Just (rn_v, anned_v) <- lookupValue (Heap h ids) x' = Just (deeds, (Heap h               ids, k,                           if dUPLICATE_VALUES then (rn_v, fmap Value anned_v) else (mkIdentityRenaming [x'], annedTerm tg (Value (Indirect x')))))
+      | Just (Concrete in_e) <- M.lookup x' h               = Just (deeds, (Heap (M.delete x' h) ids, Update (annedVar tg x') : k, in_e))
+      | otherwise                                           = Nothing
 
     unwind :: Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> Maybe (Deeds, State)
     unwind deeds h k tg_v in_v = uncons k >>= \(kf, k) -> case kf of
@@ -123,7 +125,9 @@ step (deeds, _state@(h, k, (rn, e))) =
     update :: Deeds -> Heap -> Stack -> Tag -> Anned (Out Var) -> In AnnedValue -> Maybe (Deeds, State)
     update deeds (Heap h ids) k tg_v x' (rn, v) = case claimDeed deeds' tg_v of
         Nothing      -> traceRender ("update: deed claim FAILURE", annee x') Nothing
-        Just deeds'' -> Just (deeds'', (Heap (M.insert (annee x') (Concrete (rn, annedTerm tg_v (Value v))) h) ids, k, (mkIdentityRenaming [annee x'], annedTerm tg_v (Value (Indirect (annee x')))))) -- TODO: might be cleaner if I had the update frame renaming?
+        Just deeds'' -> Just (deeds'', (Heap (M.insert (annee x') (Concrete (rn, annedTerm tg_v (Value v))) h) ids, k, in_e))
+          where in_e | dUPLICATE_VALUES = (rn,                            annedTerm tg_v (Value v))
+                     | otherwise        = (mkIdentityRenaming [annee x'], annedTerm tg_v (Value (Indirect (annee x'))))
       where
         -- Unconditionally release the tag associated with the update frame
         deeds' = releaseDeedDeep deeds (annedTag x')
