@@ -82,8 +82,13 @@ pureHeapOpenLiveness :: PureHeap -> (BoundVars, FreeVars) -> (BoundVars, Livenes
 pureHeapOpenLiveness h (bvs, fvs) = M.foldWithKey (\x' hb (bvs, fvs) -> (S.insert x' bvs, fvs `plusLiveness` heapBindingLiveness hb)) (bvs, mkConcreteLiveness fvs) h
 
 pureHeapFreeVars :: PureHeap -> (BoundVars, FreeVars) -> FreeVars
-pureHeapFreeVars h (bvs, fvs) = fvs' S.\\ bvs_static' S.\\ bvs_nonstatic'
-  where ((bvs_static', bvs_nonstatic'), fvs') = pureHeapOpenFreeVars h (bvs, fvs)
+pureHeapFreeVars h (bvs, fvs) = fvs' S.\\ bvs'
+  where (bvs', fvs') = pureHeapFreeVars' h (bvs, fvs)
+
+pureHeapFreeVars' :: PureHeap -> (BoundVars, FreeVars) -> (BoundVars, FreeVars)
+pureHeapFreeVars' h (bvs, fvs) = (bvs_static' `S.union` (fvs_static S.\\ residualised_fvs), residualised_fvs)
+  where ((bvs_static', bvs_nonstatic'), (fvs_static, fvs_nonstatic')) = pureHeapOpenFreeVars h (bvs, fvs)
+        residualised_fvs = fvs_nonstatic' S.\\ bvs_nonstatic'
 
 -- Note [Free variables of phantom bindings]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -125,14 +130,17 @@ pureHeapFreeVars h (bvs, fvs) = fvs' S.\\ bvs_static' S.\\ bvs_nonstatic'
 -- we could in this case), so we wouldn't have reused it! Thus, changing the input state to be:
 --   < y |-> <>, x |-> <Just y> | case x of Just z -> z | \epsilon >
 --
--- Means to change the reusability.
-pureHeapOpenFreeVars :: PureHeap -> (BoundVars, FreeVars) -> ((BoundVars, BoundVars), FreeVars)
-pureHeapOpenFreeVars h (bvs, fvs) = M.foldWithKey go ((S.empty, bvs), fvs) h
+-- Means no change to the reusability.
+--
+-- FIXME: I'm now trying to do this. Fix the comments.
+pureHeapOpenFreeVars :: PureHeap -> (BoundVars, FreeVars) -> ((BoundVars, BoundVars), (FreeVars, FreeVars))
+pureHeapOpenFreeVars h (bvs, fvs) = M.foldWithKey go ((S.empty, bvs), (S.empty, fvs)) h
   where
     --go x' hb ((bvs_static, bvs_nonstatic), fvs) = case hb of Concrete in_e -> ((bvs_static, S.insert x' bvs_nonstatic), fvs `S.union` inFreeVars annedTermFreeVars in_e); _ -> ((S.insert x' bvs_static, bvs_nonstatic), fvs))
-    go x' hb ((bvs_static, bvs_nonstatic), fvs) =
+    go x' hb ((bvs_static, bvs_nonstatic), (fvs_static, fvs_nonstatic)) =
       (case hb of Concrete _ -> (bvs_static, S.insert x' bvs_nonstatic); _ -> (S.insert x' bvs_static, bvs_nonstatic),
-       fvs `S.union` maybe S.empty (inFreeVars annedTermFreeVars) (heapBindingTerm hb))
+       if heapBindingNonConcrete hb then (fvs_static `S.union` fvs, fvs_nonstatic) else (fvs_static, fvs_nonstatic `S.union` fvs))
+      where fvs = maybe S.empty (inFreeVars annedTermFreeVars) (heapBindingTerm hb)
 
 stackFreeVars :: Stack -> FreeVars -> (BoundVars, FreeVars)
 stackFreeVars k fvs = (S.unions *** (S.union fvs . S.unions)) . unzip . map stackFrameFreeVars $ k
@@ -148,5 +156,4 @@ stateFreeVars :: State -> FreeVars
 stateFreeVars (Heap h _, k, in_e) = pureHeapFreeVars h (stackFreeVars k (inFreeVars annedTermFreeVars in_e))
 
 stateStaticFreeVars :: State -> (BoundVars, FreeVars)
-stateStaticFreeVars (Heap h _, k, in_e) = (bvs_static', fvs' S.\\ bvs_nonstatic')
-  where ((bvs_static', bvs_nonstatic'), fvs') = pureHeapOpenFreeVars h (stackFreeVars k (inFreeVars annedTermFreeVars in_e))
+stateStaticFreeVars (Heap h _, k, in_e) = pureHeapFreeVars' h (stackFreeVars k (inFreeVars annedTermFreeVars in_e))

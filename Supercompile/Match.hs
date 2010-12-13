@@ -221,4 +221,8 @@ matchPureHeap ids bound_eqs free_eqs init_h_l init_h_r = go bound_eqs free_eqs i
      -- if we can't rename it!
     matchHeapBinding x_l (Concrete in_e_l) x_r (Concrete in_e_r) = fmap (\extra_free_eqs -> (deleteExpensive x_l in_e_l, deleteExpensive x_r in_e_r, extra_free_eqs)) $ matchInTerm ids in_e_l in_e_r
      -- Phantom-ish heap bindings (i.e. phantoms / input FVs / things bound by update frames) must match *exactly* since we couldn't rename them
-    matchHeapBinding x_l _                 x_r _                 = guard (x_l == x_r) >> return (id, id, [])
+     --
+     -- If we abstracted over the free variables of phantom bindings, we would have to produce a renaming for those FVs here. The new story is that such
+     -- FVs are treated just like statics themselves, so there is no need to FIXME
+     -- we just do a little hack here to make that work. We assume that if x_l == x_r then both sides are phantoms with the same RHS.
+    matchHeapBinding x_l _                 x_r _                = guard (x_l == x_r) >> return (id, id, [])
