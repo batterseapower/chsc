@@ -345,6 +345,8 @@ memo opt (deeds, state) = do
         let (static_vs, vs) = stateStaticFreeVars state
     
         -- NB: promises are lexically scoped because they may refer to FVs
+        -- NB: thanks to stateStaticFreeVars, we abstract over the free variables of phantoms here, NOT just the free variables of
+        -- concretes. This is because the evaluator is allowed to look at phantom values, which may in turn make reference to FVs.
         x <- freshHName
         promise P { fun = x, abstracted = S.toList (vs S.\\ static_vs), lexical = S.toList static_vs, meaning = state } $ do
             traceRenderM (">sc", x, residualiseState state, case state of (Heap h _, _, _) -> M.filter heapBindingNonConcrete h, deeds)

@@ -85,8 +85,36 @@ pureHeapFreeVars :: PureHeap -> (BoundVars, FreeVars) -> FreeVars
 pureHeapFreeVars h (bvs, fvs) = fvs' S.\\ bvs_static' S.\\ bvs_nonstatic'
   where ((bvs_static', bvs_nonstatic'), fvs') = pureHeapOpenFreeVars h (bvs, fvs)
 
+-- Note [Free variables of phantom bindings]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+--
+-- Once upon a time, this function would not consider the free variables of phantom bindings to be free.
+-- This has changed for two reasons:
+--   1) If we want the matcher to "look through" into phantom bindings, it needs to be able to rename
+--      the free variables of those bindings when it ties back. For example, consider:
+--         xl |-> <yl : ysl> `match` xr |-> <yr : ysr>
+--
+--      When we tie back, we need to rename yl |-> yr, ysl |-> ysr. We can't do that unless the tieback
+--      was abstracted over them in the first place, so we better report them as free here.
+--
+--   2) This point is the real killer. We have a scheme to avoid duplicating values by adding values to
+--      the phantom heap and then letting the evaluator "look through" into phantom bindings as long
+--      as they contain values. However, if we do this in the course of evaluation a free variables
+--      of a phantom binding might become a real free variable. For example:
+--             < x |-> <Just y> | case x of Just z -> z | \epsilon >
+--         --> < x |-> <Just y> | y | \epsilon >
+--
+--      So we better have bound that y above, or we're screwed!
+--
+-- If we only cared about 2), we could just make the free variables of phantom *values* show up as free variables,
+-- but it's simpler to just make all phantom free variables into free variables.
 pureHeapOpenFreeVars :: PureHeap -> (BoundVars, FreeVars) -> ((BoundVars, BoundVars), FreeVars)
-pureHeapOpenFreeVars h (bvs, fvs) = M.foldWithKey (\x' hb ((bvs_static, bvs_nonstatic), fvs) -> case hb of Concrete in_e -> ((bvs_static, S.insert x' bvs_nonstatic), fvs `S.union` inFreeVars annedTermFreeVars in_e); _ -> ((S.insert x' bvs_static, bvs_nonstatic), fvs)) ((S.empty, bvs), fvs) h
+pureHeapOpenFreeVars h (bvs, fvs) = M.foldWithKey go ((S.empty, bvs), fvs) h
+  where
+    --go x' hb ((bvs_static, bvs_nonstatic), fvs) = case hb of Concrete in_e -> ((bvs_static, S.insert x' bvs_nonstatic), fvs `S.union` inFreeVars annedTermFreeVars in_e); _ -> ((S.insert x' bvs_static, bvs_nonstatic), fvs))
+    go x' hb ((bvs_static, bvs_nonstatic), fvs) =
+      (case hb of Concrete _ -> (bvs_static, S.insert x' bvs_nonstatic); _ -> (S.insert x' bvs_static, bvs_nonstatic),
+       fvs `S.union` maybe S.empty (inFreeVars annedTermFreeVars) (heapBindingTerm hb))
 
 stackFreeVars :: Stack -> FreeVars -> (BoundVars, FreeVars)
 stackFreeVars k fvs = (S.unions *** (S.union fvs . S.unions)) . unzip . map stackFrameFreeVars $ k
