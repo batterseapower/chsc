@@ -150,6 +150,34 @@ matchPureHeapExact ids bound_eqs free_eqs init_h_l init_h_r = do
     --     NB: We use this function when matching letrecs, so don't necessarily want to build a renaming immediately
     return eqs
 
+-- **Historical** Note [Static-to-dynamic conversion]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+--
+-- This note records problems with optimisation that I had when I had a static *set* rather than a heap containing some
+-- phantom and some concrete bindings. Keeping it around for posterity:
+--
+--   Check that all of the things that were dynamic last time are dynamic this time.
+--   This is an issue of *performance* and *typeability*. If we omit this check, the generated code may
+--   be harder for GHC to chew on because we will apply static variables to dynamic positions in the tieback.
+--   
+--   Rejecting tieback on this basis can lead to crappy supercompilation (since -- if we didn't incorporate the Statics set in
+--   the wqo -- we would immediately whistle without making a tieback). For an example, see AccumulatingParam-Peano: with split
+--   point generalisation, we *would* be building an optimal loop, but this check rejects it (tieback at h15 to h6 rejected
+--   because "n" would be converted from static to dynamic). Instead, we do something like this:
+--    * Record whether a variable is static or dynamic in the Statics set
+--    * "Generalise away" a variables staticness if this check fails so that:
+--       a) The termination criteria does not immediately fire
+--       b) We have a chance to build a loop where that variable is dynamic
+--   
+--   NB: I've now turned this check off. The reason is that if we don't tie back here, in order to actually continue supercompilation
+--   in a half-decent way we need to generalise away some staticness so the WQO doesn't fire. But if we do that then we'll just reach
+--   here again, except with less statics and thus we hope that this test now passes.
+--   
+--   It is more direct to just shortcut the process and do the tieback. This decision is essentially motivated by the thinking that
+--   it is ALWAYS better to convert a static into a dynamic than drop a frame in the splitter.
+--
+-- Nowadays, dropping a static causes the WQOs tag bag to change, so we don't get crappy supercompilation if we fail to tieback.
+-- Hence the current matcher does *not* instantiate dynamic variables with static ones.
 matchPureHeap :: IdSupply -> [(Var, Var)] -> [(Var, Var)] -> PureHeap -> PureHeap -> Maybe [(Var, Var)]
 matchPureHeap ids bound_eqs free_eqs init_h_l init_h_r = go bound_eqs free_eqs init_h_l init_h_r
   where
@@ -164,8 +192,6 @@ matchPureHeap ids bound_eqs free_eqs init_h_l init_h_r = go bound_eqs free_eqs i
     -- TODO: look through variables on both sides
     --  x |-> e1; (x, x) `match` x |-> e1; y |-> x `match` (x, y) /= Nothing
     --  x |-> e1, y |-> x; (x, y) `match` x |-> e1 `match` (x, x) /= Nothing
-    -- NB: allow us to instantiate a dynamic variable with a static variable.
-    -- FIXME: import the reason for why this is from the commentary in local-hs-termination-simple
     --go known free_eqs h_l h_r | traceRender ("go", known, free_eqs, h_l, h_r) False = undefined
     go known [] _ _ = Just known
     go known ((x_l, x_r):free_eqs) h_l h_r
@@ -178,9 +204,15 @@ matchPureHeap ids bound_eqs free_eqs init_h_l init_h_r = go bound_eqs free_eqs i
        -- The left side is free, so assume that we can instantiate x_l to x_r (x_l may be bound above, x_r may be bound here or above):
       | otherwise = go ((x_l, x_r) : known) free_eqs h_l h_r
 
+     -- We can match Concretes "semantically", by peeking into ther definitions
+     -- NB: we used to use heapBindingTerm to look through into phantom bindings here, but it caused bugs. In particular, if we had
+     -- two matching phantom bindings:
+     --   xl |-> <yl : ysl> `match` xr |-> <yr : ysr>
+     --
+     -- We would look through and generate a renaming yl |-> yr, ysl |-> ysr. This renaming cannot be applied. One option would be to
+     -- allow matching through phantom bindings only if that involved renaming variables bound by this heap, but IMHO this is too much complexity
+     -- for this relatively unimportant feature of the matching mechanism.
+    matchHeapBinding x_l (Concrete in_e_l) x_r (Concrete in_e_r) = fmap (\extra_free_eqs -> (deleteExpensive x_l in_e_l, deleteExpensive x_r in_e_r, extra_free_eqs)) $ matchInTerm ids in_e_l in_e_r
      -- Environental heap bindings (i.e. input FVs) / things bound by update frames must match *exactly* since we know nothing about them
-    matchHeapBinding x_l (heapBindingTerm -> Nothing)     x_r (heapBindingTerm -> Nothing)     = guard (x_l == x_r) >> return (id, id, [])
-     -- We can match other possibilities "semantically", by peeking into ther definitions
-    matchHeapBinding x_l (heapBindingTerm -> Just in_e_l) x_r (heapBindingTerm -> Just in_e_r) = fmap (\extra_free_eqs -> (deleteExpensive x_l in_e_l, deleteExpensive x_r in_e_r, extra_free_eqs)) $ matchInTerm ids in_e_l in_e_r
-     -- Environment variables match *only* against themselves, not against anything other heap binding at all
-    matchHeapBinding _ _ _ _ = Nothing
+     -- We also match phantom bindings this way, even though we could look through them (see above)
+    matchHeapBinding x_l _                 x_r _                 = guard (x_l == x_r) >> return (id, id, [])
