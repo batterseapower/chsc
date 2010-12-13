@@ -261,6 +261,10 @@ mapMaybeSet f = S.fromList . mapMaybe f . S.toList
 setToMap :: Ord k => v -> S.Set k -> M.Map k v
 setToMap v = M.fromAscList . map (,v) . S.toAscList
 
+-- Essentially XOR on sets. See <http://en.wikipedia.org/wiki/Set_(mathematics)>
+symmetricDifference :: Ord a => S.Set a -> S.Set a -> S.Set a
+symmetricDifference a b = (a `S.difference` b) `S.union` (b `S.difference` a)
+
 
 data Combining a b = LeftOnly a | Both a b | RightOnly b
 

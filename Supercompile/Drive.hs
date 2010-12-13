@@ -339,7 +339,7 @@ memo opt (deeds, state) = do
           -- , traceRender ("memo'", statics, stateFreeVars state, rn_lr, (fun p, lexical p, abstracted p)) True
          ] of
       (_p, res):_ -> {- traceRender ("tieback", residualiseState state, fst res) $ -} do
-        traceRenderM ("=sc", fun _p, residualiseState state, deeds, res)
+        traceRenderM ("=sc", fun _p, residualiseState state, case state of (Heap h _, _, _) -> M.filter heapBindingNonConcrete h, deeds, res)
         return res
       [] -> {- traceRender ("new drive", residualiseState state) $ -} do
         let (static_vs, vs) = stateStaticFreeVars state
