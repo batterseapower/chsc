@@ -209,10 +209,9 @@ matchPureHeap ids bound_eqs free_eqs init_h_l init_h_r = go bound_eqs free_eqs i
      -- two matching phantom bindings:
      --   xl |-> <yl : ysl> `match` xr |-> <yr : ysr>
      --
-     -- We would look through and generate a renaming yl |-> yr, ysl |-> ysr. This renaming cannot be applied. One option would be to
-     -- allow matching through phantom bindings only if that involved renaming variables bound by this heap, but IMHO this is too much complexity
-     -- for this relatively unimportant feature of the matching mechanism.
+     -- We would look through and thus generate a renaming xl |-> xr, yl |-> yr, ysl |-> ysr. The xl |-> xr part of this renaming cannot be applied,
+     -- because by definition the corresponding binding is not abstracted over xl! (By chance we *can* actually apply the other part, because we
+     -- abstract over free variables of phantom bindings for other reasons - see pureHeapOpenFreeVars)
     matchHeapBinding x_l (Concrete in_e_l) x_r (Concrete in_e_r) = fmap (\extra_free_eqs -> (deleteExpensive x_l in_e_l, deleteExpensive x_r in_e_r, extra_free_eqs)) $ matchInTerm ids in_e_l in_e_r
-     -- Environental heap bindings (i.e. input FVs) / things bound by update frames must match *exactly* since we know nothing about them
-     -- We also match phantom bindings this way, even though we could look through them (see above)
+     -- Phantom-ish heap bindings (i.e. phantoms / input FVs / things bound by update frames) must match *exactly* since we couldn't rename them
     matchHeapBinding x_l _                 x_r _                 = guard (x_l == x_r) >> return (id, id, [])
