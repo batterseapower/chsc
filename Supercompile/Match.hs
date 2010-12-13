@@ -212,6 +212,13 @@ matchPureHeap ids bound_eqs free_eqs init_h_l init_h_r = go bound_eqs free_eqs i
      -- We would look through and thus generate a renaming xl |-> xr, yl |-> yr, ysl |-> ysr. The xl |-> xr part of this renaming cannot be applied,
      -- because by definition the corresponding binding is not abstracted over xl! (By chance we *can* actually apply the other part, because we
      -- abstract over free variables of phantom bindings for other reasons - see pureHeapOpenFreeVars)
+     --
+     -- One option would be to insist on exact matching for any free variables found from the RHS of a phantom binding, but this is more trouble than it's worth.
+     -- It would also be rather delicate because it would rely on free variables of different tiebacks referring to the same thing if they have the same name. Probably true,
+     -- but this would be the only thing making that assumption (?).
+     --
+     -- We could also do something clever if we knew that the static variable vanished after reduction. If we know it won't be used, it doesn't matter
+     -- if we can't rename it!
     matchHeapBinding x_l (Concrete in_e_l) x_r (Concrete in_e_r) = fmap (\extra_free_eqs -> (deleteExpensive x_l in_e_l, deleteExpensive x_r in_e_r, extra_free_eqs)) $ matchInTerm ids in_e_l in_e_r
      -- Phantom-ish heap bindings (i.e. phantoms / input FVs / things bound by update frames) must match *exactly* since we couldn't rename them
     matchHeapBinding x_l _                 x_r _                 = guard (x_l == x_r) >> return (id, id, [])

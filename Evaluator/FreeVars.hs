@@ -97,6 +97,8 @@ pureHeapFreeVars h (bvs, fvs) = fvs' S.\\ bvs_static' S.\\ bvs_nonstatic'
 --      When we tie back, we need to rename yl |-> yr, ysl |-> ysr. We can't do that unless the tieback
 --      was abstracted over them in the first place, so we better report them as free here.
 --
+--      (I've later found that we can't do this anyway - see matchHeapBinding in Match.hs - so this point is moot)
+--
 --   2) This point is the real killer. We have a scheme to avoid duplicating values by adding values to
 --      the phantom heap and then letting the evaluator "look through" into phantom bindings as long
 --      as they contain values. However, if we do this in the course of evaluation a free variables
@@ -108,6 +110,22 @@ pureHeapFreeVars h (bvs, fvs) = fvs' S.\\ bvs_static' S.\\ bvs_nonstatic'
 --
 -- If we only cared about 2), we could just make the free variables of phantom *values* show up as free variables,
 -- but it's simpler to just make all phantom free variables into free variables.
+--
+-- NB: there is at least one other option:
+--  1. Revert to the old pureHeapOpenFreeVars call that does the naive thing
+--  2. In the *splitter*, add a phantom (e.g. Environmental) heap binding to the outgoing heaps for every
+--     free variable referred to only by other phantom heap bindings
+--
+-- The advantage of this scheme is that we will lambda-abstract over less stuff. It doesn't even mean that
+-- the supercompiled terms will be less reusable. In particular, if we had something like:
+--   < x |-> <Just y> | case x of Just z -> z | \epsilon >
+--
+-- In the old scheme we would reduce this to just "y". You might then think that we could reuse this for any
+-- new state of the same form. However, the matcher doesn't look through phantom heap bindings (even though
+-- we could in this case), so we wouldn't have reused it! Thus, changing the input state to be:
+--   < y |-> <>, x |-> <Just y> | case x of Just z -> z | \epsilon >
+--
+-- Means to change the reusability.
 pureHeapOpenFreeVars :: PureHeap -> (BoundVars, FreeVars) -> ((BoundVars, BoundVars), FreeVars)
 pureHeapOpenFreeVars h (bvs, fvs) = M.foldWithKey go ((S.empty, bvs), fvs) h
   where
