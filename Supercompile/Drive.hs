@@ -309,6 +309,7 @@ memo opt (deeds, state) = do
          | p <- ps
          , Just rn_lr <- [-- (\res -> if isNothing res then traceRender ("no match:", fun p) res else res) $
                            match (meaning p) state]
+         , let bad_renames = S.fromList (abstracted p) `symmetricDifference` M.keysSet (unRenaming rn_lr) in assertRender (text "Renaming was inexhaustive or too exhaustive:" <+> pPrint bad_renames $$ pPrint rn_lr $$ pPrint (residualiseState state) $$ case state of (Heap h _, _, _) -> pPrint (M.filter heapBindingNonConcrete h)) (S.null bad_renames) True
          , let rn_fvs = map (safeRename ("tieback: FVs for " ++ render (pPrint (fun p) $$ text "Us:" $$ pPrint state $$ text "Them:" $$ pPrint (meaning p)))
                                         rn_lr) -- NB: If tb contains a dead PureHeap binding (hopefully impossible) then it may have a free variable that I can't rename, so "rename" will cause an error. Not observed in practice yet.
                tb_dynamic_vs = rn_fvs (abstracted p)

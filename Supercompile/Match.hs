@@ -137,11 +137,13 @@ matchPureHeapExact ids bound_eqs free_eqs init_h_l init_h_r = do
     -- 2) The outgoing equalities should only relate x_l's that are not bound by init_h_l
     --    because we don't want the local bound variables I've generated from matchingIdSupply "leaking" upwards.
     --    (I think this reason is now redundant, but actually we still need to make sure that we only output equalities
-    --     on free variables of the two heaps).
-    eqs <- return $ filter (\(x_l, _x_r) -> x_l `M.notMember` init_h_l) eqs
+    --     on *free variables* of the two heaps, not any bound members).
+    --    NB: Because some variables may be bound by update frames in the stack, we need to filter out those too...
+    eqs <- --traceRender ("matchPureHeapExact", eqs, bound_eqs, init_h_l, init_h_r) $
+           return $ filter (\(x_l, _x_r) -> x_l `M.notMember` init_h_l && all ((/= x_l) . fst) bound_eqs) eqs
     -- 3) Now the problem is that there might be some bindings in the Right heap that are referred
     --    to by eqs. We want an exact match, so we can't allow that.
-    guard $ all (\(_x_l, x_r) -> x_r `M.notMember` init_h_r) eqs
+    guard $ all (\(_x_l, x_r) -> x_r `M.notMember` init_h_r && all ((/= x_r) . snd) bound_eqs) eqs
     -- 4) We now know that all of the variables bound by both init_h_l and init_h_r are not mentioned
     --    in the outgoing equalities, which is what we want for an exact match.
     --     NB: We use this function when matching letrecs, so don't necessarily want to build a renaming immediately
