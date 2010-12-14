@@ -12,6 +12,7 @@ import Core.Prelude (trueDataCon, falseDataCon)
 import Size.Deeds
 
 import Renaming
+import StaticFlags
 import Utilities
 
 import qualified Data.IntSet as IS
@@ -27,7 +28,7 @@ emptyLosers = IS.empty
 step :: (Deeds, State) -> Maybe (Deeds, State)
 step (deeds, _state@(h, k, (rn, e))) =
   (\mb_res -> assertRender (hang (text "step: deeds lost or gained when stepping:") 2 (pPrint (residualiseState _state)))
-                           (maybe True (\(deeds', state') -> noChange (releaseStateDeed deeds _state) (releaseStateDeed deeds' state')) mb_res) mb_res) $
+                           (not dEEDS || maybe True (\(deeds', state') -> noChange (releaseStateDeed deeds _state) (releaseStateDeed deeds' state')) mb_res) mb_res) $
   case annee e of
     Var x             -> force  deeds h k tg (rename rn x)
     Value v           -> unwind deeds h k tg (rn, v)
