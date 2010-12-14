@@ -92,7 +92,7 @@ gc (deeds, (Heap h ids, k, in_e)) = (M.fold (flip releaseHeapBindingDeeds) deeds
                                      (Heap h_reachable ids, k, in_e))
   where
     (h_dead, h_reachable) = M.mapEitherWithKey (\x' hb -> maybe (Left hb) (\why_live -> Right $ demoteHeapBinding why_live hb) (x' `whyLive` reachable)) h
-    reachable = lfpFrom (mkConcreteLiveness $ snd $ stackFreeVars k $ inFreeVars annedTermFreeVars in_e) go
+    reachable = lfpFrom (mkConcreteLiveness $ snd $ stackOpenFreeVars k $ inFreeVars annedTermFreeVars in_e) go
     go live = M.foldWithKey (\x' hb live -> maybe live (\why_live -> live `plusLiveness` heapBindingLiveness (demoteHeapBinding why_live hb)) (x' `whyLive` live)) live h
     
     -- TODO: fix this comment. It used to be attached to the update frame logic in the evaluator.
@@ -341,7 +341,7 @@ memo opt (deeds, state) = do
         traceRenderM ("=sc", fun _p, residualiseState state, deeds, res)
         return res
       [] -> {- traceRender ("new drive", residualiseState state) $ -} do
-        let (static_vs, vs) = stateStaticFreeVars state
+        let (static_vs, vs) = stateStaticBindersAndFreeVars state
     
         -- NB: promises are lexically scoped because they may refer to FVs
         x <- freshHName

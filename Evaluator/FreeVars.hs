@@ -5,9 +5,9 @@ module Evaluator.FreeVars (
     whyLive, keepAlive, demoteHeapBinding,
 
     inFreeVars,
-    heapBindingLiveness, pureHeapOpenLiveness,
-    stackFreeVars, stackFrameFreeVars,
-    stateFreeVars, stateStaticFreeVars
+    heapBindingLiveness,
+    heapBoundVars, stackBoundVars, stackFrameBoundVars, stackOpenFreeVars,
+    stateFreeVars, stateStaticBindersAndFreeVars
   ) where
 
 import Core.Syntax
@@ -78,29 +78,35 @@ heapBindingLiveness (Updated _ fvs) = mkPhantomLiveness fvs
 heapBindingLiveness (Phantom in_e)  = mkPhantomLiveness  (inFreeVars annedTermFreeVars in_e)
 heapBindingLiveness (Concrete in_e) = mkConcreteLiveness (inFreeVars annedTermFreeVars in_e)
 
-pureHeapOpenLiveness :: PureHeap -> (BoundVars, FreeVars) -> (BoundVars, Liveness)
-pureHeapOpenLiveness h (bvs, fvs) = M.foldWithKey (\x' hb (bvs, fvs) -> (S.insert x' bvs, fvs `plusLiveness` heapBindingLiveness hb)) (bvs, mkConcreteLiveness fvs) h
+heapBoundVars :: Heap -> BoundVars
+heapBoundVars (Heap h _) = M.keysSet (M.filter (not . heapBindingNonConcrete) h)
 
-pureHeapFreeVars :: PureHeap -> (BoundVars, FreeVars) -> FreeVars
-pureHeapFreeVars h (bvs, fvs) = fvs' S.\\ bvs_static' S.\\ bvs_nonstatic'
-  where ((bvs_static', bvs_nonstatic'), fvs') = pureHeapOpenFreeVars h (bvs, fvs)
+stackBoundVars :: Stack -> BoundVars
+stackBoundVars = S.unions . map stackFrameBoundVars
 
-pureHeapOpenFreeVars :: PureHeap -> (BoundVars, FreeVars) -> ((BoundVars, BoundVars), FreeVars)
-pureHeapOpenFreeVars h (bvs, fvs) = M.foldWithKey (\x' hb ((bvs_static, bvs_nonstatic), fvs) -> case hb of Concrete in_e -> ((bvs_static, S.insert x' bvs_nonstatic), fvs `S.union` inFreeVars annedTermFreeVars in_e); _ -> ((S.insert x' bvs_static, bvs_nonstatic), fvs)) ((S.empty, bvs), fvs) h
+stackOpenFreeVars :: Stack -> FreeVars -> (BoundVars, FreeVars)
+stackOpenFreeVars k fvs = (S.unions *** (S.union fvs . S.unions)) . unzip . map stackFrameOpenFreeVars $ k
 
-stackFreeVars :: Stack -> FreeVars -> (BoundVars, FreeVars)
-stackFreeVars k fvs = (S.unions *** (S.union fvs . S.unions)) . unzip . map stackFrameFreeVars $ k
+stackFrameBoundVars :: StackFrame -> BoundVars
+stackFrameBoundVars = fst . stackFrameOpenFreeVars
 
-stackFrameFreeVars :: StackFrame -> (BoundVars, FreeVars)
-stackFrameFreeVars kf = case kf of
+stackFrameOpenFreeVars :: StackFrame -> (BoundVars, FreeVars)
+stackFrameOpenFreeVars kf = case kf of
     Apply x'                -> (S.empty, annedFreeVars x')
     Scrutinise in_alts      -> (S.empty, inFreeVars annedAltsFreeVars in_alts)
     PrimApply _ in_vs in_es -> (S.empty, S.unions (map (inFreeVars annedValueFreeVars) in_vs) `S.union` S.unions (map (inFreeVars annedTermFreeVars) in_es))
     Update x'               -> (S.singleton (annee x'), S.empty)
 
+-- | Returns the free variables that the state would have if it were residualised right now (i.e. excludes static binders)
 stateFreeVars :: State -> FreeVars
-stateFreeVars (Heap h _, k, in_e) = pureHeapFreeVars h (stackFreeVars k (inFreeVars annedTermFreeVars in_e))
+stateFreeVars = snd . stateStaticBindersAndFreeVars
 
-stateStaticFreeVars :: State -> (BoundVars, FreeVars)
-stateStaticFreeVars (Heap h _, k, in_e) = (bvs_static', fvs' S.\\ bvs_nonstatic')
-  where ((bvs_static', bvs_nonstatic'), fvs') = pureHeapOpenFreeVars h (stackFreeVars k (inFreeVars annedTermFreeVars in_e))
+-- | Returns the free variables that the state would have if it were residualised right now (i.e. excludes static binders),
+-- along with the static binders as a separate set.
+stateStaticBindersAndFreeVars :: State -> (BoundVars, FreeVars)
+stateStaticBindersAndFreeVars (Heap h _, k, in_e) = (bvs_static', fvs' S.\\ bvs_nonstatic')
+  where
+    ((bvs_static', bvs_nonstatic'), fvs') = pureHeapOpenFreeVars h (stackOpenFreeVars k (inFreeVars annedTermFreeVars in_e))
+    
+    pureHeapOpenFreeVars :: PureHeap -> (BoundVars, FreeVars) -> ((BoundVars, BoundVars), FreeVars)
+    pureHeapOpenFreeVars h (bvs, fvs) = M.foldWithKey (\x' hb ((bvs_static, bvs_nonstatic), fvs) -> case hb of Concrete in_e -> ((bvs_static, S.insert x' bvs_nonstatic), fvs `S.union` inFreeVars annedTermFreeVars in_e); _ -> ((S.insert x' bvs_static, bvs_nonstatic), fvs)) ((S.empty, bvs), fvs) h

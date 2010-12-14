@@ -46,7 +46,7 @@ embedWithTagGraphs = precomp stateTags $ postcomp generaliserFromGrowing $ refin
         stackTagGraph :: [Tag] -> Stack -> TagGraph
         stackTagGraph _         []     = emptyTagGraph
         stackTagGraph focus_tgs (kf:k) = IM.fromList [(kf_tg, (IS.singleton focus_tg, 0)) | kf_tg <- kf_tgs, focus_tg <- focus_tgs] -- Binding structure of the stack itself (outer frames refer to inner ones)
-                                            `plusTagGraph` mkTagGraph kf_tgs (snd (stackFrameFreeVars kf))                          -- Binding structure of the stack referring to bound names
+                                            `plusTagGraph` mkTagGraph kf_tgs (stackFrameBoundVars kf)                               -- Binding structure of the stack referring to bound names
                                             `plusTagGraph` stackTagGraph kf_tgs k                                                   -- Recurse to deal with rest of the stack
           where kf_tgs = stackFrameTags' kf
         
