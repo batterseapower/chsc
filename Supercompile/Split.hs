@@ -446,7 +446,10 @@ splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (sp
         
         -- 2) Build a splitting for those elements of the heap we propose to residualise in resid_xs
         (h_residualised, h_not_residualised) = M.partitionWithKey (\x' _ -> x' `S.member` resid_xs) h
-        bracketeds_nonupdated = M.mapMaybeWithKey (\x' hb -> do { Concrete in_e <- return hb; return (Concrete in_e, oneBracketed (Once (fromJust (name_id x')), (Heap M.empty ids_brack, [], in_e))) }) h_residualised
+        bracketeds_nonupdated = M.mapMaybeWithKey (\x' hb -> do { Concrete in_e <- return hb; return (Phantom in_e, fill_ids $ oneBracketed (Once (fromJust (name_id x')), \ids -> (Heap M.empty ids, [], in_e))) }) h_residualised
+        -- For every heap binding we ever need to deal with, contains:
+        --  1) A phantom version of that heap binding
+        --  2) A version of that heap binding as a concrete Bracketed thing
         bracketeds_heap = bracketeds_updated `M.union` bracketeds_nonupdated
         
         -- 3) Inline as much of the Heap as possible into the candidate splitting
@@ -469,9 +472,23 @@ splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (sp
         --   It important that we do not mark residualised things as phantoms just because they are in bracketeds_heap. If we did, it would mean
         --   that *concrete residualised stuff* is recorded as a phantom even if it was explicitly residualised in the initial iteration (since
         --   anything residualised in the first iteration is certainly in bracketeds_heap).
-        h_cheap = M.filter (\hb -> case hb of Concrete (_, e) -> isCheap (annee e); _ -> True) h
-                    `M.union` M.map fst bracketeds_heap -- This is where I mark things residualised here which are not explicitly generalised as static
-        h_inlineable = (h_not_residualised `M.union` h_cheap) `exclude` snd split_from -- FIXME: reduce hack value and explain?? (Astonishingly, this does the right thing for staticness as well)
+        -- * If we are inlining a value (into a non-linear context), we are careful to only inline an *indirection* to that value. That
+        --   allows us to prevent duplicating the allocation of such values. NB: we still duplicate allocation of cheap non-values, but never mind...
+        --
+        -- Inlineable things are either:
+        --  1) Heap bindings from the input (i.e from the heap and update frames) that have not been residualised for work duplication reasons
+        --  2) Concrete values and cheap expressions from the input, in a form that is suitable for pushing down (i.e. values have been turned into indirections).
+        --  3) Phantom versions of phantom input heap bindings (just copied verbatim).
+        --  4) Phantom versions of concrete input heap bindings
+        -- The range of this heap is lte that of bracketeds_heap. We explicitly EXCLUDE those bindings that we are residualising based on the generalisation heuristic.
+        -- We prefer input heap bindings to everything else, and concrete values/cheap expressions to phantoms. For example, even if a value is residualised, we would
+        -- like to push down *some* version of it, hence the h_cheap full of indirections. And even if a concrete term is residualised we'd like a phantom version of it.
+        --
+        -- Basically the idea of this heap is "stuff we want to make available to push down"
+        h_inlineable = (h_not_residualised `M.union`         -- Take any non-residualised bindings from the input...
+                        h_cheap_and_phantom `M.union`        -- ...failing which, take cheap bindings even if they are also residualised...
+                        M.map fst bracketeds_heap) `exclude` -- ...failing which, take a phantom version of it.
+                        snd split_from                       -- The exclusion just makes sure we don't inline explicitly generalised bindings (even phantom ones)
         
         -- Generalising the final proposed floats may cause some bindings that we *thought* were going to be inlined to instead be
         -- residualised. We need to account for this in the Entered information (for work-duplication purposes), and in that we will
@@ -494,26 +511,33 @@ splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (sp
         --  a) We should also residualise bindings that occur as free variables of any of the
         --     elements of the (post-inlining) residualised heap or focus. As a side effect, this will pick up
         --     any variables that should be residualised due to generalisation
-        --  b) Lastly, we should residualise non-cheap bindings that got Entered more than once in the proposal
+        --  b) Lastly, we should residualise bindings that got Entered more than once in the proposal
         --     to make the splitter more agressive (see Note [Better fixed points of Entered information]), I only
-        --     do this for bindings that were actually direct free variables of the original term.
+        --     do this for bindings that were actually direct free variables of the original term or (transitively) FVs
+        --     of something that is used linearly
         fvs' = bracketedFreeVars stateFreeVars bracketed_focus' `S.union` S.unions (map (bracketedFreeVars stateFreeVars) (M.elems bracketeds_heap'))
         entered    = entered_focus `join` entered_heap
         fvs_paths' = M.unionWith (++) fvs_paths_focus' fvs_paths_heap'
         entered_resid_substep x' paths no_change@(newly_resid, not_newly_resid)
           = -- If *all* the paths leading here certainly don't contain something we are going to change our mind about residualising...
             if all (all (`S.member` not_newly_resid)) paths
-            then -- ...and the binding is cheap or linear
-                 if x' `M.member` h_cheap || maybe True isOnce (M.lookup x' entered)
+            then -- ...and the binding is linear
+                 if maybe True isOnce (M.lookup x' entered)
                  then (newly_resid,             S.insert x' not_newly_resid) -- ...the binding is certainly not going to be residualised
                  else (S.insert x' newly_resid, not_newly_resid)             -- Otherwise, it certainly should be residualised to make a new root
             else no_change -- Can't decide yet
         entered_resid_step (nr, nnr) = -- traceRender ("entered_resid_step", (nr, nnr)) $
                                        M.foldWithKey entered_resid_substep (nr, nnr) fvs_paths'
         (newly_resid, _not_newly_resid) = -- traceRender ("entered_resid", fvs_paths') $
-                                          lfpFrom (S.empty, M.keysSet h_cheap `S.union` resid_xs) entered_resid_step
-        resid_xs' = fvs' `S.union` newly_resid
+                                          lfpFrom (S.empty, resid_xs) entered_resid_step
+        resid_xs' = fvs' `S.union` newly_resid -- NB: newly_resid and not_newly_resid might not cover all variables. This is OK!
         resid_kfs' = IS.fromList [i | (i, kf) <- named_k, Update (annee -> x') <- [kf], x' `S.member` resid_xs']
+    
+    -- Heap full of cheap expressions and any phantom stuff from the input heap.
+    -- Used within the main loop in the process of computing h_inlineable -- see comments there for the full meaning of this stuff.
+    extract_cheap_hb (Concrete (rn, e)) = guard (isCheap (annee e)) >> Just (Concrete (rn, e))
+    extract_cheap_hb hb                 = Just hb -- Inline phantom stuff verbatim: there is no work duplication issue
+    h_cheap_and_phantom = M.mapMaybe extract_cheap_hb h
 
 -- Note [Better fixed points of Entered information]
 --
