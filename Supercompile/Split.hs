@@ -438,8 +438,16 @@ splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (sp
         --
         -- We also take this opportunity to fill in the IdSupply required by each prospective new State.
         -- We can use the same one for each context because there is no danger of shadowing.
+        --
+        -- We also rename the bracketed things with the renaming that makes us refer to indirections
+        -- to values rather than values themselves. How do I know I'm not creating references to unbound things?
+        --  * We only rename variables if the corresponding heap bindings are non-indirection values
+        --  * Non-indirection values are always present in h_inlineable (so we will be able to bind them),
+        --    UNLESS the corresponding variable has been residualised
+        --  * FIXME: should generalise x'' if x' was generalised
+        -- FIXME FIXME
         fill_ids :: Bracketed (Entered, IdSupply -> State) -> Bracketed (Entered, State)
-        fill_ids = fmap (\(ent, f) -> (ent, f ids_brack))
+        fill_ids = fmap (\(ent, f) -> (ent, renameState x_vs_x_vs'_rn $ f ids_brack))
         (deeds0_unreleased, bracketeds_updated, bracketed_focus)
           = (\(a, b, c) -> (a, M.map (second fill_ids) b, fill_ids c)) $
             pushStack ids_stack deeds scruts [(i `IS.notMember` resid_kfs, kf) | (i, kf) <- named_k] bracketed_qa
@@ -536,19 +544,22 @@ splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (sp
     -- Heap full of cheap non-value expressions, indirections to values and any phantom stuff from the input heap.
     -- Used within the main loop in the process of computing h_inlineable -- see comments there for the full meaning of this stuff.
     --
-    -- When we push down values, for each value binding x |-> _@v we need to:
-    --   1. Manufacture a fresh name x'
-    --   2. Accumulate a renaming \theta from old to new names, adding in x |-> x'
-    --   3. Manufacture a binding to push down, x' |-> x@(v\theta)
-    --   4. Make sure we have a phantom version of x |-> _@v suitable for binding here
+    -- When we push down values, for each value binding x' |-> _@{v} we need to:
+    --   1. Manufacture a fresh name x''
+    --   2. Accumulate a renaming \theta from old to new names, adding in x' |-> x''
+    --   3. Manufacture a binding to push down, x'' |-> x'@{v\theta}
+    --   4. Make sure we have a phantom version of x' |-> _@{v} suitable for binding right here
+    --      (NB: this is currently done using bracketeds_heap, not in the definition of h_cheap_and_phantom)
     --
-    -- If we just naively push down a x |-> x@v binding we get circularity in the output program (duh!)
-    -- FIXME: make this happen
-    extract_cheap_hb ids x' (Concrete (rn, e)) = case annee e of Value Nothing v -> (ids', Just (Concrete (insertRenaming x'' x' rn, annedTerm (annedTag e) $ Value (Just x'') v)))
-                                                                   where (ids', x'') = freshName ids (name_string x')
-                                                                 _               -> (ids, guard (isCheap (annee e)) >> Just (Concrete (rn, e)))
-    extract_cheap_hb ids _  hb                 = (ids, Just hb) -- Inline phantom stuff verbatim: there is no work duplication issue
-    (ids_stack, M.mapMaybe id -> h_cheap_and_phantom) = M.mapAccumWithKey extract_cheap_hb ids_indirection h
+    -- If we just naively push down a x |-> x@{v} binding we get circularity in the output program (duh!)
+    extract_cheap_hb x' (Concrete (rn, e)) (x_vs_x_vs', ids, h)
+      = case annee e of Value Nothing v -> ((x', x'') : x_vs_x_vs', ids', M.insert x'' (Concrete (insertRenaming x''' x' $ x_vs_x_vs'_rn `plusRenaming` rn, annedTerm (annedTag e) $ Value (Just x''') v)) h)
+                          where (ids',  x'')  = freshName ids  (name_string x') -- The name for the concrete binding we push down
+                                (ids'', x''') = freshName ids' (name_string x') -- "Dummy" name so we can refer to the phantom binding from inside the renaming
+                        _               -> (x_vs_x_vs', ids, if isCheap (annee e) then M.insert x' (Concrete (rn, e)) h else h)
+    extract_cheap_hb x' hb (x_vs_x_vs', ids, h)
+      = (x_vs_x_vs', ids, M.insert x' hb h) -- Inline phantom stuff verbatim: there is no work duplication issue
+    (mkRenaming -> x_vs_x_vs'_rn, ids_stack, h_cheap_and_phantom) = M.foldWithKey extract_cheap_hb ([], ids_indirection, M.empty) h -- FIXME: must apply renaming to holes of bracketeds
 
 -- Note [Better fixed points of Entered information]
 --
