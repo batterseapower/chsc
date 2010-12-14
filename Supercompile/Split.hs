@@ -515,20 +515,18 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
         must_resid_xs = extraFvs bracketed_focus' `S.union` S.unions (map extraFvs (M.elems bracketeds_heap'))
                           `S.union` gen_xs
         --  b) Lastly, we should *stop* residualising bindings that got Entered only once in the proposal.
-        --   
-        --     We can only do one of these at a time, because not residualising a binding may make the entered information out of date...
+        --     I once thought that we should only add a single variable to non_resid_xs' every time around the loop, because I worried
+        --     that choosing not to residualise some binding would cause some other bindings to stop being candiates (i.e. would increase
+        --     the number of times they were entered).
         --
-        --     TODO: this is sort of crap, can we fix it? In the vast majority of cases it is OK -- inlining a Once thing won't change the
-        --     Onceness of its FVs. But consider this:
-        --       
-        --       a |-> 1 : b
-        --       b |-> 1 : a
+        --     However, I've revised my opinion and decided to add all candidate variables every time. This is because if we inline a binding
+        --     into a context where it is still evaluated Once, anything it refers to is still evaluated Once. So the existing Entered information
+        --     does not appear to be invalidated when we decide not to residualise an additional binding.
         entered    = entered_focus `join` entered_heap
-        not_resid_xs' = -- traceRender ("candidates", onces, must_resid_xs, not_resid_xs, candidates) $
-                        if S.null candidates then not_resid_xs
-                                             else S.insert (S.findMin candidates) not_resid_xs
+        not_resid_xs' = -- traceRender ("candidates", onces, must_resid_xs, not_resid_xs, candidates S.\\ not_resid_xs) $
+                        not_resid_xs `S.union` candidates
           where onces = S.filter (\x' -> maybe True isOnce (M.lookup x' entered)) bound_xs
-                candidates = onces S.\\ must_resid_xs S.\\ not_resid_xs
+                candidates = onces S.\\ must_resid_xs
     
     -- Bound variables: those variables that I am interested in making a decision about whether to residualise or not
     bound_xs = heapBoundVars (Heap h ids) `S.union` stackBoundVars (map snd named_k)
