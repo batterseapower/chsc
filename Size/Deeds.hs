@@ -41,7 +41,7 @@ data GlobalDeeds = GlobalDeeds {
     globalChildren :: TagTree Identity
   }
 
--- FIXME: this module is rather ugly, but this data type is a particular eyesore
+-- TODO: this module is rather ugly, but this data type is a particular eyesore
 data TagTree f = TagTree {
     rootTag :: Tag,
     childrenMap :: IM.IntMap (f [Tag])

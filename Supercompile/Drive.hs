@@ -151,7 +151,7 @@ reduce (deeds, orig_state) = go (mkHistory (extra wQO)) (deeds, orig_state)
                       _ | intermediate state  -> Right hist
                       -- _ | traceRender ("reduce.go (non-intermediate)", residualiseState state) False -> undefined
                       Continue hist               -> Right hist
-                      Stop (_gen, (deeds, state)) -> trace "reduce-stop" $ Left (guard rEDUCE_ROLLBACK >> return (deeds, state)) -- FIXME: generalise?
+                      Stop (_gen, (deeds, state)) -> trace "reduce-stop" $ Left (guard rEDUCE_ROLLBACK >> return (deeds, state)) -- TODO: generalise?
           Right $ fmap (go hist') $ step (deeds, state)
     
     intermediate :: State -> Bool
@@ -313,29 +313,6 @@ memo opt (deeds, state) = do
          , let rn_fvs = map (safeRename ("tieback: FVs for " ++ render (pPrint (fun p) $$ text "Us:" $$ pPrint state $$ text "Them:" $$ pPrint (meaning p)))
                                         rn_lr) -- NB: If tb contains a dead PureHeap binding (hopefully impossible) then it may have a free variable that I can't rename, so "rename" will cause an error. Not observed in practice yet.
                tb_dynamic_vs = rn_fvs (abstracted p)
-               -- tb_static_vs  = rn_fvs (lexical p)
-          -- FIXME: this comment is outdated
-          --
-          -- Check that all of the things that were dynamic last time are dynamic this time.
-          -- This is an issue of *performance* and *typeability*. If we omit this check, the generated code may
-          -- be harder for GHC to chew on because we will apply static variables to dynamic positions in the tieback.
-          --
-          -- FIXME: rejecting tieback on this basis can lead to crappy supercompilation (since we immediately whistle).
-          -- For an example, see AccumulatingParam-Peano: with split-point generalisation, we *would* be building an optimal
-          -- loop, but this check rejects it (tieback at h15 to h6 rejected because "n" would be converted from static to dynamic).
-          -- We should probably do something like this:
-          --  * Record whether a variable is static or dynamic in the tag collections
-          --  * "Generalise away" a variables staticness if this check fails so that:
-          --     a) The termination criteria does not immediately fire
-          --     b) We have a chance to build a loop where that variable is dynamic
-          -- , (\res -> if res then True else traceRender ("memo: rejected by dynamics", statics, tb_dynamic_vs) False) $
-          --   all (`isStatic` statics) tb_dynamic_vs
-          -- Check that all of the things that were static last time are static this time *and refer to exactly the same thing*.
-          -- This is an issue of *correctness*. If we omit this check, we may tie back to a version of the function where a FV
-          -- actually referred to a different let binding than that which we intend to refer tos.
-          -- , (\res -> if res then True else traceRender ("memo: rejected by statics", lexical p, tb_static_vs) False) $
-          --   and $ zipWith (\x x' -> x' == x && x' `isStatic` statics) (lexical p) tb_static_vs
-          -- , traceRender ("memo'", statics, stateFreeVars state, rn_lr, (fun p, lexical p, abstracted p)) True
          ] of
       (_p, res):_ -> {- traceRender ("tieback", residualiseState state, fst res) $ -} do
         traceRenderM ("=sc", fun _p, residualiseState state, deeds, res)

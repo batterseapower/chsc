@@ -87,7 +87,7 @@ bLOAT_FACTOR = fromMaybe 10 $ listToMaybe [read val | arg <- unsafePerformIO get
  -- 
  -- Unfortunately, my implementation doesn't tie back as eagerly as you might like, so we actually peel the loop once and
  -- hence need a bloat factor of 8 here (5 + 3 other case statements derived from (++))
- -- FIXME: figure out how to reduce this number.
+ -- TODO: figure out how to reduce this number.
 
 {-# NOINLINE sPLITTER_CHEAPIFICATION #-}
 sPLITTER_CHEAPIFICATION :: Bool

@@ -319,7 +319,7 @@ optimiseSplit :: MonadStatics m
               -> M.Map (Out Var) (Bracketed State)
               -> Bracketed State
               -> m (Deeds, Out FVedTerm)
-optimiseSplit opt deeds bracketeds_heap bracketed_focus = do -- FIXME: use gen_xs to trim statics set
+optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
     -- 0) The "process tree" splits at this point. We can choose to distribute the deeds between the children in a number of ways
     let stateSize (h, k, in_e) = heapSize h + stackSize k + termSize (snd in_e)
           where heapBindingSize hb = case hb of
@@ -351,15 +351,6 @@ optimiseSplit opt deeds bracketeds_heap bracketed_focus = do -- FIXME: use gen_x
                                                                           (M.fold (flip (releaseBracketedDeeds (\deeds (extra_deeds, s) -> extra_deeds `releaseDeedsTo` releaseStateDeed deeds s))) (releaseBracketedDeeds (\deeds (extra_deeds, s) -> extra_deeds `releaseDeedsTo` releaseStateDeed deeds s) deeds_initial bracketed_deeded_focus) bracketeds_deeded_heap))
     
     -- 1) Recursively drive the focus itself
-    -- FIXME: fix comments below
-    --
-    -- NB: it is *very important* that we do not mark generalised variables as static! If we do, we defeat the whole point of
-    -- generalisation because our specialisations do not truly become more "general", and simple things like foldl specialisation break.
-    --
-    -- NB: by the same token, it is also *very very important* that if a variable is generalised, we still bind here and now any "h" functions
-    -- that refer to the generalised variable. If we just naively did (statics S.\\ gen_xs) for the statics set, we would break this. Instead, we
-    -- need to make sure that the gen_xs *are removed entirely* from the statics set in the monad environment (the dangerous case is if the variable
-    -- is already in there, which can be caused by shadowing induced by value duplication).
     let extra_statics = M.keysSet bracketeds_heap
     (hes, (leftover_deeds, e_focus)) <- bindCapturedFloats extra_statics $ optimiseBracketed opt (deeds_initial, bracketed_deeded_focus)
     
@@ -560,7 +551,12 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
                           `S.union` gen_xs
         --  b) Lastly, we should *stop* residualising bindings that got Entered only once in the proposal.
         --     We can only do one of these at a time, because not residualising a binding may make the entered information out of date...
-        --     TODO: this is sort of crap, can we fix it? FIXME: actually, maybe its OK -- inlining a Once thing won't change the Onceness of its FVs..?
+        --
+        --     TODO: this is sort of crap, can we fix it? In the vast majority of cases it is OK -- inlining a Once thing won't change the
+        --     Onceness of its FVs. But consider this:
+        --       
+        --       a |-> 1 : b
+        --       b |-> 1 : a
         entered    = entered_focus `join` entered_heap
         not_resid_xs' = -- traceRender ("candidates", onces, must_resid_xs, not_resid_xs, candidates) $
                         if S.null candidates then not_resid_xs
@@ -577,62 +573,9 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
     extract_cheap_hb hb                 = Just hb -- Inline phantom stuff verbatim: there is no work duplication issue
     h_cheap_and_phantom = M.mapMaybe extract_cheap_hb h
 
--- Note [Better fixed points of Entered information]
---
--- FIXME: historical note only
---
--- Consider this example:
---
---   ex_used_once |-> if unk then False else True
---   ex_uses_ex |-> if ex_used_once then True else False
---   one |-> f ex_uses_ex
---   two |-> g ex_uses_ex
---   (one, two)
---
--- If we just optimistically inline all heap bindings in the first step, we get:
---
---   one |-> < ex_used_once |-> if unk then False else True,
---             ex_uses_ex |-> if ex_used_once then True else False
---           | f ex_uses_ex | >
---   two |-> < ex_used_once |-> if unk then False else True,
---             ex_uses_ex |-> if ex_used_once then True else False
---           | g ex_uses_ex | >
---   (one, two)
---
--- If we now compute the Entered information based on this proposal, we mark both
--- ex_used_once and ex_uses_ex as Many but non-cheap and hence force them to be residualised.
--- However, this is too pessimistic because once we residualise ex_uses_ex there is only one
--- occurrenc of ex_used_once.
---
--- The right thing to do is to only mark as residualised due to expense concrens those bindings
--- that would have been marked as expensive *regardless of the choice of any other binding's expense*.
--- So ex_used_once should not be marked as residualised because we only inlined it due to it being
--- a free variable of something which transitioned from inlineable to non-inlineable.
---
---
--- The solution works as follows:
---  * When inlining the heap into brackets, we record for each heap binding that we inline all the
---    "paths" through which they got inlined. If something was a direct FV of one of the brackets,
---    that will lead to a path of []. If something was a FV of a binding x that was itself a FV
---    of the bracket then the path will be [x].
---  * When deciding what to residualise for work-duplication reasons, we only force residualisation
---    for bindings that are BOTH:
---     a) Non-cheap and non-linear
---     b) Inlined through *any* path where each of the bindings on that path is certainly not
---        going to be residualised *this* time around the fixed point when it *wasn't last time*
---
---    This last condition ensures that we do not mark expensive bindings that are only *temporarily*
---    non-linear as residualised. Only bindings that actually have non-linearity arising from some
---    binding that is use that is not going to be fiddled with by future residualisations is permitted.
---    
---    In particular, this prevents ex_used_once from being marked Many even though the agressive inlining
---    outlined above causes it to be temporarily used non-linearly. Instead we delay until ex_uses_ex is
---    residualised and then see the truth -- ex_used_once is actually linear and can be inlined safely.
-
-
 -- We are going to use this helper function to inline any eligible inlinings to produce the expressions for driving.
--- Returns (along with the augmented state) the names of those bindings in the input PureHeap that could have been inlined
--- but were not due to generalisation. FIXME comment
+-- Returns (along with the augmented state) information about how many times bindings for the free variables of the final state
+-- would be evaluated (in the worst case) if they were inlined here. TODO: could put the entered_env construction in caller, simpler contract?
 transitiveInline :: Deeds -> PureHeap -> (Entered, State) -> (Deeds, EnteredEnv, State)
 transitiveInline deeds h_inlineable (ent, (Heap h ids, k, in_e))
     = -- (if not (S.null not_inlined_vs') then traceRender ("transitiveInline: generalise", not_inlined_vs') else id) $
@@ -643,7 +586,10 @@ transitiveInline deeds h_inlineable (ent, (Heap h ids, k, in_e))
     (deeds', h') = go 0 deeds (h_inlineable `M.union` h) M.empty (mkConcreteLiveness state_fvs)
     state' = (Heap h' ids, k, in_e)
     entered_env = mkEnteredEnv ent $ stateFreeVars state' -- See Note [transitiveInline and entered information]
-     -- FIXME: I (probably) need to transfer the entered_env safely out of Bracketed things
+     -- TODO: I (probably) need to transfer the entered_env safely out of Bracketed things, taking account of bound variables
+     -- over the holes. However, I think it's probably safe to ignore that for now because those bound variables will have been
+     -- renamed so as not to coincide with any of the heap/stack bindings above that we actually care about the entered information for.
+     -- So the outgoing entered envs will have a bit of junk in them, but who cares?
     
     -- NB: in the presence of phantoms, this loop gets weird.
     --  1. We want to inline phantoms if they occur as free variables of the state, so we get staticness

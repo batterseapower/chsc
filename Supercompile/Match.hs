@@ -163,8 +163,15 @@ matchPureHeap ids bound_eqs free_eqs init_h_l init_h_r = go bound_eqs free_eqs i
     -- TODO: look through variables on both sides
     --  x |-> e1; (x, x) `match` x |-> e1; y |-> x `match` (x, y) /= Nothing
     --  x |-> e1, y |-> x; (x, y) `match` x |-> e1 `match` (x, x) /= Nothing
-    -- NB: allow us to instantiate a dynamic variable with a static variable.
-    -- FIXME: import the reason for why this is from the commentary in local-hs-termination-simple
+    --
+    -- It used to be important to allow instantiatation of a dynamic variable with a static *variable*.
+    -- This was so because if we didn't tie back to a situation where all that had changed was that one more
+    -- variable was static, we would immediately whistle because the tagbags would be the same.
+    --
+    -- In the new world, we record staticness as phantom heap bindings, so this just doesn't figure in at all.
+    -- We can account for staticness using the standard generalisation mechanism, and there is no need for the
+    -- matcher to have hacks like that (though we still have to be careful about how we match phantoms).
+    
     --go known free_eqs h_l h_r | traceRender ("go", known, free_eqs, h_l, h_r) False = undefined
     go known [] _ _ = Just known
     go known ((x_l, x_r):free_eqs) h_l h_r
