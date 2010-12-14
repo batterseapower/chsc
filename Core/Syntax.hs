@@ -62,7 +62,7 @@ data Literal = Int Integer | Char Char
 type Term = Identity (TermF Identity)
 type TaggedTerm = Tagged (TermF Tagged)
 type CountedTerm = Counted (TermF Counted)
-data TermF ann = Var Var | Value (ValueF ann) | App (ann (TermF ann)) (ann Var) | PrimOp PrimOp [ann (TermF ann)] | Case (ann (TermF ann)) [AltF ann] | LetRec [(Var, ann (TermF ann))] (ann (TermF ann))
+data TermF ann = Var Var | Value (Maybe Var) (ValueF ann) | App (ann (TermF ann)) (ann Var) | PrimOp PrimOp [ann (TermF ann)] | Case (ann (TermF ann)) [AltF ann] | LetRec [(Var, ann (TermF ann))] (ann (TermF ann))
                deriving (Eq, Show)
 
 type Alt = AltF Identity
@@ -89,7 +89,7 @@ instance NFData Literal where
 
 instance NFData1 ann => NFData (TermF ann) where
     rnf (Var a) = rnf a
-    rnf (Value a) = rnf a
+    rnf (Value a b) = rnf a `seq` rnf b
     rnf (App a b) = rnf a `seq` rnf b
     rnf (PrimOp a b) = rnf a `seq` rnf b
     rnf (Case a b) = rnf a `seq` rnf b
@@ -125,7 +125,7 @@ instance Pretty1 ann => Pretty (TermF ann) where
     pPrintPrec level prec e = case e of
         LetRec xes e  -> pPrintPrecLetRec level prec xes e
         Var x         -> pPrintPrec level prec x
-        Value v       -> pPrintPrec level prec v
+        Value x v     -> maybe (pPrintPrec level prec v) (\x -> pPrintPrec level appPrec x <> if level /= haskellLevel then text "@" <> pPrintPrec level appPrec v else empty) x 
         App e1 x2     -> pPrintPrecApp level prec e1 x2
         PrimOp pop xs -> pPrintPrecPrimOp level prec pop xs
         Case e alts | level == haskellLevel, null alts                              -> pPrintPrecSeq level prec e (text "undefined")
@@ -170,8 +170,8 @@ pPrintPrecApps level prec e1 es2 = prettyParen (not (null es2) && prec >= appPre
 
 
 isValue :: TermF ann -> Bool
-isValue (Value _) = True
-isValue _         = False
+isValue (Value _ _) = True
+isValue _           = False
 
 termIsValue :: Copointed ann => ann (TermF ann) -> Bool
 termIsValue = isValue . extract
@@ -179,7 +179,7 @@ termIsValue = isValue . extract
 isCheap :: Copointed ann => TermF ann -> Bool
 isCheap _ | cALL_BY_NAME = True -- A cunning hack. I think this is all that should be required...
 isCheap (Var _)     = True
-isCheap (Value _)   = True
+isCheap (Value _ _) = True
 isCheap (Case e []) = isCheap (extract e) -- NB: important for pushing down let-bound applications of ``error''
 isCheap _           = False
 
@@ -201,7 +201,7 @@ valueSize' :: Foldable.Foldable ann => ValueF ann -> Int
     
     term' e = case e of
         Var _ -> 0
-        Value v -> value' v
+        Value _ v -> value' v
         App e x -> term e + var x
         PrimOp _ es -> sum (map term es)
         Case e alts -> term e + sum (map alt' alts)
@@ -221,7 +221,7 @@ valueSize' :: Foldable.Foldable ann => ValueF ann -> Int
 
 class Symantics ann where
     var    :: Var -> ann (TermF ann)
-    value  :: ValueF ann -> ann (TermF ann)
+    value  :: Maybe Var -> ValueF ann -> ann (TermF ann)
     app    :: ann (TermF ann) -> Var -> ann (TermF ann)
     primOp :: PrimOp -> [ann (TermF ann)] -> ann (TermF ann)
     case_  :: ann (TermF ann) -> [AltF ann] -> ann (TermF ann)
@@ -229,7 +229,7 @@ class Symantics ann where
 
 instance Symantics Identity where
     var = I . Var
-    value = I . Value
+    value x = I . Value x
     app e x = I (App e (I x))
     primOp pop es = I (PrimOp pop es)
     case_ e = I . Case e
@@ -241,27 +241,27 @@ reify = id
 
 reflect :: Term -> (forall ann. Symantics ann => ann (TermF ann))
 reflect (I e) = case e of
-    Var x              -> var x
-    Value (Lambda x e) -> value (Lambda x (reflect e))
-    Value (Data dc xs) -> value (Data dc xs)
-    Value (Literal l)  -> value (Literal l)
-    App e1 (I x2)      -> app (reflect e1) x2
-    PrimOp pop es      -> primOp pop (map reflect es)
-    Case e alts        -> case_ (reflect e) (map (second reflect) alts)
-    LetRec xes e       -> letRec (map (second reflect) xes) (reflect e)
+    Var x                  -> var x
+    Value x_v (Lambda x e) -> value x_v (Lambda x (reflect e))
+    Value x_v (Data dc xs) -> value x_v (Data dc xs)
+    Value x_v (Literal l)  -> value x_v (Literal l)
+    App e1 (I x2)          -> app (reflect e1) x2
+    PrimOp pop es          -> primOp pop (map reflect es)
+    Case e alts            -> case_ (reflect e) (map (second reflect) alts)
+    LetRec xes e           -> letRec (map (second reflect) xes) (reflect e)
 
 
 literal :: Symantics ann => Literal -> ann (TermF ann)
-literal = value . Literal
+literal = value Nothing . Literal
 
 lambda :: Symantics ann => Var -> ann (TermF ann) -> ann (TermF ann)
-lambda x = value . Lambda x
+lambda x = value Nothing . Lambda x
 
 lambdas :: Symantics ann => [Var] -> ann (TermF ann) -> ann (TermF ann)
 lambdas = flip $ foldr lambda
 
 data_ :: Symantics ann => DataCon -> [Var] -> ann (TermF ann)
-data_ dc = value . Data dc
+data_ dc = value Nothing . Data dc
 
 apps :: Symantics ann => ann (TermF ann) -> [Var] -> ann (TermF ann)
 apps = foldl app
@@ -274,8 +274,8 @@ letRecSmart []  = id
 letRecSmart xes = letRec xes
 
 collectLambdas :: Term -> ([Var], Term)
-collectLambdas (I (Value (Lambda x e))) = first (x:) $ collectLambdas e
-collectLambdas e                        = ([], e)
+collectLambdas (I (Value _ (Lambda x e))) = first (x:) $ collectLambdas e
+collectLambdas e                          = ([], e)
 
 freshFloatVar :: IdSupply -> String -> Term -> (IdSupply, Maybe (Name, Term), Name)
 freshFloatVar ids _ (I (Var x)) = (ids,  Nothing,     x)

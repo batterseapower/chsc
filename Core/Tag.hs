@@ -26,7 +26,7 @@ mkTag rec = term tagIdSupply
       where (ids', i) = stepIdSupply ids
     term' ids e = case e of
         Var x         -> Var x
-        Value v       -> Value (value ids v)
+        Value x v     -> Value x (value ids v)
         App e x       -> App (term ids0' e) (var ids1' x)
           where (ids0', ids1') = splitIdSupply ids
         PrimOp pop es -> PrimOp pop (zipWith term idss' es)
@@ -68,7 +68,7 @@ mkDetag rec = (var, term, alternatives, value, value')
     term = rec term'
     term' e = case e of
         Var x         -> Var x
-        Value v       -> Value (value' v)
+        Value x v     -> Value x (value' v)
         App e x       -> App (term e) (var x)
         PrimOp pop es -> PrimOp pop (map term es)
         Case e alts   -> Case (term e) (alternatives alts)

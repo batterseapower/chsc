@@ -31,7 +31,7 @@ matchInTerm ids = matchAnned (matchInTerm' ids)
 
 matchInTerm' :: IdSupply -> In (TermF Anned) -> In (TermF Anned) -> Maybe [(Var, Var)]
 matchInTerm' _   (rn_l, Var x_l)           (rn_r, Var x_r)           = Just [matchInVar (rn_l, x_l) (rn_r, x_r)]
-matchInTerm' ids (rn_l, Value v_l)         (rn_r, Value v_r)         = matchInValue ids (rn_l, v_l) (rn_r, v_r)
+matchInTerm' ids (rn_l, Value x_l v_l)     (rn_r, Value x_r v_r)     = matchInIndirection (matchInValue ids) (rn_l, (x_l, v_l)) (rn_r, (x_r, v_r))
 matchInTerm' ids (rn_l, App e_l x_l)       (rn_r, App e_r x_r)       = matchInTerm ids (rn_l, e_l) (rn_r, e_r) >>= \eqs -> return (matchAnned matchInVar (rn_l, x_l) (rn_r, x_r) : eqs)
 matchInTerm' ids (rn_l, PrimOp pop_l es_l) (rn_r, PrimOp pop_r es_r) = guard (pop_l == pop_r) >> matchInList (matchInTerm ids) (rn_l, es_l) (rn_r, es_r)
 matchInTerm' ids (rn_l, Case e_l alts_l)   (rn_r, Case e_r alts_r)   = liftM2 (++) (matchInTerm ids (rn_l, e_l) (rn_r, e_r)) (matchInAlts ids (rn_l, alts_l) (rn_r, alts_r))
@@ -39,6 +39,10 @@ matchInTerm' ids (rn_l, LetRec xes_l e_l)  (rn_r, LetRec xes_r e_r)  = matchInTe
   where (ids',  rn_l', xes_l') = renameBounds (\_ x' -> x') ids  rn_l xes_l
         (ids'', rn_r', xes_r') = renameBounds (\_ x' -> x') ids' rn_r xes_r
 matchInTerm' _ _ _ = Nothing
+
+matchInIndirection :: (In a -> In a -> Maybe [(Var, Var)])
+                   -> In (Maybe Var, a) -> In (Maybe Var, a) -> Maybe [(Var, Var)]
+matchInIndirection match (rn_l, (x_l, v_l)) (rn_r, (x_r, v_r)) = liftM2 (++) (matchMaybe matchInVar (fmap ((,) rn_l) x_l) (fmap ((,) rn_r) x_r)) (match (rn_l, v_l) (rn_r, v_r))
 
 matchInValue :: IdSupply -> In AnnedValue -> In AnnedValue -> Maybe [(Var, Var)]
 matchInValue ids (rn_l, Lambda x_l e_l) (rn_r, Lambda x_r e_r) = matchInTerm ids'' (rn_l', e_l) (rn_r', e_r) >>= \eqs -> matchRigidBinders [(x_l', x_r')] eqs
@@ -95,7 +99,7 @@ matchEC k_l k_r = fmap combine $ zipWithEqualM matchECFrame k_l k_r
 matchECFrame :: StackFrame -> StackFrame -> Maybe ([(Var, Var)], [(Var, Var)])
 matchECFrame (Apply x_l')                      (Apply x_r')                      = Just ([], [matchAnnedVar x_l' x_r'])
 matchECFrame (Scrutinise in_alts_l)            (Scrutinise in_alts_r)            = fmap ([],) $ matchInAlts matchIdSupply in_alts_l in_alts_r
-matchECFrame (PrimApply pop_l in_vs_l in_es_l) (PrimApply pop_r in_vs_r in_es_r) = fmap ([],) $ guard (pop_l == pop_r) >> liftM2 (++) (matchList (matchAnned (matchInValue matchIdSupply)) in_vs_l in_vs_r) (matchList (matchInTerm matchIdSupply) in_es_l in_es_r)
+matchECFrame (PrimApply pop_l in_vs_l in_es_l) (PrimApply pop_r in_vs_r in_es_r) = fmap ([],) $ guard (pop_l == pop_r) >> liftM2 (++) (matchList (matchInIndirection (matchAnned (matchInValue matchIdSupply))) in_vs_l in_vs_r) (matchList (matchInTerm matchIdSupply) in_es_l in_es_r)
 matchECFrame (Update x_l')                     (Update x_r')                     = Just ([matchAnnedVar x_l' x_r'], [])
 matchECFrame _ _ = Nothing
 
@@ -139,7 +143,7 @@ matchPureHeapExact ids bound_eqs free_eqs init_h_l init_h_r = do
     --    (I think this reason is now redundant, but actually we still need to make sure that we only output equalities
     --     on *free variables* of the two heaps, not any bound members).
     --    NB: Because some variables may be bound by update frames in the stack, we need to filter out those too...
-    eqs <- --traceRender ("matchPureHeapExact", eqs, bound_eqs, init_h_l, init_h_r) $
+    eqs <- traceRender ("matchPureHeapExact", eqs, bound_eqs, init_h_l, init_h_r) $
            return $ filter (\(x_l, _x_r) -> x_l `M.notMember` init_h_l && all ((/= x_l) . fst) bound_eqs) eqs
     -- 3) Now the problem is that there might be some bindings in the Right heap that are referred
     --    to by eqs. We want an exact match, so we can't allow that.

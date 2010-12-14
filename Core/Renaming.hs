@@ -49,7 +49,7 @@ mkRename rec = (var, term, alternatives, value, value')
     term ids rn = rec (term' ids) rn
     term' ids rn e = case e of
       Var x -> Var (safeRename "renameTerm" rn x)
-      Value v -> Value (value' ids rn v)
+      Value x v -> Value (fmap (rename rn) x) (value' ids rn v)
       App e1 x2 -> App (term ids rn e1) (var rn x2)
       PrimOp pop es -> PrimOp pop (map (term ids rn) es)
       Case e alts -> Case (term ids rn e) (alternatives ids rn alts)

@@ -82,7 +82,7 @@ split gen opt (deeds, s) = optimiseSplit opt deeds' bracketeds_heap bracketed_fo
 
 -- Non-expansive simplification that we can safely do just before splitting to make the splitter a bit simpler
 data QA = Question Var
-        | Answer   (ValueF Anned)
+        | Answer   (Maybe Var, ValueF Anned)
 
 
 {-# INLINE simplify #-}
@@ -110,8 +110,8 @@ simplify gen (init_deeds, init_s)
     droppingWhat (Case _ _)   = "Case"
     droppingWhat (LetRec _ _) = "LetRec"
     
-    toQA (Var x)   = Just (Question x)
-    toQA (Value v) = Just (Answer v)
+    toQA (Var x)     = Just (Question x)
+    toQA (Value x v) = Just (Answer (x, v))
     toQA _ = Nothing
     
     seekAdmissable :: PureHeap -> NamedStack -> Maybe (IS.IntSet, S.Set (Out Var))
@@ -332,7 +332,7 @@ optimiseSplit opt deeds bracketeds_heap bracketed_focus = do -- FIXME: use gen_x
                 stackFrameSize kf = 1 + case kf of
                     Apply x'                -> varSize x'
                     Scrutinise in_alts      -> sum (map altSize' (snd in_alts))
-                    PrimApply _ in_vs in_es -> sum (map (valueSize . snd) in_vs) + sum (map (termSize . snd) in_es)
+                    PrimApply _ in_vs in_es -> sum (map (valueSize . snd . snd) in_vs) + sum (map (termSize . snd) in_es)
                     Update x'               -> varSize x'
         bracketSizes = map stateSize . fillers
         
@@ -418,7 +418,7 @@ splitt :: (IS.IntSet, S.Set (Out Var))
        -> (Deeds,                             -- ^ The Deeds still available after splitting
            M.Map (Out Var) (Bracketed State), -- ^ The residual "let" bindings
            Bracketed State)                   -- ^ The residual "let" body
-splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply -> (ids_brack, ids))), named_k, (scruts, bracketed_qa)))
+splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply -> (ids_brack, ids_indirection))), named_k, (scruts, bracketed_qa)))
     = -- traceRender ("splitt", residualiseHeap (Heap h ids_brack) (\ids -> residualiseStack ids k (case tagee qa of Question x' -> var x'; Answer in_v -> value $ detagTaggedValue $ renameIn renameTaggedValue ids in_v))) $
       snd $ split_step split_fp -- TODO: eliminate redundant recomputation here?
   where
@@ -442,7 +442,7 @@ splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (sp
         fill_ids = fmap (\(ent, f) -> (ent, f ids_brack))
         (deeds0_unreleased, bracketeds_updated, bracketed_focus)
           = (\(a, b, c) -> (a, M.map (second fill_ids) b, fill_ids c)) $
-            pushStack ids deeds scruts [(i `IS.notMember` resid_kfs, kf) | (i, kf) <- named_k] bracketed_qa
+            pushStack ids_stack deeds scruts [(i `IS.notMember` resid_kfs, kf) | (i, kf) <- named_k] bracketed_qa
         
         -- 2) Build a splitting for those elements of the heap we propose to residualise in resid_xs
         (h_residualised, h_not_residualised) = M.partitionWithKey (\x' _ -> x' `S.member` resid_xs) h
@@ -486,7 +486,7 @@ splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (sp
         --
         -- Basically the idea of this heap is "stuff we want to make available to push down"
         h_inlineable = (h_not_residualised `M.union`         -- Take any non-residualised bindings from the input...
-                        h_cheap_and_phantom `M.union`        -- ...failing which, take cheap bindings even if they are also residualised...
+                        h_cheap_and_phantom `M.union`        -- ...failing which, take a indirected version of cheap residualised stuff...
                         M.map fst bracketeds_heap) `exclude` -- ...failing which, take a phantom version of it.
                         snd split_from                       -- The exclusion just makes sure we don't inline explicitly generalised bindings (even phantom ones)
         
@@ -533,11 +533,22 @@ splitt split_from (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (sp
         resid_xs' = fvs' `S.union` newly_resid -- NB: newly_resid and not_newly_resid might not cover all variables. This is OK!
         resid_kfs' = IS.fromList [i | (i, kf) <- named_k, Update (annee -> x') <- [kf], x' `S.member` resid_xs']
     
-    -- Heap full of cheap expressions and any phantom stuff from the input heap.
+    -- Heap full of cheap non-value expressions, indirections to values and any phantom stuff from the input heap.
     -- Used within the main loop in the process of computing h_inlineable -- see comments there for the full meaning of this stuff.
-    extract_cheap_hb (Concrete (rn, e)) = guard (isCheap (annee e)) >> Just (Concrete (rn, e))
-    extract_cheap_hb hb                 = Just hb -- Inline phantom stuff verbatim: there is no work duplication issue
-    h_cheap_and_phantom = M.mapMaybe extract_cheap_hb h
+    --
+    -- When we push down values, for each value binding x |-> _@v we need to:
+    --   1. Manufacture a fresh name x'
+    --   2. Accumulate a renaming \theta from old to new names, adding in x |-> x'
+    --   3. Manufacture a binding to push down, x' |-> x@(v\theta)
+    --   4. Make sure we have a phantom version of x |-> _@v suitable for binding here
+    --
+    -- If we just naively push down a x |-> x@v binding we get circularity in the output program (duh!)
+    -- FIXME: make this happen
+    extract_cheap_hb ids x' (Concrete (rn, e)) = case annee e of Value Nothing v -> (ids', Just (Concrete (insertRenaming x'' x' rn, annedTerm (annedTag e) $ Value (Just x'') v)))
+                                                                   where (ids', x'') = freshName ids (name_string x')
+                                                                 _               -> (ids, guard (isCheap (annee e)) >> Just (Concrete (rn, e)))
+    extract_cheap_hb ids _  hb                 = (ids, Just hb) -- Inline phantom stuff verbatim: there is no work duplication issue
+    (ids_stack, M.mapMaybe id -> h_cheap_and_phantom) = M.mapAccumWithKey extract_cheap_hb ids_indirection h
 
 -- Note [Better fixed points of Entered information]
 --
@@ -728,14 +739,15 @@ splitStackFrame ids kf scruts bracketed_hole
             ctxt_id = idFromSupply state_ids
             
             -- 1) Construct the floats for each case alternative
-            (_alt_ids', alt_rns, alt_cons') = unzip3 $ map (renameAltCon ids' rn) alt_cons
+            (ids'', x_scrut) = freshName ids' "scrut" -- A "dummy" variable just used for indirections
+            (_alt_ids', alt_rns, alt_cons') = unzip3 $ map (renameAltCon ids'' rn) alt_cons
             -- Bind something to the case scrutinee (if possible). This means that:
             --  let y = (\z -> case z of C -> ...) unk
             --  in y
             -- ===>
             --  case x of C -> let unk = C; z = C in ...
             alt_in_es = alt_rns `zip` alt_es
-            alt_hs = zipWith3 (\alt_rn alt_con alt_tg -> M.fromList $ do { Just scrut_v <- [altConToValue alt_con]; scrut <- scruts; return (scrut, Concrete (alt_rn, annedTerm alt_tg (Value scrut_v))) }) alt_rns alt_cons (map annedTag alt_es)
+            alt_hs = zipWith3 (\alt_rn alt_con alt_tg -> M.fromList $ do { Just scrut_v <- [altConToValue alt_con]; scrut <- scruts; return (scrut, Concrete (insertRenaming x_scrut scrut alt_rn, annedTerm alt_tg (Value (Just x_scrut) scrut_v))) }) alt_rns alt_cons (map annedTag alt_es)
             alt_bvss = map (\alt_con' -> fst $ altConOpenFreeVars alt_con' (S.empty, S.empty)) alt_cons'
             bracketed_alts = zipWith (\alt_h alt_in_e -> oneBracketed (Once ctxt_id, \ids -> (Heap alt_h ids, [], alt_in_e))) alt_hs alt_in_es
     PrimApply pop in_vs in_es -> zipBracketeds (primOp pop) S.unions (repeat id) (\_ -> Nothing) (bracketed_vs ++ bracketed_hole : bracketed_es)
@@ -744,7 +756,7 @@ splitStackFrame ids kf scruts bracketed_hole
             ctxt_ids = map idFromSupply state_idss
             
             -- 1) Split every value and expression remaining apart
-            bracketed_vs = map (splitValue ids' . fmap annee) in_vs
+            bracketed_vs = map (splitValue ids' . fmap (second annee)) in_vs
             bracketed_es  = zipWith (\ctxt_id in_e -> oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], in_e))) ctxt_ids in_es)
   where
     altConToValue :: AltCon -> Maybe (ValueF ann)
@@ -764,13 +776,23 @@ splitUpdate scruts x' bracketed_hole = (annee x' : scruts, M.singleton (annee x'
   -- So at the moment we do a "poor mans" thing and just keep track of the free variables and the tag in a new Updated constructor. As it turns out,
   -- this is all that is actually required to make generalisation work properly, although it might pessimise the matcher a tiny bit.
 
-splitValue :: IdSupply -> In AnnedValue -> Bracketed (Entered, IdSupply -> State)
-splitValue ids (rn, Lambda x e) = zipBracketeds (\[e'] -> lambda x' e') (\[fvs'] -> fvs') [S.insert x'] (\_ -> Nothing) [oneBracketed (Many, \ids -> (Heap M.empty ids, [], (rn', e)))]
+splitValue :: IdSupply -> In (Maybe Var, AnnedValue) -> Bracketed (Entered, IdSupply -> State)
+ -- If this value is actually an indirection, in order to prevent value duplication we *must not* drive into it,
+ -- even if it is a lambda. This can actually cause a loss of optimisation, e.g consider:
+ --   let f = \y -> if x then y else 2
+ --   in (if x then Just f else Just f, f)
+ --
+ -- We push an indirection to f into both components of the tuple, and we could benefit from removing the duplicate
+ -- "if" test from a specialised version of x in each case branch. However, with this scheme we won't get that because
+ -- we won't be allowed to duplicate the allocation of f into both components of the tuple.
+splitValue _   (rn, (Just x_v, _))         = noneBracketed (var x_v') (fvedVarFreeVars' x_v')
+  where x_v' = rename rn x_v
+splitValue ids (rn, (Nothing, Lambda x e)) = zipBracketeds (\[e'] -> lambda x' e') (\[fvs'] -> fvs') [S.insert x'] (\_ -> Nothing) [oneBracketed (Many, \ids -> (Heap M.empty ids, [], (rn', e)))]
   where (_ids', rn', x') = renameBinder ids rn x
-splitValue ids in_v             = noneBracketed (value v') (inFreeVars annedValueFreeVars' in_v)
-  where v' = detagAnnedValue' $ renameIn renameAnnedValue' ids in_v
+splitValue ids (rn, (Nothing, v))          = noneBracketed (value Nothing v') (fvedValueFreeVars' v')
+  where v' = detagAnnedValue' $ renameIn renameAnnedValue' ids (rn, v)
 
 splitQA :: IdSupply -> In QA -> Bracketed (Entered, IdSupply -> State)
-splitQA _   (rn, Question x) = noneBracketed (var x') (S.singleton x')
+splitQA _   (rn, Question x)    = noneBracketed (var x') (S.singleton x')
   where x' = rename rn x
-splitQA ids (rn, Answer v)   = splitValue ids (rn, v)
+splitQA ids (rn, Answer (x, v)) = splitValue ids (rn, (x, v))

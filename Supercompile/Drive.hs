@@ -64,15 +64,15 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ run
             
             term = rec term'
             term' e = case e of
-              Var x              -> ([], \[] -> Var x)
-              Value (Lambda x e) -> ([t], \[t'] -> Value (Lambda x (rb t')))
+              Var x                  -> ([], \[] -> Var x)
+              Value x_v (Lambda x e) -> ([t], \[t'] -> Value x_v (Lambda x (rb t')))
                 where (t, rb) = term e
-              Value (Data dc xs) -> ([], \[] -> Value (Data dc xs))
-              Value (Literal l)  -> ([], \[] -> Value (Literal l))
-              App e x            -> ([t1, t2], \[t1', t2'] -> App (rb1 t1') (rb2 t2'))
+              Value x_v (Data dc xs) -> ([], \[] -> Value x_v (Data dc xs))
+              Value x_v (Literal l)  -> ([], \[] -> Value x_v (Literal l))
+              App e x                -> ([t1, t2], \[t1', t2'] -> App (rb1 t1') (rb2 t2'))
                 where (t1, rb1) = term e
                       (t2, rb2) = var x
-              PrimOp pop es      -> (ts, \ts' -> PrimOp pop (zipWith ($) rbs ts'))
+              PrimOp pop es        -> (ts, \ts' -> PrimOp pop (zipWith ($) rbs ts'))
                 where (ts, rbs) = unzip (map term es)
               Case e (unzip -> (alt_cons, alt_es)) -> (t : ts, \(t':ts') -> Case (rb t') (alt_cons `zip` zipWith ($) rbs ts'))
                 where (t, rb)   = term e
@@ -135,8 +135,8 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) emptyLosers
         speculate_one x' (Concrete in_e) (deeds, Heap h'_winners ids, losers)
           -- | not (isValue (annee (snd in_e))), traceRender ("speculate", depth, residualiseState (Heap (h {- `exclude` M.keysSet base_h -}) ids, k, in_e)) False = undefined
           | otherwise = case (go (depth + 1) hist losers) (deeds, (Heap (M.delete x' h'_winners) ids, [], in_e)) of
-            (losers', (deeds', (Heap h' ids', [], in_e'@(_, annee -> Value _)))) -> (deeds', Heap (M.insert x' (Concrete in_e') h')         ids', losers')
-            (losers', _)                                                         -> (deeds,  Heap (M.insert x' (Concrete in_e)  h'_winners) ids,  IS.insert (annedTag (snd in_e)) losers')
+            (losers', (deeds', (Heap h' ids', [], in_e'@(_, annee -> Value _ _)))) -> (deeds', Heap (M.insert x' (Concrete in_e') h')         ids', losers')
+            (losers', _)                                                           -> (deeds,  Heap (M.insert x' (Concrete in_e)  h'_winners) ids,  IS.insert (annedTag (snd in_e)) losers')
         speculate_one x' hb              (deeds, Heap h'_winners ids, losers) 
           = (deeds, Heap (M.insert x' hb h'_winners) ids, losers)
 

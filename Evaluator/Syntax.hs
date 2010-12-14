@@ -97,7 +97,7 @@ instance Pretty Heap where
 type Stack = [StackFrame]
 data StackFrame = Apply (Out (Anned Var))
                 | Scrutinise (In [AnnedAlt])
-                | PrimApply PrimOp [In (Anned AnnedValue)] [In AnnedTerm]
+                | PrimApply PrimOp [In (Maybe Var, Anned AnnedValue)] [In AnnedTerm]
                 | Update (Out (Anned Var))
                 deriving (Show)
 
@@ -135,7 +135,7 @@ stackFrameTags :: StackFrame -> [Tag]
 stackFrameTags kf = case kf of
     Apply x'                -> [annedTag x']
     Scrutinise in_alts      -> map (annedTag . snd) (snd in_alts)
-    PrimApply _ in_vs in_es -> map (annedTag . snd) in_vs ++ map (annedTag . snd) in_es
+    PrimApply _ in_vs in_es -> map (annedTag . snd . snd) in_vs ++ map (annedTag . snd) in_es
     Update x'               -> [annedTag x']
 
 releaseHeapBindingDeeds :: Deeds -> HeapBinding -> Deeds

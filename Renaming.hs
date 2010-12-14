@@ -2,7 +2,7 @@
 module Renaming (
     Renaming(..),
     emptyRenaming, mkRenaming, mkIdentityRenaming,
-    insertRenaming, insertRenamings,
+    insertRenaming, insertRenamings, plusRenaming,
     rename, rename_maybe, safeRename, unrename,
     renameBinder, renameBinders,
     renameRenaming,
@@ -30,7 +30,7 @@ instance Pretty Renaming where
 emptyRenaming :: Renaming
 emptyRenaming = Renaming M.empty
 
-mkRenaming :: [(Name, Name)] -> Renaming
+mkRenaming :: [(In Name, Out Name)] -> Renaming
 mkRenaming = Renaming . M.fromList
 
 mkIdentityRenaming :: [Name] -> Renaming
@@ -41,6 +41,9 @@ insertRenaming n n' = Renaming . M.insert n n' . unRenaming
 
 insertRenamings :: [(In Name, Out Name)] -> Renaming -> Renaming
 insertRenamings = flip $ foldr (uncurry insertRenaming)
+
+plusRenaming :: Renaming -> Renaming -> Renaming
+plusRenaming rn1 rn2 = Renaming (unRenaming rn1 `M.union` unRenaming rn2)
 
 rename :: Renaming -> In Name -> Out Name
 rename = safeRename' Nothing

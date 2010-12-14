@@ -14,9 +14,9 @@ type FreeVars = S.Set Var
 type BoundVars = S.Set Var
 
 
-(termVarFreeVars',       termFreeVars,           termFreeVars',           altsFreeVars,           valueFreeVars,           valueFreeVars')           = mkFreeVars (\f (I e) -> f e)
-(fvedTermVarFreeVars',   fvedTermFreeVars,       fvedTermFreeVars',       fvedAltsFreeVars,       fvedValueFreeVars,       fvedValueFreeVars')       = mkFreeVars (\_ (FVed fvs _) -> fvs)
-(taggedTermVarFreeVars', taggedTermFreeVars,     taggedTermFreeVars',     taggedAltsFreeVars,     taggedValueFreeVars,     taggedValueFreeVars')     = mkFreeVars (\f (Tagged _ e) -> f e)
+(varFreeVars',           termFreeVars,           termFreeVars',           altsFreeVars,           valueFreeVars,           valueFreeVars')           = mkFreeVars (\f (I e) -> f e)
+(fvedVarFreeVars',       fvedTermFreeVars,       fvedTermFreeVars',       fvedAltsFreeVars,       fvedValueFreeVars,       fvedValueFreeVars')       = mkFreeVars (\_ (FVed fvs _) -> fvs)
+(taggedVarFreeVars',     taggedTermFreeVars,     taggedTermFreeVars',     taggedAltsFreeVars,     taggedValueFreeVars,     taggedValueFreeVars')     = mkFreeVars (\f (Tagged _ e) -> f e)
 (taggedFVedVarFreeVars', taggedFVedTermFreeVars, taggedFVedTermFreeVars', taggedFVedAltsFreeVars, taggedFVedValueFreeVars, taggedFVedValueFreeVars') = mkFreeVars (\_ (Comp (Tagged _ (FVed fvs _))) -> fvs)
 
 {-# INLINE mkFreeVars #-}
@@ -34,7 +34,7 @@ mkFreeVars rec = (var', term, term', alternatives, value, value')
     
     term = rec term'
     term' (Var x)        = S.singleton x
-    term' (Value v)      = value' v
+    term' (Value x v)    = maybe id S.insert x $ value' v
     term' (App e x)      = term e `S.union` var x
     term' (PrimOp _ es)  = S.unions $ map term es
     term' (Case e alts)  = term e `S.union` alternatives alts
@@ -90,14 +90,14 @@ type FVedValue = ValueF FVed
 
 instance Symantics FVed where
     var = fvedTerm . Var
-    value = fvedTerm . Value
+    value x = fvedTerm . Value x
     app e x = fvedTerm (App e (fvedVar x))
     primOp pop = fvedTerm . PrimOp pop
     case_ e = fvedTerm . Case e
     letRec xes e = fvedTerm (LetRec xes e)
 
 fvedVar :: Var -> FVed Var
-fvedVar x = FVed (taggedTermVarFreeVars' x) x
+fvedVar x = FVed (fvedVarFreeVars' x) x
 
 fvedTerm :: TermF FVed -> FVedTerm
 fvedTerm e = FVed (fvedTermFreeVars' e) e
