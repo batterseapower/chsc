@@ -530,7 +530,14 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
         -- But *not* the x in this:
         --  < | foo | case foo of \Delta, update x, [_] + 1 >
         --
-        -- How the hell are we going to accomplish that? FIXME
+        -- How the hell do we accomplish that? The trick is to change how update frames get split. After splitting an
+        -- update frame for x, I continue splitting the rest of the stack with a oneBracketed rather than a noneBracketed in
+        -- the focus.
+        --
+        -- If I didn't do this, the extraFvs of the bracket would indicate that x was free in a created residual term, so I
+        -- would be forced to residualise the binding just as if e.g. "Just x" had been in the focus of the state. Since I don't,
+        -- x doesn't appear in the extraFvs, and I can compute Entered information for it with transitiveInline. If this says x
+        -- was entered Once in aggregate I can stop residualising the update frame! Beautiful!
         --
         -- Note [transitiveInline and entered information]
         -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -558,9 +565,11 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
         not_resid_xs' = -- traceRender ("candidates", onces, must_resid_xs, not_resid_xs, candidates) $
                         if S.null candidates then not_resid_xs
                                              else S.insert (S.findMin candidates) not_resid_xs
-          where onces = S.filter (\x' -> maybe True isOnce (M.lookup x' entered)) (heapBoundVars (Heap h ids))
-                  -- FIXME: select subset of candidates from (stackBoundVars (map snd named_k))
+          where onces = S.filter (\x' -> maybe True isOnce (M.lookup x' entered)) bound_xs
                 candidates = onces S.\\ must_resid_xs S.\\ not_resid_xs
+    
+    -- Bound variables: those variables that I am interested in making a decision about whether to residualise or not
+    bound_xs = heapBoundVars (Heap h ids) `S.union` stackBoundVars (map snd named_k)
     
     -- Heap full of cheap expressions and any phantom stuff from the input heap.
     -- Used within the main loop in the process of computing h_inlineable -- see comments there for the full meaning of this stuff.
@@ -776,10 +785,19 @@ splitStackFrame ids kf scruts bracketed_hole
     altConToValue (LiteralAlt l)  = Just $ Literal l
     altConToValue (DefaultAlt _)  = Nothing
 
+-- I'm making use of a clever trick: after splitting an update frame for x, instead of continuing to split the stack with a
+-- noneBracketed for x in the focus, I split the stack with a oneBracketed for it in the focus.
+--
+-- You might think this is utterly worthless, since by definition the splitter will never be able to push the actual definition of
+-- x into this hole in the bracketed. However, the fact that we do this is *critical* to the algorithm I use to ensure that
+-- we can make variables bound by update frames as non-residualised: see Note [Residualisation of things referred to in extraFvs]
 splitUpdate :: [Out Var] -> Anned Var -> Bracketed (Entered, IdSupply -> State)
             -> ([Out Var], M.Map (Out Var) (HeapBinding, Bracketed (Entered, IdSupply -> State)), Bracketed (Entered, IdSupply -> State))
-splitUpdate scruts x' bracketed_hole = (annee x' : scruts, M.singleton (annee x') (Updated (annedTag x') hole_fvs, bracketed_hole), noneBracketed (var (annee x')) (S.singleton (annee x')))
-  where hole_fvs = bracketedFreeVars (\(_, mk_state) -> stateFreeVars (mk_state matchIdSupply)) bracketed_hole
+splitUpdate scruts x' bracketed_hole = (annee x' : scruts, M.singleton (annee x') (Updated (annedTag x') hole_fvs, bracketed_hole),
+                                        oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], (mkIdentityRenaming [annee x'], annedTerm (annedTag x') (Var (annee x'))))))
+  where
+    ctxt_id = fromJust (name_id (annee x'))
+    hole_fvs = bracketedFreeVars (\(_, mk_state) -> stateFreeVars (mk_state matchIdSupply)) bracketed_hole
   -- TODO: we get poor generalisation for variables bound by update frames because we don't record proper tags or whatever for them
   --
   -- We could make this work using the Phantom constructor by threading in a rebuilt version of the term being updated, but at the moment that is
