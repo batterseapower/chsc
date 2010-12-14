@@ -510,46 +510,12 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
 
         -- 4) Construct the next element of the fixed point process:
         --  a) We should residualise:
-        --     * Any x in the extraFvs of a bracketed thing, because we need to be able to refer to it right here
+        --     * Any x in the extraFvs of a bracketed thing, because we need to be able to refer to it right here, whatever happens
         --     * Anything explicitly generalised
-        --
-        -- Note [Residualisation of things referred to in extraFvs]
-        -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        -- We need to residualise stuff like the a and b in this:
-        --  <a |-> 1, b |-> 2 | (a, b) | >
-        --
-        -- But *not* the x in this:
-        --  < | foo | case foo of \Delta, update x, [_] + 1 >
-        --
-        -- How the hell do we accomplish that? The trick is to change how update frames get split. After splitting an
-        -- update frame for x, I continue splitting the rest of the stack with a oneBracketed rather than a noneBracketed in
-        -- the focus.
-        --
-        -- If I didn't do this, the extraFvs of the bracket would indicate that x was free in a created residual term, so I
-        -- would be forced to residualise the binding just as if e.g. "Just x" had been in the focus of the state. Since I don't,
-        -- x doesn't appear in the extraFvs, and I can compute Entered information for it with transitiveInline. If this says x
-        -- was entered Once in aggregate I can stop residualising the update frame! Beautiful!
-        --
-        -- Note [transitiveInline and entered information]
-        -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        -- Consider:
-        --   expensive |-> fact 100
-        --   a |-> Just expensive
-        --   b |-> Just expensive
-        --   (a, b)
-        --
-        -- We need to residualise expensive, but what is the mechanism for doing so? Both a and b will get residualised
-        -- by the rule above because they are FVs of the focus.
-        --
-        -- We additionally need transitiveInline to report Entered information. Precisely, it reports how many times a variable
-        -- would be (in the worst case) get reevaluated if the binding was made available for inlining. So in this case,
-        -- transitiveInline on the a and b bindings report that expensive would get evaluated Once in each context, which
-        -- joins together to make Many times.
-        --
-        -- This is the basis on which we choose to residualise expensive.
         must_resid_xs = extraFvs bracketed_focus' `S.union` S.unions (map extraFvs (M.elems bracketeds_heap'))
                           `S.union` gen_xs
         --  b) Lastly, we should *stop* residualising bindings that got Entered only once in the proposal.
+        --   
         --     We can only do one of these at a time, because not residualising a binding may make the entered information out of date...
         --
         --     TODO: this is sort of crap, can we fix it? In the vast majority of cases it is OK -- inlining a Once thing won't change the
@@ -572,6 +538,42 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
     extract_cheap_hb (Concrete (rn, e)) = guard (isCheap (annee e)) >> Just (Concrete (rn, e))
     extract_cheap_hb hb                 = Just hb -- Inline phantom stuff verbatim: there is no work duplication issue
     h_cheap_and_phantom = M.mapMaybe extract_cheap_hb h
+
+
+-- Note [Residualisation of things referred to in extraFvs]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- We need to residualise stuff like the a and b in this:
+--  <a |-> 1, b |-> 2 | (a, b) | >
+--
+-- But *not* the x in this:
+--  < | foo | case foo of \Delta, update x, [_] + 1 >
+--
+-- How the hell do we accomplish that? The trick is to change how update frames get split. After splitting an
+-- update frame for x, I continue splitting the rest of the stack with a oneBracketed rather than a noneBracketed in
+-- the focus.
+--
+-- If I didn't do this, the extraFvs of the bracket would indicate that x was free in a created residual term, so I
+-- would be forced to residualise the binding just as if e.g. "Just x" had been in the focus of the state. Since I don't,
+-- x doesn't appear in the extraFvs, and I can compute Entered information for it with transitiveInline. If this says x
+-- was entered Once in aggregate I can stop residualising the update frame! Beautiful!
+--
+-- Note [transitiveInline and entered information]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- Consider:
+--   expensive |-> fact 100
+--   a |-> Just expensive
+--   b |-> Just expensive
+--   (a, b)
+--
+-- We need to residualise expensive, but what is the mechanism for doing so? Both a and b will get residualised
+-- by the rule above because they are FVs of the focus.
+--
+-- We additionally need transitiveInline to report Entered information. Precisely, it reports how many times a variable
+-- would be (in the worst case) get reevaluated if the binding was made available for inlining. So in this case,
+-- transitiveInline on the a and b bindings report that expensive would get evaluated Once in each context, which
+-- joins together to make Many times.
+--
+-- This is the basis on which we choose to residualise expensive.
 
 -- We are going to use this helper function to inline any eligible inlinings to produce the expressions for driving.
 -- Returns (along with the augmented state) information about how many times bindings for the free variables of the final state
