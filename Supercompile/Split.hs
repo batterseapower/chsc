@@ -462,6 +462,14 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
         --
         -- The equivalent process is done for the stack in splitStack itself: we just subtract 1 from the number of deeds we need to
         -- claim when duplicating a stack frame.
+        --
+        -- FIXME: I'm pretty sure things will go wrong if we run out of deeds. In particular, we may duplicate some deeds because
+        -- we will have released deeds for everything in h_non_residualised, but those bindings will still be free in some of the things
+        -- they were transitivelyInlined into, if deed acquisition failed. This means that optimiseSplit will create bindings for them
+        -- without paying for those bindings!
+        -- I think that in fixing this I could ensure that the outgoing bracketeds_heap' excludes all those things in not_resid_xs.
+        -- After all, IIRC the only reason it doesn't at the moment is because I want to catch those bindings we wanted to push down
+        -- but actually couldn't because of deeds issues.
         deeds0 = M.fold (flip releaseHeapBindingDeeds) deeds0_unreleased h_not_residualised
         
         -- 3b) Work out which part of the heap is admissable for inlining
