@@ -25,7 +25,10 @@ import qualified Data.Set as S
 
 
 data WhyLive = PhantomLive | ConcreteLive
-             deriving (Eq)
+             deriving (Eq, Show)
+
+instance Pretty WhyLive where
+    pPrint = text . show
 
 instance JoinSemiLattice WhyLive where
     ConcreteLive `join` _            = ConcreteLive
