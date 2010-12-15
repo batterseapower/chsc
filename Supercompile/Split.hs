@@ -515,7 +515,7 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
         -- renamed so as not to coincide with any of the heap/stack bindings above that we actually care about the entered information for.
         -- So the outgoing entered envs will have a bit of junk in them, but who cares?
         inlineBracketHeap :: Deeds -> Bracketed (Entered, State) -> (Deeds, EnteredEnv, Bracketed State)
-        inlineBracketHeap = inlineHeapT (\deeds (ent, state) -> case transitiveInline deeds h_inlineable state of (deeds', state') -> (deeds', mkEnteredEnv ent $ stateFreeVars state', state'))
+        inlineBracketHeap = inlineHeapT (\deeds (ent, state) -> case transitiveInline h_inlineable (deeds, state) of (deeds', state') -> (deeds', mkEnteredEnv ent $ stateFreeVars state', state'))
         
         -- 3c) Actually do the inlining of as much of the heap as possible into the proposed floats
         -- We also take this opportunity to strip out the Entered information from each context.
@@ -588,10 +588,8 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
 -- This is the basis on which we choose to residualise expensive.
 
 -- We are going to use this helper function to inline any eligible inlinings to produce the expressions for driving.
--- Returns (along with the augmented state) information about how many times bindings for the free variables of the final state
--- would be evaluated (in the worst case) if they were inlined here. TODO: could put the entered_env construction in caller, simpler contract?
-transitiveInline :: Deeds -> PureHeap -> State -> (Deeds, State)
-transitiveInline deeds h_inlineable (Heap h ids, k, in_e)
+transitiveInline :: PureHeap -> (Deeds, State) -> (Deeds, State)
+transitiveInline h_inlineable (deeds, (Heap h ids, k, in_e))
     = -- (if not (S.null not_inlined_vs') then traceRender ("transitiveInline: generalise", not_inlined_vs') else id) $
       -- traceRender ("transitiveInline", concreteKeysSet h_inlineable, {- "before", h, "after", h', -} "hence entered is", entered_env) $
       (deeds', state')
