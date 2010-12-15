@@ -289,15 +289,15 @@ catchScpM :: ((forall b. c -> ScpM b) -> ScpM a) -- ^ Action to try: supplies a 
 catchScpM f_try f_abort = ScpM $ \e s k -> unScpM (f_try (\c -> ScpM $ \_ _ _ -> unScpM (f_abort c) e s k)) e s k
 
 
-newtype SCRollback = SCRB { rollbackWith :: Generaliser -> ScpM (Deeds, Out FVedTerm) }
+type RollbackScpM = Generaliser -> ScpM (Deeds, Out FVedTerm)
 
-sc, sc' :: History (State, SCRollback) (Generaliser, SCRollback) -> (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
+sc, sc' :: History (State, RollbackScpM) (Generaliser, RollbackScpM) -> (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
 sc  hist = memo (sc' hist)
-sc' hist (deeds, state) = (\raise -> check (SCRB raise)) `catchScpM` \gen -> stop gen hist -- TODO: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
+sc' hist (deeds, state) = (\raise -> check raise) `catchScpM` \gen -> stop gen hist -- TODO: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
   where
-    check mb_rb = case terminate hist (state, mb_rb) of
-                    Continue hist' -> continue hist'
-                    Stop (gen, rb) -> maybe (stop gen hist) (`rollbackWith` gen) $ guard sC_ROLLBACK >> Just rb
+    check this_rb = case terminate hist (state, this_rb) of
+                      Continue hist' -> continue hist'
+                      Stop (gen, rb) -> maybe (stop gen hist) ($ gen) $ guard sC_ROLLBACK >> Just rb
     stop gen hist = trace "sc-stop" $ split gen               (sc hist) (deeds, state)
     continue hist =                   split generaliseNothing (sc hist) ((\res@(_, state') -> traceRender ("reduce end", residualiseState state') res) $
                                                                          gc (speculate reduce (deeds, state))) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
