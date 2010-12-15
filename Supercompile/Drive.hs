@@ -28,8 +28,6 @@ import Renaming
 import StaticFlags
 import Utilities
 
-import Algebra.Lattice
-
 import qualified Data.Map as M
 import Data.Ord
 import qualified Data.Set as S
@@ -88,25 +86,20 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ run
 
 -- TODO: have the garbage collector collapse indirections to indirections (but unlike GHC, not further!)
 gc :: (Deeds, State) -> (Deeds, State)
-gc (deeds, (Heap h ids, k, in_e)) = (M.fold (flip releaseHeapBindingDeeds) deeds h_dead,
-                                     (Heap h_reachable ids, k, in_e))
+gc (deeds, (Heap h ids, k, in_e)) = transitiveInline h (M.fold (flip releaseHeapBindingDeeds) deeds h, (Heap M.empty ids, k, in_e))
   where
-    -- FIXME: we should be releasing deeds for things downgraded to Phantom as well
-    (h_dead, h_reachable) = M.mapEitherWithKey (\x' hb -> maybe (Left hb) (\why_live -> Right $ demoteHeapBinding why_live hb) (x' `whyLive` reachable)) h
-    reachable = lfpFrom (mkConcreteLiveness $ snd $ stackOpenFreeVars k $ inFreeVars annedTermFreeVars in_e) go
-    go live = M.foldWithKey (\x' hb live -> maybe live (\why_live -> live `plusLiveness` heapBindingLiveness (demoteHeapBinding why_live hb)) (x' `whyLive` live)) live h
-    
-    -- TODO: fix this comment. It used to be attached to the update frame logic in the evaluator.
-    --
-    -- If we can GC the update frame (because it can't be referred to in the continuation) then:
+    -- We used to garbage-collect in the evaluator, when we executed the rule for update frames. This had two benefits:
     --  1) We don't have to actually update the heap or even claim a new deed
-    --  2) We make the supercompiler less likely to terminate, because doing so tends to reduce TagBag sizes
+    --  2) We make the supercompiler less likely to terminate, because GCing so tends to reduce TagBag sizes
     --
-    -- NB: to prevent incorrectly garbage collecting bindings from the enclosing heap when we have speculation on,
-    -- we pass around an extra "live set" of parts of the heap that might be referred to later on
+    -- However, this caused problems with speculation: to prevent incorrectly garbage collecting bindings from the invisible "enclosing"
+    -- heap when we speculated one of the bindings from the heap, we had to pass around an extra "live set" of parts of the heap that might
+    -- be referred to later on. Furthermore:
+    --  * Finding FVs when executing every update step was a bit expensive (though they were memoized on each of the State components)
+    --  * This didn't GC cycles (i.e. don't consider stuff from the Heap that was only referred to by the thing being removed as "GC roots")
+    --  * It didn't seem to make any difference to the benchmark numbers anyway
     --
-    -- TODO: make finding FVs much cheaper (i.e. memoise it in the syntax functor construction)
-    -- TODO: could GC cycles as well (i.e. don't consider stuff from the Heap that was only referred to by the thing being removed as "GC roots")
+    -- So I nixed in favour of a bit of gc in this module. TODO: experiment with not GCing here either.
 
 speculate :: ((Deeds, State) -> (Deeds, State))
           -> (Deeds, State) -> (Deeds, State)

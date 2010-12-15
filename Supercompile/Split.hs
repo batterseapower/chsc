@@ -1,7 +1,7 @@
 {-# LANGUAGE PatternGuards, ViewPatterns, TupleSections, DeriveFunctor, DeriveFoldable, DeriveTraversable,
              MultiParamTypeClasses, FlexibleInstances, GeneralizedNewtypeDeriving #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
-module Supercompile.Split (MonadStatics(..), split) where
+module Supercompile.Split (MonadStatics(..), split, transitiveInline) where
 
 import Core.FreeVars
 import Core.Renaming

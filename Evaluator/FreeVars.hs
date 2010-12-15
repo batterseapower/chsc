@@ -2,11 +2,11 @@
 module Evaluator.FreeVars (
     WhyLive(..), Liveness, livenessAllFreeVars,
     mkConcreteLiveness, mkPhantomLiveness, emptyLiveness, plusLiveness, plusLivenesses,
-    whyLive, keepAlive, demoteHeapBinding,
+    whyLive, keepAlive,
 
     inFreeVars,
     heapBindingLiveness,
-    heapBoundVars, stackBoundVars, stackFrameBoundVars, stackOpenFreeVars,
+    heapBoundVars, stackBoundVars, stackFrameBoundVars,
     stateFreeVars, stateStaticBindersAndFreeVars
   ) where
 
@@ -66,11 +66,6 @@ keepAlive Nothing             _  _    h = h
 keepAlive (Just PhantomLive)  x' in_e h = M.insert x' (Phantom in_e) h
 keepAlive (Just ConcreteLive) x' in_e h = M.insert x' (Concrete in_e) h
 
-demoteHeapBinding :: WhyLive -> HeapBinding -> HeapBinding
-demoteHeapBinding PhantomLive hb | Just in_e <- heapBindingTerm hb = Phantom in_e
-demoteHeapBinding _           hb = hb
-  -- All HeapBindings that don't have expressions are necessarily already some sort of phantom.
-
 
 inFreeVars :: (a -> FreeVars) -> In a -> FreeVars
 inFreeVars thing_fvs (rn, thing) = renameFreeVars rn (thing_fvs thing)
@@ -86,9 +81,6 @@ heapBoundVars (Heap h _) = M.keysSet (M.filter (not . heapBindingNonConcrete) h)
 
 stackBoundVars :: Stack -> BoundVars
 stackBoundVars = S.unions . map stackFrameBoundVars
-
-stackOpenFreeVars :: Stack -> FreeVars -> (BoundVars, FreeVars)
-stackOpenFreeVars k fvs = (S.unions *** (S.union fvs . S.unions)) . unzip . map stackFrameOpenFreeVars $ k
 
 stackFrameBoundVars :: StackFrame -> BoundVars
 stackFrameBoundVars = fst . stackFrameOpenFreeVars
@@ -113,3 +105,6 @@ stateStaticBindersAndFreeVars (Heap h _, k, in_e) = (bvs_static', fvs' S.\\ bvs_
     
     pureHeapOpenFreeVars :: PureHeap -> (BoundVars, FreeVars) -> ((BoundVars, BoundVars), FreeVars)
     pureHeapOpenFreeVars h (bvs, fvs) = M.foldWithKey (\x' hb ((bvs_static, bvs_nonstatic), fvs) -> case hb of Concrete in_e -> ((bvs_static, S.insert x' bvs_nonstatic), fvs `S.union` inFreeVars annedTermFreeVars in_e); _ -> ((S.insert x' bvs_static, bvs_nonstatic), fvs)) ((S.empty, bvs), fvs) h
+    
+    stackOpenFreeVars :: Stack -> FreeVars -> (BoundVars, FreeVars)
+    stackOpenFreeVars k fvs = (S.unions *** (S.union fvs . S.unions)) . unzip . map stackFrameOpenFreeVars $ k
