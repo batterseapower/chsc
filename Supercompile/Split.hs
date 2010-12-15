@@ -422,7 +422,7 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
     
     -- Simultaneously computes the next fixed-point step and some artifacts computed along the way,
     -- which happen to correspond to exactly what I need to return from splitt.
-    split_step not_resid_xs = -- traceRender ("split_step", not_resid_xs, concreteKeysSet h_not_residualised, concreteKeysSet h_residualised) $
+    split_step not_resid_xs = -- traceRender ("split_step", (not_resid_xs, bound_xs S.\\ not_resid_xs), heapBoundVars (Heap h_not_residualised ids), heapBoundVars (Heap h_residualised ids)) $
                               (not_resid_xs', (deeds2, bracketeds_heap', bracketed_focus'))
       where
         -- 0) Infer the stack frames that I'm not residualising based on the *variables* I'm not residualising
