@@ -91,6 +91,7 @@ gc :: (Deeds, State) -> (Deeds, State)
 gc (deeds, (Heap h ids, k, in_e)) = (M.fold (flip releaseHeapBindingDeeds) deeds h_dead,
                                      (Heap h_reachable ids, k, in_e))
   where
+    -- FIXME: we should be releasing deeds for things downgraded to Phantom as well
     (h_dead, h_reachable) = M.mapEitherWithKey (\x' hb -> maybe (Left hb) (\why_live -> Right $ demoteHeapBinding why_live hb) (x' `whyLive` reachable)) h
     reachable = lfpFrom (mkConcreteLiveness $ snd $ stackOpenFreeVars k $ inFreeVars annedTermFreeVars in_e) go
     go live = M.foldWithKey (\x' hb live -> maybe live (\why_live -> live `plusLiveness` heapBindingLiveness (demoteHeapBinding why_live hb)) (x' `whyLive` live)) live h
