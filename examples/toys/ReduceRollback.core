@@ -1,0 +1,5 @@
+root = let loop xs = loop (1:xs)
+           id x = x
+       in id (loop [])
+
+tests = []
