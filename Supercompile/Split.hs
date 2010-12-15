@@ -507,8 +507,15 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
         inlineHeapT f deeds b = (deeds', entered', b')
           where ((deeds', entered'), b') = mapAccumT (\(deeds, entered) s -> case f deeds s of (deeds, entered', s) -> ((deeds, entered `join` entered'), s)) (deeds, bottom) b
 
+        -- Inline what we can of the heap, and compute the Entered information for the resulting thing.
+        -- See Note [transitiveInline and entered information] for the story about Entered information.
+        --
+        -- TODO: I (probably) need to transfer the EnteredEnv safely out of Bracketed things, taking account of bound variables
+        -- over the holes. However, I think it's probably safe to ignore that for now because those bound variables will have been
+        -- renamed so as not to coincide with any of the heap/stack bindings above that we actually care about the entered information for.
+        -- So the outgoing entered envs will have a bit of junk in them, but who cares?
         inlineBracketHeap :: Deeds -> Bracketed (Entered, State) -> (Deeds, EnteredEnv, Bracketed State)
-        inlineBracketHeap = inlineHeapT (\deeds (ent, state) -> transitiveInline deeds h_inlineable (ent, state))
+        inlineBracketHeap = inlineHeapT (\deeds (ent, state) -> case transitiveInline deeds h_inlineable state of (deeds', state') -> (deeds', mkEnteredEnv ent $ stateFreeVars state', state'))
         
         -- 3c) Actually do the inlining of as much of the heap as possible into the proposed floats
         -- We also take this opportunity to strip out the Entered information from each context.
@@ -583,20 +590,15 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
 -- We are going to use this helper function to inline any eligible inlinings to produce the expressions for driving.
 -- Returns (along with the augmented state) information about how many times bindings for the free variables of the final state
 -- would be evaluated (in the worst case) if they were inlined here. TODO: could put the entered_env construction in caller, simpler contract?
-transitiveInline :: Deeds -> PureHeap -> (Entered, State) -> (Deeds, EnteredEnv, State)
-transitiveInline deeds h_inlineable (ent, (Heap h ids, k, in_e))
+transitiveInline :: Deeds -> PureHeap -> State -> (Deeds, State)
+transitiveInline deeds h_inlineable (Heap h ids, k, in_e)
     = -- (if not (S.null not_inlined_vs') then traceRender ("transitiveInline: generalise", not_inlined_vs') else id) $
       -- traceRender ("transitiveInline", concreteKeysSet h_inlineable, {- "before", h, "after", h', -} "hence entered is", entered_env) $
-      (deeds', entered_env, state')
+      (deeds', state')
   where
     state_fvs = stateFreeVars (Heap M.empty ids, k, in_e)
     (deeds', h') = go 0 deeds (h_inlineable `M.union` h) M.empty (mkConcreteLiveness state_fvs)
     state' = (Heap h' ids, k, in_e)
-    entered_env = mkEnteredEnv ent $ stateFreeVars state' -- See Note [transitiveInline and entered information]
-     -- TODO: I (probably) need to transfer the entered_env safely out of Bracketed things, taking account of bound variables
-     -- over the holes. However, I think it's probably safe to ignore that for now because those bound variables will have been
-     -- renamed so as not to coincide with any of the heap/stack bindings above that we actually care about the entered information for.
-     -- So the outgoing entered envs will have a bit of junk in them, but who cares?
     
     -- NB: in the presence of phantoms, this loop gets weird.
     --  1. We want to inline phantoms if they occur as free variables of the state, so we get staticness
