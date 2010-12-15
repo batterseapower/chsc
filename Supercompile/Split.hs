@@ -94,11 +94,10 @@ simplify gen (init_deeds, init_s)
     go (init_deeds, init_s)
   where
     go (deeds, s@(Heap h ids, k, (rn, e)))
-         -- We can't step past a variable or value, because if we do so I can't prove that simplify terminates and the sc recursion has finite depth
-         -- If the termination criteria has not hit, we
-        | Just qa <- toQA (annee e),                   (ids1, ids2)    <- splitIdSupply ids = splitt bottom     (deeds, (Heap h ids1, named_k, (case qa of Question x -> [rename rn x]; Answer _ -> [], splitQA ids2 (rn, qa))))
          -- If we can find some fraction of the stack or heap to drop that looks like it will be admissable, just residualise those parts and continue
         | Just split_from <- seekAdmissable h named_k, (ids', ctxt_id) <- stepIdSupply ids  = splitt split_from (deeds, (Heap h ids', named_k, ([],                                                     oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], (rn, e))))))
+         -- We can't step past a variable or value, because if we do so I can't prove that simplify terminates and the sc recursion has finite depth
+        | Just qa <- toQA (annee e),                   (ids1, ids2)    <- splitIdSupply ids = splitt bottom     (deeds, (Heap h ids1, named_k, (case qa of Question x -> [rename rn x]; Answer _ -> [], splitQA ids2 (rn, qa))))
          -- Otherwise, keep dropping stuff until one of the two conditions above holds
         | Just (deeds', s') <- step (deeds, s)                                              = trace ("simplify: dropping " ++ droppingWhat (annee (snd (thd3 s))) ++ " piece :(") $ go (deeds', s')
          -- Even if we can never find some admissable fragment of the input, we *must* eventually reach a variable or value
