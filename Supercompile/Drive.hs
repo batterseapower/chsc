@@ -86,7 +86,7 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ run
 
 -- TODO: have the garbage collector collapse indirections to indirections (but unlike GHC, not further!)
 gc :: (Deeds, State) -> (Deeds, State)
-gc (deeds, (Heap h ids, k, in_e)) = transitiveInline h (M.fold (flip releaseHeapBindingDeeds) deeds h, (Heap M.empty ids, k, in_e))
+gc (deeds, (Heap h ids, k, in_e)) = transitiveInline h (releasePureHeapDeeds deeds h, (Heap M.empty ids, k, in_e))
   where
     -- We used to garbage-collect in the evaluator, when we executed the rule for update frames. This had two benefits:
     --  1) We don't have to actually update the heap or even claim a new deed

@@ -470,7 +470,7 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
         -- I think that in fixing this I could ensure that the outgoing bracketeds_heap' excludes all those things in not_resid_xs.
         -- After all, IIRC the only reason it doesn't at the moment is because I want to catch those bindings we wanted to push down
         -- but actually couldn't because of deeds issues.
-        deeds0 = M.fold (flip releaseHeapBindingDeeds) deeds0_unreleased h_not_residualised
+        deeds0 = releasePureHeapDeeds deeds0_unreleased h_not_residualised
         
         -- 3b) Work out which part of the heap is admissable for inlining
         -- * We are allowed to inline concrete things which are duplicatable or are not residualised right here and now
@@ -516,7 +516,22 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
         -- renamed so as not to coincide with any of the heap/stack bindings above that we actually care about the entered information for.
         -- So the outgoing entered envs will have a bit of junk in them, but who cares?
         inlineBracketHeap :: Deeds -> Bracketed (Entered, State) -> (Deeds, EnteredEnv, Bracketed State)
-        inlineBracketHeap = inlineHeapT (\deeds (ent, state) -> case transitiveInline h_inlineable (deeds, state) of (deeds', state') -> (deeds', mkEnteredEnv ent $ stateFreeVars state', state'))
+        inlineBracketHeap = inlineHeapT inline_one
+          where
+            claim_heap_binding_deed deeds (Concrete (_, e)) = claimDeed deeds (annedTag e)
+            claim_heap_binding_deed deeds _                 = Just deeds
+            
+            inline_one deeds (ent, (Heap h ids, k, in_e)) = (deeds'', mkEnteredEnv ent $ stateFreeVars state', state')
+              where
+                -- The elements of the Bracketed may contain proposed heap bindings gathered from Case frames.
+                -- However, we haven't yet claimed deeds for them :-(. This is solved right here, where we remove
+                -- any new binding we can't get deeds for.
+                --
+                -- NB: the correctness of this relies on the fact that only "optional" bindings that shadow something
+                -- bound above are ever present in this heap.
+                (deeds', h') = M.foldWithKey (\x' hb (deeds', h') -> maybe (deeds', h') (\deeds' -> (deeds', M.insert x' hb h')) (claim_heap_binding_deed deeds' hb)) (deeds, M.empty) h
+                -- We can then use transitiveInline to inline the (possibly trimmed) heap and the inlineables into this position
+                (deeds'', state') = transitiveInline h_inlineable (deeds', (Heap h' ids, k, in_e))
         
         -- 3c) Actually do the inlining of as much of the heap as possible into the proposed floats
         -- We also take this opportunity to strip out the Entered information from each context.
@@ -596,7 +611,7 @@ transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
       (deeds', (Heap h' ids, k, in_e))
   where
     state_fvs = stateFreeVars (Heap M.empty ids, k, in_e)
-    (deeds', h') = go 0 deeds (init_h_inlineable `M.union` h) M.empty (mkConcreteLiveness state_fvs) -- FIXME: at the moment it looks like I assume I don't have the deeds for this heap
+    (deeds', h') = go 0 (releasePureHeapDeeds deeds h) (init_h_inlineable `M.union` h) M.empty (mkConcreteLiveness state_fvs)
     
     -- NB: in the presence of phantoms, this loop gets weird.
     --  1. We want to inline phantoms if they occur as free variables of the state, so we get staticness
@@ -625,8 +640,8 @@ transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
           , (deeds, h_inlineable, inline_hb) <- case hb of
               Concrete in_e@(_, e) -> case why_live of
                 ConcreteLive -> case claimDeed deeds (annedTag e) of -- Do we have enough deeds to inline a concrete version at all?
-                                                Just deeds -> (deeds,                h_inlineable, hb)
-                                                Nothing    -> (deeds, M.insert x' hb h_inlineable, Phantom in_e)
+                                  Just deeds -> (deeds,                h_inlineable, hb)
+                                  Nothing    -> (deeds, M.insert x' hb h_inlineable, Phantom in_e)
                 PhantomLive  -> (deeds, M.insert x' hb h_inlineable, Phantom in_e) -- We want to inline only a *phantom* version if the binding is demanded by phantoms only, or madness ensues
               _              -> (deeds, h_inlineable, hb)
           = (deeds, h_inlineable, M.insert x' inline_hb h_output, live `plusLiveness` heapBindingLiveness inline_hb)
@@ -716,7 +731,7 @@ splitStackFrame ids kf scruts bracketed_hole
             -- ===>
             --  case x of C -> let unk = C; z = C in ...
             alt_in_es = alt_rns `zip` alt_es
-            alt_hs = zipWith3 (\alt_rn alt_con alt_tg -> M.fromList $ do { Just scrut_v <- [altConToValue alt_con]; scrut <- scruts; return (scrut, Concrete (alt_rn, annedTerm alt_tg (Value scrut_v))) }) alt_rns alt_cons (map annedTag alt_es) -- FIXME: should be grabbing deeds for these? Or rely on transitiveInline to get them for you?
+            alt_hs = zipWith3 (\alt_rn alt_con alt_tg -> M.fromList $ do { Just scrut_v <- [altConToValue alt_con]; scrut <- scruts; return (scrut, Concrete (alt_rn, annedTerm alt_tg (Value scrut_v))) }) alt_rns alt_cons (map annedTag alt_es) -- NB: don't need to grab deeds for these just yet - splitt will do so before calling transitiveInline
             alt_bvss = map (\alt_con' -> fst $ altConOpenFreeVars alt_con' (S.empty, S.empty)) alt_cons'
             bracketed_alts = zipWith (\alt_h alt_in_e -> oneBracketed (Once ctxt_id, \ids -> (Heap alt_h ids, [], alt_in_e))) alt_hs alt_in_es
     PrimApply pop in_vs in_es -> zipBracketeds (primOp pop) S.unions (repeat id) (\_ -> Nothing) (bracketed_vs ++ bracketed_hole : bracketed_es)

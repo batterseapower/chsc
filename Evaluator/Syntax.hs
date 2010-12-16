@@ -142,10 +142,11 @@ releaseHeapBindingDeeds :: Deeds -> HeapBinding -> Deeds
 releaseHeapBindingDeeds deeds (Concrete (_, e)) = releaseDeedDeep deeds (annedTag e)
 releaseHeapBindingDeeds deeds _                 = deeds
 
+releasePureHeapDeeds :: Deeds -> PureHeap -> Deeds
+releasePureHeapDeeds = M.fold (flip releaseHeapBindingDeeds)
+
 releaseStateDeed :: Deeds -> State -> Deeds
 releaseStateDeed deeds (Heap h _, k, (_, e))
   = foldl' (\deeds kf -> foldl' releaseDeedDeep deeds (stackFrameTags kf))
-           (foldl' releaseHeapBindingDeeds
-                   (releaseDeedDeep deeds (annedTag e))
-                   (M.elems h))
+           (releasePureHeapDeeds (releaseDeedDeep deeds (annedTag e)) h)
            k
