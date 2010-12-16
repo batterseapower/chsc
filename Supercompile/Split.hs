@@ -442,8 +442,9 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
           = (\(a, b, c) -> (a, M.map (second fill_ids) b, fill_ids c)) $
             pushStack ids deeds scruts [(need_not_resid_kf i kf, kf) | (i, kf) <- named_k] bracketed_qa
         need_not_resid_kf i kf
-          | i `IS.notMember` gen_kfs
-          , Update (annee -> x') <- kf -- We infer the stack frames we're not residualising based on the *variables* we're not residualising
+          | i `IS.member` gen_kfs
+          = False
+          | Update (annee -> x') <- kf -- We infer the stack frames we're not residualising based on the *variables* we're not residualising
           = x' `S.member` not_resid_xs
           | otherwise
           = True
