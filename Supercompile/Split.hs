@@ -9,7 +9,7 @@ import Core.Syntax
 
 import Evaluator.Evaluate
 import Evaluator.FreeVars
---import Evaluator.Residualise
+import Evaluator.Residualise
 import Evaluator.Syntax
 
 import Size.Deeds
@@ -410,7 +410,10 @@ splitt :: (IS.IntSet, S.Set (Out Var))
            Bracketed State)                   -- ^ The residual "let" body
 splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply -> (ids_brack, ids))), named_k, (scruts, bracketed_qa)))
     = -- traceRender ("splitt", residualiseHeap (Heap h ids_brack) (\ids -> residualiseStack ids k (case tagee qa of Question x' -> var x'; Answer in_v -> value $ detagTaggedValue $ renameIn renameTaggedValue ids in_v))) $
-      snd $ split_step split_fp -- TODO: eliminate redundant recomputation here?
+      snd $ split_step split_fp
+      -- Once we have the correct fixed point, go back and grab the associated information computed in the process
+      -- of obtaining the fixed point. That is what we are interested in, not the fixed point itselF!
+      -- TODO: eliminate redundant recomputation here?
   where
     -- We compute the correct way to split as a least fixed point, slowly building up a set of variables
     -- (bound by heap bindings and update frames) that it is safe *not* to residualise.
@@ -423,8 +426,24 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
     -- Simultaneously computes the next fixed-point step and some artifacts computed along the way,
     -- which happen to correspond to exactly what I need to return from splitt.
     split_step not_resid_xs = -- traceRender ("split_step", (not_resid_xs, bound_xs S.\\ not_resid_xs), heapBoundVars (Heap h_not_residualised ids), heapBoundVars (Heap h_residualised ids)) $
+                              assert_nonsuspicious $
                               (not_resid_xs', (deeds2, bracketeds_heap', bracketed_focus'))
       where
+        -- Ad-hoc check: we should never be in a situation where we will potentially drive a state with a phantom value binding,
+        -- if deeds are turned off. That would just be mad, because there is no work duplication issue from values.
+        --
+        -- This check is here because I found that the splitter *was* constructing such States at one point, due to a bug in
+        -- transitiveInline which would only inline a phantom version of a binding even if a concrete version was available.
+        find_suspicious bracketed = [x | filler_s@(Heap filler_h _, _, _) <- fillers bracketed
+                                       , x <- M.keys (M.filterWithKey (\x' hb -> case hb of Phantom (_, annee -> Value _) | x' `S.member` stateFreeVars filler_s, Just (Concrete _) <- M.lookup x' h -> True; _ -> False) filler_h)]
+        suspicious = [x | bracketed <- M.elems bracketeds_heap', x <- find_suspicious bracketed] ++ find_suspicious bracketed_focus'
+        assert_nonsuspicious = assertRender (text "Detected suspicious binding:" $$ vcat (map pPrint suspicious) $$
+                                             text "Bracketeds Heap:" $$ pPrint (M.map (map residualiseState . fillers) bracketeds_heap') $$
+                                             text "Bracketed Focus:" $$ pPrint (map residualiseState (fillers bracketed_focus')) $$
+                                             text "Heap:" $$ pPrint (M.map (residualiseHeapBinding prettyIdSupply) h) $$
+                                             text "Inlineable Heap:" $$ pPrint (M.map (residualiseHeapBinding prettyIdSupply) h_inlineable))
+                                            (dEEDS || null suspicious)
+
         -- 0) Infer the stack frames that I'm not residualising based on the *variables* I'm not residualising
         not_resid_kfs = IS.fromList [i | (i, kf) <- named_k
                                        , i `IS.notMember` gen_kfs
@@ -589,14 +608,13 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
 
 -- We are going to use this helper function to inline any eligible inlinings to produce the expressions for driving.
 transitiveInline :: PureHeap -> (Deeds, State) -> (Deeds, State)
-transitiveInline h_inlineable (deeds, (Heap h ids, k, in_e))
+transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
     = -- (if not (S.null not_inlined_vs') then traceRender ("transitiveInline: generalise", not_inlined_vs') else id) $
-      -- traceRender ("transitiveInline", concreteKeysSet h_inlineable, {- "before", h, "after", h', -} "hence entered is", entered_env) $
-      (deeds', state')
+      -- traceRender ("transitiveInline", concreteKeysSet init_h_inlineable, {- "before", h, "after", h', -} "hence entered is", entered_env) $
+      (deeds', (Heap h' ids, k, in_e))
   where
     state_fvs = stateFreeVars (Heap M.empty ids, k, in_e)
-    (deeds', h') = go 0 deeds (h_inlineable `M.union` h) M.empty (mkConcreteLiveness state_fvs)
-    state' = (Heap h' ids, k, in_e)
+    (deeds', h') = go 0 deeds (init_h_inlineable `M.union` h) M.empty (mkConcreteLiveness state_fvs) -- FIXME: at the moment it looks like I assume I don't have the deeds for this heap
     
     -- NB: in the presence of phantoms, this loop gets weird.
     --  1. We want to inline phantoms if they occur as free variables of the state, so we get staticness
@@ -606,17 +624,18 @@ transitiveInline h_inlineable (deeds, (Heap h ids, k, in_e))
     --  4. If we inlined something according to criteria 3. and that definition later becomes a free variable of a non-phantom,
     --     we need to make sure that phantom definition is replaced with a real one
     go :: Int -> Deeds -> PureHeap -> PureHeap -> Liveness -> (Deeds, PureHeap)
-    go n deeds h_inlineable h_output live = -- traceRender ("go", n, M.keysSet h_inlineable, M.keysSet h_output, fvs) $
-                                            if M.null h_inline then (deeds', h_output)
-                                                               else go (n + 1) deeds' (h_inlineable' `M.union` h_not_inlined) (h_output `M.union` h_inline) live'
-      where -- Generalisation heuristic: only inline those members of the heap which do not cause us to blow the whistle
-            --
-            -- NB: we rely here on the fact that our caller will still be able to fill in bindings for stuff from h_inlineable
+    go n deeds h_inlineable h_output live
+      = -- traceRender ("go", n, M.keysSet h_inlineable, M.keysSet h_output, fvs) $
+        if M.null h_inline
+        then (let suspicious = M.keys (M.filterWithKey (\x' hb -> case hb of Phantom (_, annee -> Value _) | x' `S.member` stateFreeVars (Heap h_output ids, k, in_e), Just (Concrete (_, annee -> Value _)) <- M.lookup x' init_h_inlineable -> True; _ -> False) h_output) in assertRender (text "transitiveInline: suspicious bindings" $$ pPrint (map (\x' -> (x', whyLive x' live)) suspicious) $$ pPrint h_inlineable) (dEEDS || null suspicious)) $
+             (deeds', h_output)
+        else go (n + 1) deeds' (h_inlineable' `M.union` h_not_inlined) (h_output `M.union` h_inline) live'
+      where -- NB: we rely here on the fact that our caller will still be able to fill in bindings for stuff from h_inlineable
             -- even if we choose not to inline it into the State, and that such bindings will not be evaluated until they are
             -- actually demanded (or we could get work duplication by inlining into only *some* Once contexts).
             --
-            -- NB: we rely here on the fact that the original h contains "optional" bindings in the sense that they are shadowed
-            -- by something bound above.
+            -- NB: we also rely here on the fact that the original h contains "optional" bindings in the sense that they are shadowed
+            -- by something bound above - i.e. it just tells us how to unfold case scrutinees within a case branch.
             consider_inlining x' (why_live, hb) (deeds, h_inline, h_not_inlined) = case mb_deeds' of
                 Nothing    -> traceRender ("transitiveInline: deed claim failure", x') (deeds,           h_inline, M.insert x' hb h_not_inlined)
                 Just deeds ->                                                          (deeds, insert_it h_inline,                h_not_inlined)
@@ -721,7 +740,7 @@ splitStackFrame ids kf scruts bracketed_hole
             -- ===>
             --  case x of C -> let unk = C; z = C in ...
             alt_in_es = alt_rns `zip` alt_es
-            alt_hs = zipWith3 (\alt_rn alt_con alt_tg -> M.fromList $ do { Just scrut_v <- [altConToValue alt_con]; scrut <- scruts; return (scrut, Concrete (alt_rn, annedTerm alt_tg (Value scrut_v))) }) alt_rns alt_cons (map annedTag alt_es)
+            alt_hs = zipWith3 (\alt_rn alt_con alt_tg -> M.fromList $ do { Just scrut_v <- [altConToValue alt_con]; scrut <- scruts; return (scrut, Concrete (alt_rn, annedTerm alt_tg (Value scrut_v))) }) alt_rns alt_cons (map annedTag alt_es) -- FIXME: should be grabbing deeds for these? Or rely on transitiveInline to get them for you?
             alt_bvss = map (\alt_con' -> fst $ altConOpenFreeVars alt_con' (S.empty, S.empty)) alt_cons'
             bracketed_alts = zipWith (\alt_h alt_in_e -> oneBracketed (Once ctxt_id, \ids -> (Heap alt_h ids, [], alt_in_e))) alt_hs alt_in_es
     PrimApply pop in_vs in_es -> zipBracketeds (primOp pop) S.unions (repeat id) (\_ -> Nothing) (bracketed_vs ++ bracketed_hole : bracketed_es)
