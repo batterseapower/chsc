@@ -386,8 +386,7 @@ optimiseLetBinds opt leftover_deeds bracketeds_heap fvs' = -- traceRender ("opti
                                                            go leftover_deeds bracketeds_heap [] fvs'
   where
     go leftover_deeds bracketeds_deeded_heap_not_resid xes_resid resid_fvs
-      | M.null h_resid = -- traceRenderM ("go", resid_fvs, resid_bvs, (M.map (residualiseBracketed (residualiseState . first3 (flip Heap prettyIdSupply))) bracketeds_deeded_heap)) $
-                         return (leftover_deeds, bracketeds_deeded_heap_not_resid, resid_fvs, xes_resid)
+      | M.null h_resid = return (leftover_deeds, bracketeds_deeded_heap_not_resid, resid_fvs, xes_resid)
       | otherwise = {- traceRender ("optimiseSplit", xs_resid') $ -} do
         -- Recursively drive the new residuals arising from the need to bind the resid_fvs
         (leftover_deeds, es_resid') <- optimiseMany (optimiseBracketed opt) (leftover_deeds, bracks_resid)
@@ -409,8 +408,7 @@ splitt :: (IS.IntSet, S.Set (Out Var))
            M.Map (Out Var) (Bracketed State), -- ^ The residual "let" bindings
            Bracketed State)                   -- ^ The residual "let" body
 splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply -> (ids_brack, ids))), named_k, (scruts, bracketed_qa)))
-    = -- traceRender ("splitt", residualiseHeap (Heap h ids_brack) (\ids -> residualiseStack ids k (case tagee qa of Question x' -> var x'; Answer in_v -> value $ detagTaggedValue $ renameIn renameTaggedValue ids in_v))) $
-      snd $ split_step split_fp
+    = snd $ split_step split_fp
       -- Once we have the correct fixed point, go back and grab the associated information computed in the process
       -- of obtaining the fixed point. That is what we are interested in, not the fixed point itselF!
       -- TODO: eliminate redundant recomputation here?
@@ -425,7 +423,7 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
     
     -- Simultaneously computes the next fixed-point step and some artifacts computed along the way,
     -- which happen to correspond to exactly what I need to return from splitt.
-    split_step not_resid_xs = -- traceRender ("split_step", (not_resid_xs, bound_xs S.\\ not_resid_xs), heapBoundVars (Heap h_not_residualised ids), heapBoundVars (Heap h_residualised ids)) $
+    split_step not_resid_xs = -- let pPrintBracketedState = map residualiseState . fillers in traceRender ("split_step", (not_resid_xs, bound_xs S.\\ not_resid_xs), pureHeapBoundVars h_not_residualised, pureHeapBoundVars h_residualised, M.map pPrintBracketedState bracketeds_heap', pPrintBracketedState bracketed_focus') $
                               (not_resid_xs', (deeds2, bracketeds_heap', bracketed_focus'))
       where
         -- 0) Infer the stack frames that I'm not residualising based on the *variables* I'm not residualising
@@ -546,7 +544,7 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
                 candidates = onces S.\\ must_resid_xs
     
     -- Bound variables: those variables that I am interested in making a decision about whether to residualise or not
-    bound_xs = heapBoundVars (Heap h ids) `S.union` stackBoundVars (map snd named_k)
+    bound_xs = pureHeapBoundVars h `S.union` stackBoundVars (map snd named_k)
     
     -- Heap full of cheap expressions and any phantom stuff from the input heap.
     -- Used within the main loop in the process of computing h_inlineable -- see comments there for the full meaning of this stuff.
@@ -572,8 +570,8 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
 -- x doesn't appear in the extraFvs, and I can compute Entered information for it with transitiveInline. If this says x
 -- was entered Once in aggregate I can stop residualising the update frame! Beautiful!
 --
--- Note [transitiveInline and entered information]
--- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- Note [Entered information]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~
 -- Consider:
 --   expensive |-> fact 100
 --   a |-> Just expensive
@@ -583,10 +581,10 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
 -- We need to residualise expensive, but what is the mechanism for doing so? Both a and b will get residualised
 -- by the rule above because they are FVs of the focus.
 --
--- We additionally need transitiveInline to report Entered information. Precisely, it reports how many times a variable
--- would be (in the worst case) get reevaluated if the binding was made available for inlining. So in this case,
--- transitiveInline on the a and b bindings report that expensive would get evaluated Once in each context, which
--- joins together to make Many times.
+-- We gather Entered information from each proposed Bracketed to collect Entered information for each free variable.
+-- This reports how many times a variable would be (in the worst case) get reevaluated if the binding was made available
+-- for inlining and thus pushed into that context. So in this case, Entered information for the a and b bindings report
+-- that expensive would get evaluated Once in each context, which joins together to make Many times.
 --
 -- This is the basis on which we choose to residualise expensive.
 
@@ -594,7 +592,7 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
 transitiveInline :: PureHeap -> (Deeds, State) -> (Deeds, State)
 transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
     = -- (if not (S.null not_inlined_vs') then traceRender ("transitiveInline: generalise", not_inlined_vs') else id) $
-      -- traceRender ("transitiveInline", concreteKeysSet init_h_inlineable, {- "before", h, "after", h', -} "hence entered is", entered_env) $
+      -- traceRender ("transitiveInline", pureHeapBoundVars init_h_inlineable, state_fvs, pureHeapBoundVars h') $
       (deeds', (Heap h' ids, k, in_e))
   where
     state_fvs = stateFreeVars (Heap M.empty ids, k, in_e)
@@ -611,7 +609,7 @@ transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
     go n deeds h_inlineable h_output live
       = -- traceRender ("go", n, M.keysSet h_inlineable, M.keysSet h_output, fvs) $
         if live == live'
-        then (deeds', h_output)
+        then (deeds', h_output') -- NB: it's important we use the NEW versions of h_output/deeds, because we might have inlined extra stuff even though live hasn't changed!
         else go (n + 1) deeds' h_inlineable' h_output' live' -- NB: the argument order to union is important because we want to overwrite an existing phantom binding (if any) with the concrete one
       where 
         (deeds', h_inlineable', h_output', live') = M.foldWithKey consider_inlining (deeds, M.empty, h_output, live) h_inlineable

@@ -6,7 +6,7 @@ module Evaluator.FreeVars (
 
     inFreeVars,
     heapBindingLiveness,
-    heapBoundVars, stackBoundVars, stackFrameBoundVars,
+    pureHeapBoundVars, stackBoundVars, stackFrameBoundVars,
     stateFreeVars, stateStaticBindersAndFreeVars
   ) where
 
@@ -71,8 +71,8 @@ heapBindingLiveness (Updated _ fvs) = mkPhantomLiveness fvs
 heapBindingLiveness (Phantom in_e)  = mkPhantomLiveness  (inFreeVars annedTermFreeVars in_e)
 heapBindingLiveness (Concrete in_e) = mkConcreteLiveness (inFreeVars annedTermFreeVars in_e)
 
-heapBoundVars :: Heap -> BoundVars
-heapBoundVars (Heap h _) = M.keysSet (M.filter (not . heapBindingNonConcrete) h)
+pureHeapBoundVars :: PureHeap -> BoundVars
+pureHeapBoundVars = M.keysSet . M.filter (not . heapBindingNonConcrete)
 
 stackBoundVars :: Stack -> BoundVars
 stackBoundVars = S.unions . map stackFrameBoundVars

@@ -247,7 +247,7 @@ promise p opt = ScpM $ \e s k -> traceRender ("promise", fun p, abstracted p, le
       (a, e') <- opt
       ScpM $ \e s k -> k () e (s { fulfilments = (p, e') : fulfilments s })
       
-      let fvs' = fvedTermFreeVars e' in fmap (S.fromList . ((abstracted p ++ lexical p) ++) . map fun) getPromises >>= \fvs -> assertRender ("sc: FVs", fun p, fvs' S.\\ fvs, fvs) (fvs' `S.isSubsetOf` fvs) $ return ()
+      let fvs' = fvedTermFreeVars e' in fmap (S.fromList . ((abstracted p ++ lexical p) ++) . map fun) getPromises >>= \fvs -> assertRender ("sc: FVs", fun p, fvs' S.\\ fvs, fvs, e') (fvs' `S.isSubsetOf` fvs) $ return ()
       
       return (a, fun p `varApps` abstracted p)
 
