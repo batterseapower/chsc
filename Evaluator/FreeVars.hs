@@ -2,7 +2,7 @@
 module Evaluator.FreeVars (
     WhyLive(..), Liveness, livenessAllFreeVars,
     mkConcreteLiveness, mkPhantomLiveness, emptyLiveness, plusLiveness, plusLivenesses,
-    whyLive, keepAlive,
+    whyLive,
 
     inFreeVars,
     heapBindingLiveness,
@@ -60,11 +60,6 @@ plusLivenesses = joins
 
 whyLive :: Out Var -> Liveness -> Maybe WhyLive
 whyLive x' live = x' `M.lookup` unLiveness live
-
-keepAlive :: Maybe WhyLive -> Out Var -> In AnnedTerm -> PureHeap -> PureHeap
-keepAlive Nothing             _  _    h = h
-keepAlive (Just PhantomLive)  x' in_e h = M.insert x' (Phantom in_e) h
-keepAlive (Just ConcreteLive) x' in_e h = M.insert x' (Concrete in_e) h
 
 
 inFreeVars :: (a -> FreeVars) -> In a -> FreeVars

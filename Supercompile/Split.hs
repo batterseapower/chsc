@@ -626,36 +626,31 @@ transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
     go :: Int -> Deeds -> PureHeap -> PureHeap -> Liveness -> (Deeds, PureHeap)
     go n deeds h_inlineable h_output live
       = -- traceRender ("go", n, M.keysSet h_inlineable, M.keysSet h_output, fvs) $
-        if M.null h_inline
+        if live == live'
         then (let suspicious = M.keys (M.filterWithKey (\x' hb -> case hb of Phantom (_, annee -> Value _) | x' `S.member` stateFreeVars (Heap h_output ids, k, in_e), Just (Concrete (_, annee -> Value _)) <- M.lookup x' init_h_inlineable -> True; _ -> False) h_output) in assertRender (text "transitiveInline: suspicious bindings" $$ pPrint (map (\x' -> (x', whyLive x' live)) suspicious) $$ pPrint h_inlineable) (dEEDS || null suspicious)) $
              (deeds', h_output)
-        else go (n + 1) deeds' (h_inlineable' `M.union` h_not_inlined) (h_output `M.union` h_inline) live'
-      where -- NB: we rely here on the fact that our caller will still be able to fill in bindings for stuff from h_inlineable
-            -- even if we choose not to inline it into the State, and that such bindings will not be evaluated until they are
-            -- actually demanded (or we could get work duplication by inlining into only *some* Once contexts).
-            --
-            -- NB: we also rely here on the fact that the original h contains "optional" bindings in the sense that they are shadowed
-            -- by something bound above - i.e. it just tells us how to unfold case scrutinees within a case branch.
-            consider_inlining x' (why_live, hb) (deeds, h_inline, h_not_inlined) = case mb_deeds' of
-                Nothing    -> traceRender ("transitiveInline: deed claim failure", x') (deeds,           h_inline, M.insert x' hb h_not_inlined)
-                Just deeds ->                                                          (deeds, insert_it h_inline,                h_not_inlined)
-              where mb_deeds' | Concrete (_, e) <- hb
-                              , ConcreteLive <- why_live
-                              = claimDeed deeds (annedTag e)
-                              | otherwise
-                              = Just deeds
-                    -- NB: we want to inline only a *phantom* version if the binding is demanded by phantoms only, or madness ensues
-                    -- NB: it is important we insert rather than union, because we want to overwrite an existing phantom binding (if any) with the concrete one
-                    insert_it | Concrete in_e <- hb = keepAlive (Just why_live) x' in_e
-                              | otherwise           = M.insert x' hb
-            (deeds', h_inline, h_not_inlined) = M.foldWithKey consider_inlining (deeds, M.empty, M.empty) h_inline_candidates
-            (h_inline_candidates, h_inlineable') = M.mapEitherWithKey (\x' hb -> case x' `whyLive` live of Just why_live | live_is_inline_candidate x' why_live -> Left (why_live, hb); _ -> Right hb) h_inlineable
-            live_is_inline_candidate x' live = case M.lookup x' h_output of
-                Just (Concrete _)            -> False -- Never inline if we already inlined a concrete version, since we can't do better
-                Just _ | PhantomLive <- live -> False -- If we have inlined a phantom version, do not inline one again!
-                _                            -> True  -- Always inline if we inlined nothing at all, or if we are newly going to inline the concrete version over an existing phantom version
-            
-            live' = M.fold (\hb live -> live `plusLiveness` heapBindingLiveness hb) live h_inline
+        else go (n + 1) deeds' h_inlineable' h_output' live' -- NB: the argument order to union is important because we want to overwrite an existing phantom binding (if any) with the concrete one
+      where 
+        (deeds', h_inlineable', h_output', live') = M.foldWithKey consider_inlining (deeds, M.empty, h_output, live) h_inlineable
+        
+        -- NB: we rely here on the fact that our caller will still be able to fill in bindings for stuff from h_inlineable
+        -- even if we choose not to inline it into the State, and that such bindings will not be evaluated until they are
+        -- actually demanded (or we could get work duplication by inlining into only *some* Once contexts).
+        --
+        -- NB: we also rely here on the fact that the original h contains "optional" bindings in the sense that they are shadowed
+        -- by something bound above - i.e. it just tells us how to unfold case scrutinees within a case branch.
+        consider_inlining x' hb (deeds, h_inlineable, h_output, live)
+          | Just why_live <- x' `whyLive` live -- Is the binding actually live?
+          , (deeds, h_inlineable, inline_hb) <- case hb of
+              Concrete in_e@(_, e) -> case why_live of
+                ConcreteLive -> case claimDeed deeds (annedTag e) of -- Do we have enough deeds to inline a concrete version at all?
+                                                Just deeds -> (deeds,                h_inlineable, hb)
+                                                Nothing    -> (deeds, M.insert x' hb h_inlineable, Phantom in_e)
+                PhantomLive  -> (deeds, M.insert x' hb h_inlineable, Phantom in_e) -- We want to inline only a *phantom* version if the binding is demanded by phantoms only, or madness ensues
+              _              -> (deeds, h_inlineable, hb)
+          = (deeds, h_inlineable, M.insert x' inline_hb h_output, live `plusLiveness` heapBindingLiveness inline_hb)
+          | otherwise
+          = (deeds, M.insert x' hb h_inlineable, h_output, live)
 
 
 -- TODO: replace with a genuine evaluator. However, think VERY hard about the termination implications of this!
