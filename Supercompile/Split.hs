@@ -419,19 +419,16 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
     -- Note that as an optimisation, optimiseSplit will only actually creates those residual bindings if the
     -- corresponding variables are free *after driving*. Of course, we have no way of knowing which bindings
     -- will get this treatment here, so just treat resid_xs as being exactly the set of residualised stuff.
-    split_fp = lfpFrom S.empty (fst . split_step)
+    split_fp = lfpFrom (S.empty, S.empty) (fst . split_step)
     
     -- Simultaneously computes the next fixed-point step and some artifacts computed along the way,
     -- which happen to correspond to exactly what I need to return from splitt.
-    split_step not_resid_xs = -- let pPrintBracketedState = map residualiseState . fillers in traceRender ("split_step", (not_resid_xs, bound_xs S.\\ not_resid_xs), pureHeapBoundVars h_not_residualised, pureHeapBoundVars h_residualised, M.map pPrintBracketedState bracketeds_heap', pPrintBracketedState bracketed_focus') $
-                              (not_resid_xs', (deeds2, bracketeds_heap', bracketed_focus'))
+    split_step (safe_not_resid_xs, deeds_resid_xs) = -- let pPrintBracketedState = map residualiseState . fillers in traceRender ("split_step", (not_resid_xs, bound_xs S.\\ not_resid_xs), pureHeapBoundVars h_not_residualised, pureHeapBoundVars h_residualised, M.map pPrintBracketedState bracketeds_heap', pPrintBracketedState bracketed_focus') $
+                                                     ((safe_not_resid_xs', deeds_resid_xs'), (deeds2, bracketeds_heap', bracketed_focus'))
       where
-        -- 0) Infer the stack frames that I'm not residualising based on the *variables* I'm not residualising
-        not_resid_kfs = IS.fromList [i | (i, kf) <- named_k
-                                       , i `IS.notMember` gen_kfs
-                                       , case kf of Update (annee -> x') -> x' `S.member` not_resid_xs
-                                                    _                    -> True
-                                       ]
+        -- 0) Compute the set of variables that I can *actually* get away without residualising, once deeds are accounted for
+        -- See Note [Deeds and splitting] for further details on this.
+        not_resid_xs = safe_not_resid_xs S.\\ deeds_resid_xs
         
         -- 1) Build a candidate splitting for the Stack and QA components
         -- When creating the candidate stack split, we ensure that we create a residual binding
@@ -443,7 +440,13 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
         fill_ids = fmap (\(ent, f) -> (ent, f ids_brack))
         (deeds0_unreleased, bracketeds_updated, bracketed_focus)
           = (\(a, b, c) -> (a, M.map (second fill_ids) b, fill_ids c)) $
-            pushStack ids deeds scruts [(i `IS.member` not_resid_kfs, kf) | (i, kf) <- named_k] bracketed_qa
+            pushStack ids deeds scruts [(need_not_resid_kf i kf, kf) | (i, kf) <- named_k] bracketed_qa
+        need_not_resid_kf i kf
+          | i `IS.notMember` gen_kfs
+          , Update (annee -> x') <- kf -- We infer the stack frames we're not residualising based on the *variables* we're not residualising
+          = x' `S.member` not_resid_xs
+          | otherwise
+          = True
         
         -- 2) Build a splitting for those elements of the heap we propose to residualise not in not_resid_xs
         (h_not_residualised, h_residualised) = M.partitionWithKey (\x' _ -> x' `S.member` not_resid_xs) h
@@ -462,14 +465,6 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
         --
         -- The equivalent process is done for the stack in splitStack itself: we just subtract 1 from the number of deeds we need to
         -- claim when duplicating a stack frame.
-        --
-        -- FIXME: I'm pretty sure things will go wrong if we run out of deeds. In particular, we may duplicate some deeds because
-        -- we will have released deeds for everything in h_non_residualised, but those bindings will still be free in some of the things
-        -- they were transitivelyInlined into, if deed acquisition failed. This means that optimiseSplit will create bindings for them
-        -- without paying for those bindings!
-        -- I think that in fixing this I could ensure that the outgoing bracketeds_heap' excludes all those things in not_resid_xs.
-        -- After all, IIRC the only reason it doesn't at the moment is because I want to catch those bindings we wanted to push down
-        -- but actually couldn't because of deeds issues.
         deeds0 = releasePureHeapDeeds deeds0_unreleased h_not_residualised
         
         -- 3b) Work out which part of the heap is admissable for inlining
@@ -544,7 +539,7 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
         --     * Anything explicitly generalised
         must_resid_xs = extraFvs bracketed_focus' `S.union` S.unions (map extraFvs (M.elems bracketeds_heap'))
                           `S.union` gen_xs
-        --  b) Lastly, we should *stop* residualising bindings that got Entered only once in the proposal.
+        --  b) We should *stop* residualising bindings that got Entered only once in the proposal.
         --     I once thought that we should only add a single variable to non_resid_xs' every time around the loop, because I worried
         --     that choosing not to residualise some binding would cause some other bindings to stop being candiates (i.e. would increase
         --     the number of times they were entered).
@@ -553,10 +548,14 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
         --     into a context where it is still evaluated Once, anything it refers to is still evaluated Once. So the existing Entered information
         --     does not appear to be invalidated when we decide not to residualise an additional binding.
         entered    = entered_focus `join` entered_heap
-        not_resid_xs' = -- traceRender ("candidates", onces, must_resid_xs, not_resid_xs, candidates S.\\ not_resid_xs) $
-                        not_resid_xs `S.union` candidates
+        safe_not_resid_xs' = -- traceRender ("candidates", onces, must_resid_xs, not_resid_xs, candidates S.\\ not_resid_xs) $
+                             safe_not_resid_xs `S.union` candidates
           where onces = S.filter (\x' -> maybe True isOnce (M.lookup x' entered)) bound_xs
                 candidates = onces S.\\ must_resid_xs
+        --   c) We should *start* residualising those bindings we thought were safe to inline but we actually couldn't inline because
+        --      deeds issues prevented us from inlining them into *all* contexts that needed them. See also Note [Deeds and splitting]
+        deeds_resid_xs' = deeds_resid_xs `S.union` (safe_not_resid_xs `S.intersection` (bracketedFreeVars stateFreeVars bracketed_focus' `S.union`
+                                                                                        S.unions (map (bracketedFreeVars stateFreeVars) (M.elems bracketeds_heap'))))
     
     -- Bound variables: those variables that I am interested in making a decision about whether to residualise or not
     bound_xs = pureHeapBoundVars h `S.union` stackBoundVars (map snd named_k)
@@ -566,6 +565,19 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
     extract_cheap_hb (Concrete (rn, e)) = guard (isCheap (annee e)) >> Just (Concrete (rn, e))
     extract_cheap_hb hb                 = Just hb -- Inline phantom stuff verbatim: there is no work duplication issue
     h_cheap_and_phantom = M.mapMaybe extract_cheap_hb h
+
+
+-- Note [Deeds and splitting]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- Some heap bindings are safe to inline (from a work-duplication perspective), but bad to inline from a deeds perspective
+-- because it can prove impossible to get enough deeds to actually inline them. We apply a rather unsubtle (but safe)
+-- heuristic to deal with this situation, by monotonically growing a set of variables that we should *not* attempt
+-- to inline even though they appear in the safe_not_resid_xs set.
+-- 
+-- This really is extremely conservative, but if we're running out of deeds bad things will happen anyway, so who cares?
+--
+-- If we did not do this, then the bracketed_heap outgoing from splitt may not bind some of the variables free in what
+-- it intends to drive, because bracketeds_heap only contains those bindings that splitt decided should be residualised.
 
 
 -- Note [Residualisation of things referred to in extraFvs]
