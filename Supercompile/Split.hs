@@ -9,7 +9,7 @@ import Core.Syntax
 
 import Evaluator.Evaluate
 import Evaluator.FreeVars
-import Evaluator.Residualise
+--import Evaluator.Residualise
 import Evaluator.Syntax
 
 import Size.Deeds
@@ -426,24 +426,8 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
     -- Simultaneously computes the next fixed-point step and some artifacts computed along the way,
     -- which happen to correspond to exactly what I need to return from splitt.
     split_step not_resid_xs = -- traceRender ("split_step", (not_resid_xs, bound_xs S.\\ not_resid_xs), heapBoundVars (Heap h_not_residualised ids), heapBoundVars (Heap h_residualised ids)) $
-                              assert_nonsuspicious $
                               (not_resid_xs', (deeds2, bracketeds_heap', bracketed_focus'))
       where
-        -- Ad-hoc check: we should never be in a situation where we will potentially drive a state with a phantom value binding,
-        -- if deeds are turned off. That would just be mad, because there is no work duplication issue from values.
-        --
-        -- This check is here because I found that the splitter *was* constructing such States at one point, due to a bug in
-        -- transitiveInline which would only inline a phantom version of a binding even if a concrete version was available.
-        find_suspicious bracketed = [x | filler_s@(Heap filler_h _, _, _) <- fillers bracketed
-                                       , x <- M.keys (M.filterWithKey (\x' hb -> case hb of Phantom (_, annee -> Value _) | x' `S.member` stateFreeVars filler_s, Just (Concrete _) <- M.lookup x' h -> True; _ -> False) filler_h)]
-        suspicious = [x | bracketed <- M.elems bracketeds_heap', x <- find_suspicious bracketed] ++ find_suspicious bracketed_focus'
-        assert_nonsuspicious = assertRender (text "Detected suspicious binding:" $$ vcat (map pPrint suspicious) $$
-                                             text "Bracketeds Heap:" $$ pPrint (M.map (map residualiseState . fillers) bracketeds_heap') $$
-                                             text "Bracketed Focus:" $$ pPrint (map residualiseState (fillers bracketed_focus')) $$
-                                             text "Heap:" $$ pPrint (M.map (residualiseHeapBinding prettyIdSupply) h) $$
-                                             text "Inlineable Heap:" $$ pPrint (M.map (residualiseHeapBinding prettyIdSupply) h_inlineable))
-                                            (dEEDS || null suspicious)
-
         -- 0) Infer the stack frames that I'm not residualising based on the *variables* I'm not residualising
         not_resid_kfs = IS.fromList [i | (i, kf) <- named_k
                                        , i `IS.notMember` gen_kfs
@@ -627,8 +611,7 @@ transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
     go n deeds h_inlineable h_output live
       = -- traceRender ("go", n, M.keysSet h_inlineable, M.keysSet h_output, fvs) $
         if live == live'
-        then (let suspicious = M.keys (M.filterWithKey (\x' hb -> case hb of Phantom (_, annee -> Value _) | x' `S.member` stateFreeVars (Heap h_output ids, k, in_e), Just (Concrete (_, annee -> Value _)) <- M.lookup x' init_h_inlineable -> True; _ -> False) h_output) in assertRender (text "transitiveInline: suspicious bindings" $$ pPrint (map (\x' -> (x', whyLive x' live)) suspicious) $$ pPrint h_inlineable) (dEEDS || null suspicious)) $
-             (deeds', h_output)
+        then (deeds', h_output)
         else go (n + 1) deeds' h_inlineable' h_output' live' -- NB: the argument order to union is important because we want to overwrite an existing phantom binding (if any) with the concrete one
       where 
         (deeds', h_inlineable', h_output', live') = M.foldWithKey consider_inlining (deeds, M.empty, h_output, live) h_inlineable
