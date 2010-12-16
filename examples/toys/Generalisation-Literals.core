@@ -1,0 +1,10 @@
+silly f acc = case acc' of
+    0 -> acc' + 1
+    _ -> silly f acc'
+  where acc' = f acc
+
+root = silly (\x -> x - 1)
+
+tests = [
+    (root 10, 1)
+  ]

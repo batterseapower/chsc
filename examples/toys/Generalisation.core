@@ -1,0 +1,11 @@
+silly f control acc = case control of
+    []           -> f True:acc -- NB: the extra call to (f True) is to test if we generalise away the cons as well as the (f True:) part. We shouldn't!
+    (_:control') -> silly f control' (f True:acc)
+
+root = silly Just
+
+-- NB: lists of () are isomorphic to Peano numbers
+tests = [
+    (root [()]     [], [Just True, Just True]),
+    (root [(), ()] [], [Just True, Just True, Just True])
+  ]
