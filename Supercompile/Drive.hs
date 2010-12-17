@@ -164,58 +164,16 @@ data Promise = P {
     meaning    :: State            -- Minimum adequate term
   }
 
--- Note [Which h functions to residualise in bindCapturedFloats]
--- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
---
--- Imagine we have driven to this situation:
---
---  let map = ...
---  in ...
---
--- With these "h" functions floating out:
---
---  h1 = \fvs1 -> ... map ...
---  h2 = \fvs2 -> let map = ...
---                in ... h1 ...
---
--- Previously, what bindCapturedFloats did was residualise those floating "h" function that have lexical
--- free variables that intersect with the set of statics (which is just {map} in this case).
---
--- However, this is insufficient in this example, because we built a map binding locally within h2
--- and so it does not occur as a lexical FV of h2. However, h2 refers to h1 (which does have map as a
--- lexical FV) so what is going to happen is that h2 will float out past h1 and we will get a variable
--- out of scope error at the reference to h1.
---
--- There are two solutions:
---  1) When pushing heap bindings down into several different contexts, give them different names in each
---     context. Then we will end up in a situation like:
---
---  let map1 = ...
---  in ...
---
---  h1 = \fvs1 -> ... map1 ...
---  h2 = \fvs2 -> let map2 = ...
---                in ... h1 ...
---
--- Now map1 will be a lexical FV of h1 and all will be well.
---
---  2) Make the h functions that get called into lexical FVs of the h function making the call, and then
---     compute the least fixed point of the statics set in bindCapturedFloats, residualising h functions that are
---     referred to only by other h functions.
---
---  This solution is rather elegant because it falls out naturally if I make the FreeVars set returned by the
---  supercompiler exactly equal to the free variables of the term returned (previously I excluded h functions
---  from the set, but *included* lexical FVs of any h functions called). This simplifies the description of the
---  supercompiler but also means that in the future I might just be able to return a TermWithFVs or something --
---  memoising the FVs on the term structure itself.
-
 instance MonadStatics ScpM where
      -- FIXME: lOCAL_TIEBACKS isn't doing anything at the moment
      -- NB: it's important we still use bindFloats if (not lOCAL_TIEBACKS) because h functions are static
     bindCapturedFloats extra_statics mx = bindFloats (partition_fulfilments extra_statics) mx
       where
-        -- We need a fixed point here to identify the full set of h-functions to residualise.
-        -- See Note [Phantom variables and bindings introduced by scrutinisation]
+        -- We do need a fixed point here to identify the full set of h-functions to residualise.
+        -- The reason is that even if a static variable is not free in an output h-function, we might
+        -- have created (and make reference to) some h-function that *does* actually refer to one
+        -- of the static variables.
+        -- See also Note [Phantom variables and bindings introduced by scrutinisation]
         partition_fulfilments extra_statics fs
           | extra_statics == extra_statics' = (fs_now, fs_later)
           | otherwise                       = partition_fulfilments extra_statics' fs
@@ -243,7 +201,7 @@ bindFloats :: ([Fulfilment] -> ([Fulfilment], [Fulfilment]))
 bindFloats partition_fulfilments mx
   = ScpM $ \e s k -> unScpM mx (e { promises = map fst (fulfilments s) ++ promises e }) (s { fulfilments = [] })
                                (\x _e (s'@(ScpState { fulfilments = (partition_fulfilments -> (fs_now, fs_later)) })) -> -- traceRender ("bindFloats", [(fun p, fvedTermFreeVars e) | (p, e) <- fs_now], [(fun p, fvedTermFreeVars e) | (p, e) <- fs_later]) $
-                                                                                                                         k (sortBy (comparing ((read :: String -> Int) . drop 1 . name_string . fst)) [(fun p, lambdas (abstracted p) e') | (p, e') <- fs_now], x)
+                                                                                                                         k (sortBy (comparing ((read :: String -> Int) . drop 1 . name_string . fst)) [(fun p, e') | (p, e') <- fs_now], x)
                                                                                                                            e (s' { fulfilments = fs_later ++ fulfilments s }))
 
 freshHName :: ScpM Var
@@ -257,7 +215,7 @@ promise p opt = ScpM $ \e s k -> {- traceRender ("promise", fun p, abstracted p)
   where
     mx p = do
       (a, e') <- opt
-      ScpM $ \e s k -> k () e (s { fulfilments = (p, e') : fulfilments s })
+      ScpM $ \e s k -> k () e (s { fulfilments = (p, lambdas (abstracted p) e') : fulfilments s })
       
       let fvs' = fvedTermFreeVars e' in fmap (((S.fromList (abstracted p) `S.union` stateStaticBinders (meaning p)) `S.union`) . S.fromList . map fun) getPromises >>= \fvs -> assertRender ("sc: FVs", fun p, fvs' S.\\ fvs, fvs, e') (fvs' `S.isSubsetOf` fvs) $ return ()
       
@@ -306,16 +264,15 @@ sc' hist (deeds, state) = (\raise -> check raise) `catchScpM` \gen -> stop gen h
     check this_rb = case terminate hist (state, this_rb) of
                       Continue hist' -> continue hist'
                       Stop (gen, rb) -> maybe (stop gen hist) ($ gen) $ guard sC_ROLLBACK >> Just rb
-    stop gen hist = do traceRenderM "sc-stop"
+    stop gen hist = do traceRenderScpM "sc-stop"
                        split gen               (sc hist) (deeds,  state)
-    continue hist = do ScpM (\e s k -> k (depth e) e s) >>= \depth -> traceRenderM $ nest depth $ pPrint ("reduce end", residualiseState state')
+    continue hist = do traceRenderScpM ("reduce end", residualiseState state')
                        split generaliseNothing (sc hist) (deeds', state')
       where (deeds', state') = gc (speculate reduce (deeds, state)) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
 
 memo :: ((Deeds, State) -> ScpM (Deeds, Out FVedTerm))
      ->  (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
 memo opt (deeds, state) = do
-    depth <- ScpM $ \e s k -> k (depth e) e s
     ps <- getPromises
     case [ (p, (releaseStateDeed deeds state, fun p `varApps` tb_dynamic_vs))
          | p <- ps
@@ -327,7 +284,7 @@ memo opt (deeds, state) = do
                tb_dynamic_vs = rn_fvs (abstracted p)
          ] of
       (_p, res):_ -> {- traceRender ("tieback", residualiseState state, fst res) $ -} do
-        traceRenderM $ nest depth $ pPrint ("=sc", fun _p, residualiseState state, deeds, res)
+        traceRenderScpM ("=sc", fun _p, residualiseState state, deeds, res)
         return res
       [] -> {- traceRender ("new drive", residualiseState state) $ -} do
         let (static_vs, vs) = stateStaticBindersAndFreeVars state
@@ -335,7 +292,10 @@ memo opt (deeds, state) = do
         -- NB: promises are lexically scoped because they may refer to FVs
         x <- freshHName
         promise P { fun = x, abstracted = S.toList (vs S.\\ static_vs), meaning = state } $ do
-            traceRenderM $ nest depth $ pPrint (">sc", x, residualiseState state, case state of (Heap h _, _, _) -> M.filter heapBindingNonConcrete h, deeds)
+            traceRenderScpM (">sc", x, residualiseState state, case state of (Heap h _, _, _) -> M.filter heapBindingNonConcrete h, deeds)
             res <- opt (deeds, case state of (Heap h ids, k, in_e) -> (Heap (M.insert x Environmental h) ids, k, in_e)) -- TODO: should I just put "h" functions into a different set of statics??
-            traceRenderM $ nest depth $ pPrint ("<sc", x, residualiseState state, res)
+            traceRenderScpM ("<sc", x, residualiseState state, res)
             return res
+
+traceRenderScpM :: Pretty a => a -> ScpM ()
+traceRenderScpM x = ScpM (\e s k -> k (depth e) e s) >>= \depth -> traceRenderM $ nest depth $ pPrint x

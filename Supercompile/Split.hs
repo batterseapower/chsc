@@ -88,20 +88,32 @@ mkEnteredEnv = setToMap
 -- during supercompilation (h2, h3) have more free variables than the term from which they were generated (h1).
 -- This is absolutely the only place that a lexically free variable changes to static!
 --
--- In the simple world, when choosing which h-functions to bind, we could simply pick those whose free variables
+-- There are three options:
+--   1. Float h2 and h3 to the binding site for x, then notice that h1 refers to h2/h3 and residualise that
+--      in the same place.
+--   2. Do not float h2 and h3: just residualise them directly within the case branches
+--   3. Do not add phantom bindings for free variables to the heap *at all*.
+--
+-- Option 1 is rather a bad idea because it means we end up specialising lots of code on boring variables
+-- bound by lambdas -- h1 could be applied to any x, but in the proposed scheme it would be bound within
+-- whatever happens to bind x, so we can't use it for any other x.
+--
+-- Option 2 is better, but still a bit complex. We do option 3 instead.
+--
+-- With option 2/3, when choosing which h-functions to bind, we could simply pick those whose free variables
 -- intersected with variables bound by residual let-bindings.
 --
--- In the real world, we have to add two more complications:
+-- If we wanted to do option 1, we would have to add two more complications:
 --   1. Because we can case-scrutinise variables that were originally bound by a *lambda or case alt* rather than a
 --      let, we have to bind h-functions inside *all* binding sites that we generate, NOT JUST lets
 --   2. Because bound h-functions (e.g. h2 or h3) may be referred to by other h-functions (e.g. h1) which do not
---      refer to any of the free variables of the h-functions we are about to bind, we have to have a fixed point
---      in bindCapturedFloats. This fixed point ensures we bind those h-functions that have as free variables any
---      h-functions we are about to bind.
+--      refer to any of the free variables of the h-functions we are about to bind, we have an additionaly reason
+--      to have a fixed point in bindCapturedFloats. This fixed point ensures we bind those h-functions that have
+--      as free variables any h-functions we are about to bind.
 --
--- Thus, when we evaluate optimiseBracketed for whoever originally binds the x (probably a lambda or case-alt --
--- since it was free in h1 we probably had no information about what it was), we will residualise h2 and
--- h3, because we can see that they mention x as a static. It's not immediately cleary that h1 should be residualised
+-- This makes option 1 work, because, when we evaluate optimiseBracketed for whoever originally binds the x (probably a
+-- lambda or case-alt -- since it was free in h1 we probably had no information about what it was), we will residualise h2
+-- and h3, because we can see that they mention x as a static. It's not immediately cleary that h1 should be residualised
 -- because x wasn't free in it, but the fixed point will spot that h2/h3 are free in it and hence bind h1 as well.
 
 
@@ -113,52 +125,6 @@ split :: MonadStatics m
       -> m (Deeds, Out FVedTerm)
 split gen opt (deeds, s) = optimiseSplit opt deeds' bracketeds_heap bracketed_focus
   where (deeds', bracketeds_heap, bracketed_focus) = simplify gen (deeds, s)
-    
-    -- s_fvs = stateFreeVars s
-    -- opt' (nested_deeds, nested_s@(Heap h _, _, _)) = do
-    --   
-    --   
-    --   
-    --   
-    --   
-    --   
-    --   
-    --   
-    --   
-    --   
-    --   
-    --   
-    --   
-    --   
-    --   
-    --   
-    --   
-    --   
-    --   
-    --   
-    --   
-    --   --
-    --   -- This happens because the current logic in bindCapturedFloats assumes that lexical sets of bindings floating
-    --   -- out will be no larger than the implicit lexical set of the thing that they float out of...
-    --   --
-    --   -- The right thing to do is to bind h2 and h3 just inside the case branches they originated from, as long
-    --   -- as they still refer to the scrutinee at all. Hence:
-    --   --
-    --   --  \x -> Just (case x of True -> e1; False -> e2)
-    --   -- ==>
-    --   --  let h1 x = Just (h2 x)
-    --   --      h2 x = case x of True -> let h2 = D[e1][x] in h2; False -> let h3 = D[e2][x] in h3
-    --   --  in \x -. h1 x
-    --   --
-    --   -- Note that if the scrutinee x is actually a static we could safely float h2/h3 up to the binding site for
-    --   -- that static, because h1 will *also* be residualised at that point. There fore the final test is:
-    --   --
-    --   --   Check if (initial_state_fvs_including_initial_phantom_bindings `S.intersection` vars_bound_to_phantom_in h)
-    --   --   intersects with the lexical FVs of the float: if it does, bind that float here
-    --   let fvs_that_became_phantom = s_fvs `S.intersection` M.keysSet (M.filter heapBindingNonConcrete h)
-    --   (xes, (nested_deeds', nested_e')) <- bindCapturedFloats fvs_that_became_phantom $ opt (nested_deeds, nested_s)
-    --   unless (null xes) $ traceRenderM ("split.opt", fvs_that_became_phantom, xes)
-    --   return (nested_deeds', letRecSmart xes nested_e')
 
 -- Non-expansive simplification that we can safely do just before splitting to make the splitter a bit simpler
 data QA = Question Var
@@ -377,12 +343,10 @@ optimiseBracketed :: MonadStatics m
                   => ((Deeds, State) -> m (Deeds, Out FVedTerm))
                   -> (Deeds, Bracketed (Deeds, State))
                   -> m (Deeds, Out FVedTerm)
-optimiseBracketed opt (deeds, b) = liftM (second (rebuild b)) $ optimiseMany optimise_one (deeds, extraBvs b `zip` fillers b)
-  where optimise_one (deeds, (extra_bvs, (s_deeds, s))) = do
-          -- We must bind any h-functions that refer to the lambda/case-alt bound variables around this hole.
-          -- See the Note [Phantom variables and bindings introduced by scrutinisation]
-          (xes, (deeds, e)) <- bindCapturedFloats extra_bvs $ opt (deeds `releaseDeedsTo` s_deeds, s)
-          return (deeds, letRecSmart xes e)
+optimiseBracketed opt (deeds, b) = liftM (second (rebuild b)) $ optimiseMany optimise_one (deeds, fillers b)
+  where optimise_one (deeds, (s_deeds, s)) = opt (deeds `releaseDeedsTo` s_deeds, s)
+        -- No h-functions can refer to the lambda/case-alt bound variables around this hole.
+        -- See the Note [Phantom variables and bindings introduced by scrutinisation]
 
 
 transformWholeList :: ([a] -> [b]) -- Transformer of concatenated lists -- must be length-preserving!
@@ -597,20 +561,15 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
         inlineBracketHeap :: Deeds -> Bracketed (Entered, State) -> (Deeds, EnteredEnv, Bracketed State)
         inlineBracketHeap = inlineHeapT inline_one
           where
-            claim_heap_binding_deed deeds (Concrete (_, e)) = claimDeed deeds (annedTag e)
-            claim_heap_binding_deed deeds _                 = Just deeds
-            
-            inline_one deeds (ent, (Heap h ids, k, in_e)) = (deeds'', mkEnteredEnv ent $ stateFreeVars state', state')
+            inline_one deeds (ent, state) = (deeds', mkEnteredEnv ent $ stateFreeVars state', state')
               where
                 -- The elements of the Bracketed may contain proposed heap bindings gathered from Case frames.
-                -- However, we haven't yet claimed deeds for them :-(. This is solved right here, where we remove
-                -- any new binding we can't get deeds for.
+                -- However, we haven't yet claimed deeds for them :-(.
                 --
-                -- NB: the correctness of this relies on the fact that only "optional" bindings that shadow something
-                -- bound above are ever present in this heap.
-                (deeds', h') = M.foldWithKey (\x' hb (deeds', h') -> maybe (deeds', h') (\deeds' -> (deeds', M.insert x' hb h')) (claim_heap_binding_deed deeds' hb)) (deeds, M.empty) h
-                -- We can then use transitiveInline to inline the (possibly trimmed) heap and the inlineables into this position
-                (deeds'', state') = transitiveInline h_inlineable (deeds', (Heap h' ids, k, in_e))
+                -- This is OK, because transitiveInline treats the heap of its state "specially". NB: the correctness
+                -- of this relies on the fact that only "optional" bindings that shadow something bound above are ever
+                -- present in this heap.
+                (deeds', state') = transitiveInline h_inlineable (deeds, state)
         
         -- 3c) Actually do the inlining of as much of the heap as possible into the proposed floats
         -- We also take this opportunity to strip out the Entered information from each context.
@@ -700,14 +659,26 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
 -- This is the basis on which we choose to residualise expensive.
 
 -- We are going to use this helper function to inline any eligible inlinings to produce the expressions for driving.
-transitiveInline :: PureHeap -> (Deeds, State) -> (Deeds, State)
+--
+-- WARNING! We treat bindings in the incoming Heap very specially:
+--   1. We assume that we haven't yet claimed any deeds for them
+--   2. We NEVER inline a phantom version of them -- only a concrete version
+--
+-- Both of these oddities are a consequence of the fact that this heap is only non-empty in the splitter for states
+-- originating from the branch of some residual case expression. See Note [Phantom variables and bindings introduced by scrutinisation]
+-- for details about point 2 in particular.
+transitiveInline :: PureHeap       -- ^ What to inline. We have not claimed deeds for any of this.
+                 -> (Deeds, State) -- ^ What to inline into
+                 -> (Deeds, State)
 transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
     = -- (if not (S.null not_inlined_vs') then traceRender ("transitiveInline: generalise", not_inlined_vs') else id) $
       -- traceRender ("transitiveInline", pureHeapBoundVars init_h_inlineable, state_fvs, pureHeapBoundVars h') $
       (deeds', (Heap h' ids, k, in_e))
   where
     state_fvs = stateFreeVars (Heap M.empty ids, k, in_e)
-    (deeds', h') = go 0 (releasePureHeapDeeds deeds h) (init_h_inlineable `M.union` h) M.empty (mkConcreteLiveness state_fvs)
+    (deeds', h') = go 0 deeds (h `M.union` init_h_inlineable) M.empty (mkConcreteLiveness state_fvs)
+      -- NB: we prefer bindings from h to those from init_h_inlineable if there is any conflict. This is motivated by
+      -- the fact that bindings from case branches are usually more informative than e.g. a phantom binding for the scrutinee.
     
     -- NB: in the presence of phantoms, this loop gets weird.
     --  1. We want to inline phantoms if they occur as free variables of the state, so we get staticness
@@ -732,7 +703,7 @@ transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
         -- NB: we also rely here on the fact that the original h contains "optional" bindings in the sense that they are shadowed
         -- by something bound above - i.e. it just tells us how to unfold case scrutinees within a case branch.
         consider_inlining x' hb (deeds, h_inlineable, h_output, live)
-          | Just why_live <- x' `whyLive` live -- Is the binding actually live?
+          | Just why_live <- x' `whyLive` live -- Is the binding actually live at all?
           , (deeds, h_inlineable, inline_hb) <- case hb of
               Concrete in_e@(_, e) -> case why_live of
                 ConcreteLive -> case claimDeed deeds (annedTag e) of -- Do we have enough deeds to inline a concrete version at all?
@@ -740,6 +711,7 @@ transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
                                   Nothing    -> (deeds, M.insert x' hb h_inlineable, Phantom in_e)
                 PhantomLive  -> (deeds, M.insert x' hb h_inlineable, Phantom in_e) -- We want to inline only a *phantom* version if the binding is demanded by phantoms only, or madness ensues
               _              -> (deeds, h_inlineable, hb)
+          , (x' `M.notMember` h || not (heapBindingNonConcrete inline_hb)) -- The Hack: only inline stuff from h *concretely*
           = (deeds, h_inlineable, M.insert x' inline_hb h_output, live `plusLiveness` heapBindingLiveness inline_hb)
           | otherwise
           = (deeds, M.insert x' hb h_inlineable, h_output, live)
@@ -827,7 +799,7 @@ splitStackFrame ids kf scruts bracketed_hole
             -- ===>
             --  case x of C -> let unk = C; z = C in ...
             alt_in_es = alt_rns `zip` alt_es
-            alt_hs = zipWith3 (\alt_rn alt_con alt_tg -> M.fromList $ do { Just scrut_v <- [altConToValue alt_con]; scrut <- scruts; return (scrut, Concrete (alt_rn, annedTerm alt_tg (Value scrut_v))) }) alt_rns alt_cons (map annedTag alt_es) -- NB: don't need to grab deeds for these just yet - splitt will do so before calling transitiveInline
+            alt_hs = zipWith3 (\alt_rn alt_con alt_tg -> M.fromList $ do { Just scrut_v <- [altConToValue alt_con]; scrut <- scruts; return (scrut, Concrete (alt_rn, annedTerm alt_tg (Value scrut_v))) }) alt_rns alt_cons (map annedTag alt_es) -- NB: don't need to grab deeds for these just yet, due to the funny contract for transitiveInline
             alt_bvss = map (\alt_con' -> fst $ altConOpenFreeVars alt_con' (S.empty, S.empty)) alt_cons'
             bracketed_alts = zipWith (\alt_h alt_in_e -> oneBracketed (Once ctxt_id, \ids -> (Heap alt_h ids, [], alt_in_e))) alt_hs alt_in_es
     PrimApply pop in_vs in_es -> zipBracketeds (primOp pop) S.unions (repeat id) (\_ -> Nothing) (bracketed_vs ++ bracketed_hole : bracketed_es)
