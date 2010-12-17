@@ -711,7 +711,7 @@ transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
                                   Nothing    -> (deeds, M.insert x' hb h_inlineable, Phantom in_e)
                 PhantomLive  -> (deeds, M.insert x' hb h_inlineable, Phantom in_e) -- We want to inline only a *phantom* version if the binding is demanded by phantoms only, or madness ensues
               _              -> (deeds, h_inlineable, hb)
-          , (x' `M.notMember` h || not (heapBindingNonConcrete inline_hb)) -- The Hack: only inline stuff from h *concretely*
+          , (x' `M.notMember` h && lOCAL_TIEBACKS) || not (heapBindingNonConcrete inline_hb) -- The Hack: only inline stuff from h *concretely*
           = (deeds, h_inlineable, M.insert x' inline_hb h_output, live `plusLiveness` heapBindingLiveness inline_hb)
           | otherwise
           = (deeds, M.insert x' hb h_inlineable, h_output, live)

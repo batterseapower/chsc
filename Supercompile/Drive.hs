@@ -165,8 +165,6 @@ data Promise = P {
   }
 
 instance MonadStatics ScpM where
-     -- FIXME: lOCAL_TIEBACKS isn't doing anything at the moment
-     -- NB: it's important we still use bindFloats if (not lOCAL_TIEBACKS) because h functions are static
     bindCapturedFloats extra_statics mx = bindFloats (partition_fulfilments extra_statics) mx
       where
         -- We do need a fixed point here to identify the full set of h-functions to residualise.
