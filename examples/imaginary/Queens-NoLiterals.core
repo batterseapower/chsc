@@ -13,8 +13,6 @@ nsoln nq = length (gen nq)
              then [[]]
              else concatMap (\b -> concatMap (\q -> if safe q lit1'Int b then [(q:b)] else []) (enumFromTo'Int lit1'Int nq)) (gen (n `subtract'Int` lit1'Int))
 
-enumFromTo'Int n m = if n `gt'Int` m then [] else n : enumFromTo'Int (add'Int n lit1'Int) m
-
 root = nsoln
 
 --See \url{http://en.wikipedia.org/wiki/Eight_queens_puzzle}
