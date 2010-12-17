@@ -67,7 +67,42 @@ mkEnteredEnv = setToMap
 
 --
 -- == The splitter ==
+
+-- Note [Phantom variables and bindings introduced by scrutinisation]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 --
+-- If we never introduced bindings from scrutinisation, the world of phantom bindings would be relatively
+-- simple. In such a world, we would have this property:
+--
+--   The free variables of h-functions generated while supercompiling some term would never have
+--   more free variables than the term being supercompiled
+--
+-- Unfortunately, this is not true in the real world. What can happen is this. We supercompile:
+--  h1 x = case x of True -> e1; False -> e2
+--
+-- Which leads to the two recursively-supercompiled components:
+--  h2 = let <x = True> in e1
+--  h3 = let <x = False> in e2
+--
+-- Note that x was not static (free) in h1, but it is static (free) in h2. Thus, h-functions generated
+-- during supercompilation (h2, h3) have more free variables than the term from which they were generated (h1).
+-- This is absolutely the only place that a lexically free variable changes to static!
+--
+-- In the simple world, when choosing which h-functions to bind, we could simply pick those whose free variables
+-- intersected with variables bound by residual let-bindings.
+--
+-- In the real world, we have to add two more complications:
+--   1. Because we can case-scrutinise variables that were originally bound by a *lambda or case alt* rather than a
+--      let, we have to bind h-functions inside *all* binding sites that we generate, NOT JUST lets
+--   2. Because bound h-functions (e.g. h2 or h3) may be referred to by other h-functions (e.g. h1) which do not
+--      refer to any of the free variables of the h-functions we are about to bind, we have to have a fixed point
+--      in bindCapturedFloats. This fixed point ensures we bind those h-functions that have as free variables any
+--      h-functions we are about to bind.
+--
+-- Thus, when we evaluate optimiseBracketed for whoever originally binds the x (probably a lambda or case-alt --
+-- since it was free in h1 we probably had no information about what it was), we will residualise h2 and
+-- h3, because we can see that they mention x as a static. It's not immediately cleary that h1 should be residualised
+-- because x wasn't free in it, but the fixed point will spot that h2/h3 are free in it and hence bind h1 as well.
 
 
 {-# INLINE split #-}
@@ -75,10 +110,55 @@ split :: MonadStatics m
       => Generaliser
       -> ((Deeds, State) -> m (Deeds, Out FVedTerm))
       -> (Deeds, State)
-      -> m (Deeds, Out FVedTerm) -- NB: it is very important that extra_statics go in the second argument of union, because we don't want them overriding real definitions in the heap!
+      -> m (Deeds, Out FVedTerm)
 split gen opt (deeds, s) = optimiseSplit opt deeds' bracketeds_heap bracketed_focus
   where (deeds', bracketeds_heap, bracketed_focus) = simplify gen (deeds, s)
-
+    
+    -- s_fvs = stateFreeVars s
+    -- opt' (nested_deeds, nested_s@(Heap h _, _, _)) = do
+    --   
+    --   
+    --   
+    --   
+    --   
+    --   
+    --   
+    --   
+    --   
+    --   
+    --   
+    --   
+    --   
+    --   
+    --   
+    --   
+    --   
+    --   
+    --   
+    --   
+    --   
+    --   --
+    --   -- This happens because the current logic in bindCapturedFloats assumes that lexical sets of bindings floating
+    --   -- out will be no larger than the implicit lexical set of the thing that they float out of...
+    --   --
+    --   -- The right thing to do is to bind h2 and h3 just inside the case branches they originated from, as long
+    --   -- as they still refer to the scrutinee at all. Hence:
+    --   --
+    --   --  \x -> Just (case x of True -> e1; False -> e2)
+    --   -- ==>
+    --   --  let h1 x = Just (h2 x)
+    --   --      h2 x = case x of True -> let h2 = D[e1][x] in h2; False -> let h3 = D[e2][x] in h3
+    --   --  in \x -. h1 x
+    --   --
+    --   -- Note that if the scrutinee x is actually a static we could safely float h2/h3 up to the binding site for
+    --   -- that static, because h1 will *also* be residualised at that point. There fore the final test is:
+    --   --
+    --   --   Check if (initial_state_fvs_including_initial_phantom_bindings `S.intersection` vars_bound_to_phantom_in h)
+    --   --   intersects with the lexical FVs of the float: if it does, bind that float here
+    --   let fvs_that_became_phantom = s_fvs `S.intersection` M.keysSet (M.filter heapBindingNonConcrete h)
+    --   (xes, (nested_deeds', nested_e')) <- bindCapturedFloats fvs_that_became_phantom $ opt (nested_deeds, nested_s)
+    --   unless (null xes) $ traceRenderM ("split.opt", fvs_that_became_phantom, xes)
+    --   return (nested_deeds', letRecSmart xes nested_e')
 
 -- Non-expansive simplification that we can safely do just before splitting to make the splitter a bit simpler
 data QA = Question Var
@@ -114,7 +194,7 @@ simplify gen (init_deeds, init_s)
     toQA _ = Nothing
     
     seekAdmissable :: PureHeap -> NamedStack -> Maybe (IS.IntSet, S.Set (Out Var))
-    seekAdmissable h named_k = traceRender ("gen_kfs", gen_kfs, "gen_xs'", gen_xs') $ guard (not (IS.null gen_kfs) || not (S.null gen_xs')) >> Just (traceRender ("seekAdmissable", gen_kfs, gen_xs') (gen_kfs, gen_xs'))
+    seekAdmissable h named_k = {- traceRender ("gen_kfs", gen_kfs, "gen_xs'", gen_xs') $ -} guard (not (IS.null gen_kfs) || not (S.null gen_xs')) >> Just (traceRender ("seekAdmissable", gen_kfs, gen_xs') (gen_kfs, gen_xs'))
       where gen_kfs = IS.fromList [i  | (i, kf) <- named_k, generaliseStackFrame gen kf]
             gen_xs' = S.fromList  [x' | (x', hb) <- M.toList h, generaliseHeapBinding gen x' hb]
 
@@ -297,9 +377,12 @@ optimiseBracketed :: MonadStatics m
                   => ((Deeds, State) -> m (Deeds, Out FVedTerm))
                   -> (Deeds, Bracketed (Deeds, State))
                   -> m (Deeds, Out FVedTerm)
-optimiseBracketed opt (deeds, b) = do
-    (deeds, es') <- optimiseMany (\(deeds, (s_deeds, s)) -> opt (deeds `releaseDeedsTo` s_deeds, s)) (deeds, fillers b)
-    return (deeds, rebuild b es')
+optimiseBracketed opt (deeds, b) = liftM (second (rebuild b)) $ optimiseMany optimise_one (deeds, extraBvs b `zip` fillers b)
+  where optimise_one (deeds, (extra_bvs, (s_deeds, s))) = do
+          -- We must bind any h-functions that refer to the lambda/case-alt bound variables around this hole.
+          -- See the Note [Phantom variables and bindings introduced by scrutinisation]
+          (xes, (deeds, e)) <- bindCapturedFloats extra_bvs $ opt (deeds `releaseDeedsTo` s_deeds, s)
+          return (deeds, letRecSmart xes e)
 
 
 transformWholeList :: ([a] -> [b]) -- Transformer of concatenated lists -- must be length-preserving!

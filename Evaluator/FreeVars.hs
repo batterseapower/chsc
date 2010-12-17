@@ -7,7 +7,7 @@ module Evaluator.FreeVars (
     inFreeVars,
     heapBindingLiveness,
     pureHeapBoundVars, stackBoundVars, stackFrameBoundVars,
-    stateFreeVars, stateStaticBindersAndFreeVars
+    stateFreeVars, stateStaticBinders, stateStaticBindersAndFreeVars
   ) where
 
 import Core.Syntax
@@ -87,9 +87,12 @@ stackFrameOpenFreeVars kf = case kf of
     PrimApply _ in_vs in_es -> (S.empty, S.unions (map (inFreeVars annedValueFreeVars) in_vs) `S.union` S.unions (map (inFreeVars annedTermFreeVars) in_es))
     Update x'               -> (S.singleton (annee x'), S.empty)
 
--- | Returns the free variables that the state would have if it were residualised right now (i.e. excludes static binders)
+-- | Returns the free variables that the state would have if it were residualised right now (i.e. variables bound by phantom bindings are in the free vars set)
 stateFreeVars :: State -> FreeVars
 stateFreeVars = snd . stateStaticBindersAndFreeVars
+
+stateStaticBinders :: State -> BoundVars
+stateStaticBinders = fst . stateStaticBindersAndFreeVars
 
 -- | Returns the free variables that the state would have if it were residualised right now (i.e. excludes static binders),
 -- along with the static binders as a separate set.
