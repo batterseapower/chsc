@@ -91,14 +91,15 @@ mkEnteredEnv = setToMap
 -- There are three options:
 --   1. Float h2 and h3 to the binding site for x, then notice that h1 refers to h2/h3 and residualise that
 --      in the same place.
---   2. Do not float h2 and h3: just residualise them directly within the case branches
+--   2. Do not float h2 and h3: just residualise them directly within the case branches/above the case
 --   3. Do not add phantom bindings for free variables to the heap *at all*.
 --
 -- Option 1 is rather a bad idea because it means we end up specialising lots of code on boring variables
 -- bound by lambdas -- h1 could be applied to any x, but in the proposed scheme it would be bound within
 -- whatever happens to bind x, so we can't use it for any other x.
 --
--- Option 2 is better, but still a bit complex. We do option 3 instead.
+-- Option 3 is very simple to do, but has a problem: when we come to implement our scheme for avoiding
+-- value duplication, we *need* to push down phantom bindings (see Note [Value duplication])! We do option 2 instead.
 --
 -- With option 2/3, when choosing which h-functions to bind, we could simply pick those whose free variables
 -- intersected with variables bound by residual let-bindings.
@@ -117,16 +118,24 @@ mkEnteredEnv = setToMap
 -- because x wasn't free in it, but the fixed point will spot that h2/h3 are free in it and hence bind h1 as well.
 
 
--- FIXME: make non-linear values be Phantom rather than Concrete, and give them a residual binding
-
 {-# INLINE split #-}
 split :: MonadStatics m
       => Generaliser
       -> ((Deeds, State) -> m (Deeds, Out FVedTerm))
       -> (Deeds, State)
       -> m (Deeds, Out FVedTerm)
-split gen opt (deeds, s) = optimiseSplit opt deeds' bracketeds_heap bracketed_focus
-  where (deeds', bracketeds_heap, bracketed_focus) = simplify gen (deeds, s)
+split gen opt (deeds, s) = do
+    -- When we split, we have an additional trick: we force the residualisation of any floats that refer to variables
+    -- free (but not phantom) in this state. The only such floats will be those originating from case branches that
+    -- produced a phantom binding for a variable after scrutinising that free variable.
+    --
+    -- This has the effect of binding such floats (and their dependents) directly above the corresponding case branch.
+    -- See Note [Phantom variables and bindings introduced by scrutinisation] for more.
+    let (static_vs, vs) = stateStaticBindersAndFreeVars s
+    (hes, (deeds, e)) <- bindCapturedFloats (vs S.\\ static_vs) $ optimiseSplit opt deeds' bracketeds_heap bracketed_focus
+    return (deeds, letRecSmart hes e)
+  where
+    (deeds', bracketeds_heap, bracketed_focus) = simplify gen (deeds, s)
 
 -- Non-expansive simplification that we can safely do just before splitting to make the splitter a bit simpler
 data QA = Question Var
@@ -607,11 +616,41 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
     
     -- Heap full of cheap expressions and any phantom stuff from the input heap.
     -- Used within the main loop in the process of computing h_inlineable -- see comments there for the full meaning of this stuff.
-    extract_cheap_hb (Concrete (rn, e)) = guard (isCheap (annee e) && not (isValue (annee e))) >> Just (Concrete (rn, e)) -- FIXME: explain not . isValue
+    extract_cheap_hb (Concrete (rn, e)) = guard (isCheap (annee e) && not (isValue (annee e))) >> Just (Concrete (rn, e)) -- Why (not isValue)? See Note [Value duplication]
     extract_cheap_hb hb                 = Just hb -- Inline phantom stuff verbatim: there is no work duplication issue
     h_cheap_and_phantom = M.mapMaybe extract_cheap_hb h
 
 
+-- Note [Value duplication]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~
+--
+-- We have a simple scheme for preventing value duplication that builds on phantom bindings:
+--  1. Have the evaluator never duplicate values (build *indirections* instead)
+--  2. When splitting, do not duplicate values (push down *phantom* versions of values instead)
+--  3. Allow the evaluator to look inside phantom values
+--
+-- There are three major complications to this scheme:
+--  1. Some terms are cheap, but not values. Currently we merrily duplicate the allocation of such things by pushing them down concretely.
+--     (This path also kicks in naturally if we have call-by-name reduction turned on, but that's an edge case)
+--  2. Values introduced from case scrutinisation should also be pushed down as phantoms, the same way as heap-bound values
+--  3. As a result of 2, it is possible for free variables that become phantom (see also Note [Phantom variables and bindings introduced by scrutinisation])
+--     This can get annoying for h-functions originating from case branches because they get residualised too soon. Consider:
+--
+--       \x -> case x of
+--          True  -> e1
+--          False -> e2
+--
+--     We drive e1/e2 with x as a phantom variable, and then residualise it just above the case:
+--
+--      h10 x = let h11 = D[e1]
+--                  h12 = D[e2]
+--              in case x of True -> h11; False -> h12
+--
+--     This is suboptimal because h11 and h12 could really be lambda-abstracted over x (as long as the caller bound it to True/False respectively), but in
+--     the current scheme we can't do that while also pushing down the information about what value x was bound to.
+--
+-- TODO: find a way to address points 1. or 3.
+--
 -- Note [Deeds and splitting]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~
 -- Some heap bindings are safe to inline (from a work-duplication perspective), but bad to inline from a deeds perspective
@@ -662,13 +701,11 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
 
 -- We are going to use this helper function to inline any eligible inlinings to produce the expressions for driving.
 --
--- WARNING! We treat bindings in the incoming Heap very specially:
---   1. We assume that we haven't yet claimed any deeds for them
---   2. We NEVER inline a phantom version of them -- only a concrete version
+-- WARNING! We treat bindings in the incoming Heap specially:
+--   * We assume that we haven't yet claimed any deeds for them
 --
--- Both of these oddities are a consequence of the fact that this heap is only non-empty in the splitter for states
--- originating from the branch of some residual case expression. See Note [Phantom variables and bindings introduced by scrutinisation]
--- for details about point 2 in particular.
+-- This oddity is a consequence of the fact that this heap is only non-empty in the splitter for states
+-- originating from the branch of some residual case expression.
 transitiveInline :: PureHeap       -- ^ What to inline. We have not claimed deeds for any of this.
                  -> (Deeds, State) -- ^ What to inline into
                  -> (Deeds, State)
@@ -713,7 +750,7 @@ transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
                                   Nothing    -> (deeds, M.insert x' hb h_inlineable, Phantom in_e)
                 PhantomLive  -> (deeds, M.insert x' hb h_inlineable, Phantom in_e) -- We want to inline only a *phantom* version if the binding is demanded by phantoms only, or madness ensues
               _              -> (deeds, h_inlineable, hb)
-          , (x' `M.notMember` h && lOCAL_TIEBACKS) || not (heapBindingNonConcrete inline_hb) -- The Hack: only inline stuff from h *concretely*
+          , lOCAL_TIEBACKS || not (heapBindingNonConcrete inline_hb)
           = (deeds, h_inlineable, M.insert x' inline_hb h_output, live `plusLiveness` heapBindingLiveness inline_hb)
           | otherwise
           = (deeds, M.insert x' hb h_inlineable, h_output, live)
