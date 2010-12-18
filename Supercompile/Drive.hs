@@ -86,6 +86,7 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ run
 --
 
 -- TODO: have the garbage collector collapse indirections to indirections (but unlike GHC, not further!)
+-- TODO: have the garbage collector eliminate extra update frames
 gc :: (Deeds, State) -> (Deeds, State)
 gc (deeds, (Heap h ids, k, in_e)) = transitiveInline h (releasePureHeapDeeds deeds h, (Heap M.empty ids, k, in_e))
   where
