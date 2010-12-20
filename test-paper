@@ -35,10 +35,9 @@ VANILLA_OPTS="raw --no-primops --no-deeds --tag-collection=bags --no-generalisat
 ./test-all ${VANILLA_OPTS/--cheapification --no-speculation/} | tee results-speculation.tex
 #./test-all --cheapification --no-speculation | tee nresults-speculation.tex
 
-./test-all ${VANILLA_OPTS/--no-deeds/--deeds-policy=fcfs} | tee results-deeds-fcfs.tex
-./test-all ${VANILLA_OPTS/--no-deeds/--deeds-policy=proportional} | tee results-deeds-proportional.tex
-
 # # You just can't use deeds without local tiebacks because the resulting programs are almost never typeable in Hindley Milner:
+# ./test-all ${VANILLA_OPTS/--no-deeds/--deeds-policy=fcfs} | tee results-deeds-fcfs.tex
+# ./test-all ${VANILLA_OPTS/--no-deeds/--deeds-policy=proportional} | tee results-deeds-proportional.tex
 LOCAL_H_OPTS=${VANILLA_OPTS/--no-local-tiebacks/}
 ./test-all ${LOCAL_H_OPTS/--no-deeds/--deeds-policy=fcfs} | tee results-local-tiebacks+deeds-fcfs.tex
 ./test-all ${LOCAL_H_OPTS/--no-deeds/--deeds-policy=proportional} | tee results-local-tiebacks+deeds-proportional.tex
