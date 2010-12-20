@@ -87,8 +87,12 @@ class Results(object):
     
     def summarised(self):
         mean = lambda xs: sum(xs) / len(xs)
-        lift_string = lambda f: lambda xs: str(round(f([float(x) for x in xs]), 2))
+        def lift_string(f, xs):
+            try:
+                return str(round(f([float(x) for x in xs]), 2))
+            except ValueError, e:
+                return "" # Typically happens because one of the source values is unavailable
         
         columns = self.columns()
-        summary_rows = [(summary, dict([(header, lift_string(summarise)(columns[header])) for header in self.headers])) for summary, summarise in [("Maximum", max), ("Minimum", min), ("Average", mean)]]
+        summary_rows = [(summary, dict([(header, lift_string(summarise, columns[header])) for header in self.headers])) for summary, summarise in [("Maximum", max), ("Minimum", min), ("Average", mean)]]
         return Results(self.description, self.headers, union_dict(self.results, dict(summary_rows)))
