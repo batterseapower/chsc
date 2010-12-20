@@ -51,7 +51,7 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ run
         deeds = mkDeeds (bLOAT_FACTOR - 1) (t, pPrint . rb)
         
         (t, rb) = extractDeeds (\f e -> let (ts, rb) = f (annee e)
-                                        in (Node (annedTag e) ts, \(Node unc ts') -> Counted unc (rb ts'))) anned_e
+                                        in (Node (IS.findMin (annedTag e)) ts, \(Node unc ts') -> Counted unc (rb ts'))) anned_e -- NB: initial tags are of size 1
         
         extractDeeds :: (forall a b.    (a        -> ([Tree Tag], [Tree Int] -> b))
                                      -> Anned a   -> (Tree Tag,   Tree Int   -> Counted b))
@@ -105,7 +105,7 @@ gc (deeds, (Heap h ids, k, in_e)) = transitiveInline h (releasePureHeapDeeds dee
 
 speculate :: ((Deeds, State) -> (Deeds, State))
           -> (Deeds, State) -> (Deeds, State)
-speculate reduce = snd . go (0 :: Int) (mkHistory wQO) emptyLosers
+speculate reduce = snd . go (0 :: Int) (mkHistory wQO) S.empty
   where
     go depth hist losers (deeds, state) = case terminate hist state of
         Continue hist' | sPECULATION -> continue depth hist' losers (deeds, state)
@@ -120,7 +120,7 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) emptyLosers
         -- then forcing several thunks that are each strict in it. This change was motivated by DigitsOfE2 -- it
         -- speeds up supercompilation of that benchmark massively.
         (h'_losers, h'_winners) | sPECULATE_ON_LOSERS = (M.empty, h')
-                                | otherwise           = M.partition (\hb -> maybe False (`IS.member` losers) (heapBindingTag hb)) h'
+                                | otherwise           = M.partition (\hb -> maybe False (`S.member` losers) (heapBindingTag hb)) h'
         
         -- NB: It is important that we accumulate losers across "go" invocations in a state-monady kind of way, or DigitsOfE2 blows out
         -- even more than normal (it still takes 22s with this change).
@@ -132,7 +132,7 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) emptyLosers
           -- | not (isValue (annee (snd in_e))), traceRender ("speculate", depth, residualiseState (Heap (h {- `exclude` M.keysSet base_h -}) ids, k, in_e)) False = undefined
           | otherwise = case (go (depth + 1) hist losers) (deeds, (Heap (M.delete x' h'_winners) ids, [], in_e)) of
             (losers', (deeds', (Heap h' ids', [], in_e'@(_, annee -> Value _)))) -> (deeds', Heap (M.insert x' (Concrete in_e') h')         ids', losers')
-            (losers', _)                                                         -> (deeds,  Heap (M.insert x' (Concrete in_e)  h'_winners) ids,  IS.insert (annedTag (snd in_e)) losers')
+            (losers', _)                                                         -> (deeds,  Heap (M.insert x' (Concrete in_e)  h'_winners) ids,  S.insert (annedTag (snd in_e)) losers')
         speculate_one x' hb              (deeds, Heap h'_winners ids, losers) 
           = (deeds, Heap (M.insert x' hb h'_winners) ids, losers)
 

@@ -9,11 +9,11 @@ import Evaluator.Syntax
 
 import Utilities
 
-import qualified Data.IntMap as IM
+import qualified Data.IntSet as IS
 import qualified Data.Map as M
 
 
-type TagBag = TagMap Nat
+type TagBag = M.Map TagSet Nat
 
 embedWithTagBags :: WQO State Generaliser
 embedWithTagBags = precomp stateTags $ postcomp generaliserFromGrowing $ refineCollection (\discard -> postcomp discard $ natsWeak) -- TODO: have a version where I replace weakManyNat with (zippable nat)
@@ -31,31 +31,31 @@ embedWithTagBags = precomp stateTags $ postcomp generaliserFromGrowing $ refineC
         stackTagBag :: Stack -> TagBag
         stackTagBag = mkTagBag . concatMap stackFrameTags'
      
-        tagTagBag :: Tag -> TagBag
+        tagTagBag :: TagSet -> TagBag
         tagTagBag = mkTagBag . return
         
-        mkTagBag :: [Tag] -> TagBag
-        mkTagBag = plusTagBags . map (\t -> IM.singleton t 1)
+        mkTagBag :: [TagSet] -> TagBag
+        mkTagBag = plusTagBags . map (\t -> M.singleton t 1)
         
         plusTagBag :: TagBag -> TagBag -> TagBag
-        plusTagBag = IM.unionWith (+)
+        plusTagBag = M.unionWith (+)
         
         plusTagBags :: [TagBag] -> TagBag
-        plusTagBags = foldr plusTagBag IM.empty
+        plusTagBags = foldr plusTagBag M.empty
     
-    generaliserFromGrowing :: TagMap Bool -> Generaliser
+    generaliserFromGrowing :: M.Map TagSet Bool -> Generaliser
     generaliserFromGrowing growing = Generaliser {
           generaliseStackFrame  = \kf   -> any strictly_growing (stackFrameTags' kf),
           generaliseHeapBinding = \_ hb -> maybe False (strictly_growing . pureHeapBindingTag') $ heapBindingTag hb
         }
-      where strictly_growing tg = IM.findWithDefault False tg growing
+      where strictly_growing tg = M.findWithDefault False tg growing
 
 
-pureHeapBindingTag' :: Tag -> Tag
-pureHeapBindingTag' = injectTag 5
+pureHeapBindingTag' :: TagSet -> TagSet
+pureHeapBindingTag' = IS.map (injectTag 5)
 
-stackFrameTags' :: StackFrame -> [Tag]
-stackFrameTags' = map (injectTag 3) . stackFrameTags
+stackFrameTags' :: StackFrame -> [TagSet]
+stackFrameTags' = map (IS.map (injectTag 3)) . stackFrameTags
 
-focusedTermTag' :: AnnedTerm -> Tag
-focusedTermTag' = injectTag 2 . annedTag
+focusedTermTag' :: AnnedTerm -> TagSet
+focusedTermTag' = IS.map (injectTag 2) . annedTag

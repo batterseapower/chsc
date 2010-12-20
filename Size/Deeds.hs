@@ -18,6 +18,7 @@ import Utilities
 
 import qualified Data.Foldable as Foldable
 import qualified Data.IntMap as IM
+import qualified Data.IntSet as IS
 import Data.Tree
 import Data.Ord (comparing)
 
@@ -88,29 +89,38 @@ mkDeeds k (t@(Node root_tg _), rb)
     children = go IM.empty t
     go m (Node tg trees) = foldl' go (IM.insert tg (map rootLabel trees) m) trees
 
-claimDeed :: Deeds -> Tag -> Maybe Deeds
+claimDeed :: Deeds -> TagSet -> Maybe Deeds
 claimDeed deeds tg = claimDeeds deeds tg 1
 
+claimDeeds :: Deeds -> TagSet -> Int -> Maybe Deeds
+claimDeeds deeds tgs i = IS.fold (\tg mb_deeds -> mb_deeds >>= \deeds -> claimDeeds1 deeds tg i) (return deeds) tgs
+
 -- NB: it is OK if the number of deeds to claim is negative -- that just causes some deeds to be released
-claimDeeds :: Deeds -> Tag -> Int -> Maybe Deeds
-claimDeeds deeds _ _ | not dEEDS = Just deeds
-claimDeeds (Local ldeeds) tg want = guard (unclaimed >= want) >> foldM (\deeds tg -> claimDeeds deeds tg want) (Local (ldeeds { localChildren = updateTag tg (unclaimed - want, child_tgs) (localChildren ldeeds) })) child_tgs
+claimDeeds1 :: Deeds -> Tag -> Int -> Maybe Deeds
+claimDeeds1 deeds _ _ | not dEEDS = Just deeds
+claimDeeds1 (Local ldeeds) tg want = guard (unclaimed >= want) >> foldM (\deeds tg -> claimDeeds1 deeds tg want) (Local (ldeeds { localChildren = updateTag tg (unclaimed - want, child_tgs) (localChildren ldeeds) })) child_tgs
   where !(unclaimed, child_tgs) = lookupTag tg (localChildren ldeeds)
-claimDeeds (Global gdeeds) tg want = guard (globalUnclaimed gdeeds >= want) >> foldM (\deeds tg -> claimDeeds deeds tg want) (Global (gdeeds { globalUnclaimed = globalUnclaimed gdeeds - want })) child_tgs
+claimDeeds1 (Global gdeeds) tg want = guard (globalUnclaimed gdeeds >= want) >> foldM (\deeds tg -> claimDeeds1 deeds tg want) (Global (gdeeds { globalUnclaimed = globalUnclaimed gdeeds - want })) child_tgs
   where !(I child_tgs) = lookupTag tg (globalChildren gdeeds)
 
-releaseDeedDeep :: Deeds -> Tag -> Deeds
-releaseDeedDeep deeds tg = foldl' releaseDeedDeep deeds' child_tgs
-  where (deeds', child_tgs) = releaseDeedDescend deeds tg
+releaseDeedDeep :: Deeds -> TagSet -> Deeds
+releaseDeedDeep deeds tgs = IS.fold (flip releaseDeedDeep1) deeds tgs
 
-releaseDeedDescend :: Deeds -> Tag -> (Deeds, [Tag])
-releaseDeedDescend (Local ldeeds) tg = (Local (ldeeds { localChildren = updateTag tg (unclaimed + 1, child_tgs) (localChildren ldeeds) }), child_tgs)
+releaseDeedDeep1 :: Deeds -> Tag -> Deeds
+releaseDeedDeep1 deeds tg = foldl' releaseDeedDeep1 deeds' child_tgs
+  where (deeds', child_tgs) = releaseDeedDescend1 deeds tg
+
+releaseDeedDescend1 :: Deeds -> Tag -> (Deeds, [Tag])
+releaseDeedDescend1 (Local ldeeds) tg = (Local (ldeeds { localChildren = updateTag tg (unclaimed + 1, child_tgs) (localChildren ldeeds) }), child_tgs)
   where !(unclaimed, child_tgs) = lookupTag tg (localChildren ldeeds)
-releaseDeedDescend (Global gdeeds) tg = (Global (gdeeds { globalUnclaimed = globalUnclaimed gdeeds + 1 }), child_tgs)
+releaseDeedDescend1 (Global gdeeds) tg = (Global (gdeeds { globalUnclaimed = globalUnclaimed gdeeds + 1 }), child_tgs)
   where !(I child_tgs) = lookupTag tg (globalChildren gdeeds)
 
-releaseDeedDescend_ :: Deeds -> Tag -> Deeds
-releaseDeedDescend_ deeds tg = fst (releaseDeedDescend deeds tg)
+releaseDeedDescend_ :: Deeds -> TagSet -> Deeds
+releaseDeedDescend_ deeds tgs = IS.fold (flip releaseDeedDescend1_) deeds tgs
+
+releaseDeedDescend1_ :: Deeds -> Tag -> Deeds
+releaseDeedDescend1_ deeds tg = fst (releaseDeedDescend1 deeds tg)
 
 
 lookupTag :: Tag -> TagTree f -> f [Tag]

@@ -1,5 +1,5 @@
 {-# LANGUAGE TupleSections, PatternGuards, ViewPatterns #-}
-module Evaluator.Evaluate (Losers, emptyLosers, step) where
+module Evaluator.Evaluate (step) where
 
 import Evaluator.Residualise
 import Evaluator.Syntax
@@ -15,14 +15,7 @@ import Renaming
 import StaticFlags
 import Utilities
 
-import qualified Data.IntSet as IS
 import qualified Data.Map as M
-
-
-type Losers = IS.IntSet
-
-emptyLosers :: Losers
-emptyLosers = IS.empty
 
 
 step :: (Deeds, State) -> Maybe (Deeds, State)
@@ -40,22 +33,22 @@ step (deeds, _state@(h, k, (rn, e))) =
     tg = annedTag e
     deeds' = releaseDeedDescend_ deeds tg
 
-    force :: Deeds -> Heap -> Stack -> Tag -> Out Var -> Maybe (Deeds, State)
+    force :: Deeds -> Heap -> Stack -> TagSet -> Out Var -> Maybe (Deeds, State)
     force deeds (Heap h ids) k tg x' = do { Concrete in_e <- M.lookup x' h; return (deeds, (Heap (M.delete x' h) ids, Update (annedVar tg x') : k, in_e)) }
 
-    unwind :: Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> Maybe (Deeds, State)
+    unwind :: Deeds -> Heap -> Stack -> TagSet -> In AnnedValue -> Maybe (Deeds, State)
     unwind deeds h k tg_v in_v = uncons k >>= \(kf, k) -> case kf of
         Apply x2'                 -> return $ apply      deeds h k tg_v in_v x2'
         Scrutinise in_alts        ->          scrutinise deeds h k tg_v in_v in_alts
         PrimApply pop in_vs in_es -> return $ primop     deeds h k tg_v pop in_vs in_v in_es
         Update x'                 ->          update     deeds h k tg_v x' in_v
 
-    apply :: Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> Out (Anned Var) -> (Deeds, State)
+    apply :: Deeds -> Heap -> Stack -> TagSet -> In AnnedValue -> Out (Anned Var) -> (Deeds, State)
     apply deeds h k tg_v (rn, Lambda x e_body) x2' = (deeds', (h, k, (insertRenaming x (annee x2') rn, e_body)))
       where deeds' = releaseDeedDescend_ (releaseDeedDeep deeds (annedTag x2')) tg_v
     apply _     _ _ _    (_,  v)               _   = panic "apply" (pPrint v)
 
-    scrutinise :: Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> In [AnnedAlt] -> Maybe (Deeds, State)
+    scrutinise :: Deeds -> Heap -> Stack -> TagSet -> In AnnedValue -> In [AnnedAlt] -> Maybe (Deeds, State)
     scrutinise deeds h            k tg_v (_,    Literal l)  (rn_alts, alts)
       | (alt_e, rest):_ <- [((rn_alts, alt_e), rest) | ((LiteralAlt alt_l, alt_e), rest) <- bagContexts alts, alt_l == l] ++ [((rn_alts, alt_e), rest) | ((DefaultAlt Nothing, alt_e), rest) <- bagContexts alts]
       = Just (releaseAltDeeds rest (releaseDeedDeep deeds tg_v), (h, k, alt_e))
@@ -72,7 +65,7 @@ step (deeds, _state@(h, k, (rn, e))) =
     releaseAltDeeds :: [(a, AnnedTerm)] -> Deeds -> Deeds
     releaseAltDeeds alts deeds = foldl' (\deeds (_, in_e) -> releaseDeedDeep deeds (annedTag in_e)) deeds alts
 
-    primop :: Deeds -> Heap -> Stack -> Tag -> PrimOp -> [In (Anned AnnedValue)] -> In AnnedValue -> [In AnnedTerm] -> (Deeds, State)
+    primop :: Deeds -> Heap -> Stack -> TagSet -> PrimOp -> [In (Anned AnnedValue)] -> In AnnedValue -> [In AnnedTerm] -> (Deeds, State)
     primop deeds h k tg_v2 pop [(_, Comp (Tagged tg_v1 (FVed _ (Literal (Int l1)))))] (_, Literal (Int l2)) [] = (releaseDeedDeep deeds tg_v1, (h, k, (emptyRenaming, annedTerm tg_v2 (Value (f pop l1 l2)))))
       where f pop = case pop of Add -> retInt (+); Subtract -> retInt (-);
                                 Multiply -> retInt (*); Divide -> retInt div; Modulo -> retInt mod;
@@ -81,7 +74,7 @@ step (deeds, _state@(h, k, (rn, e))) =
             retBool pop l1 l2 = if pop l1 l2 then Data trueDataCon [] else Data falseDataCon []
     primop deeds h k tg_v  pop in_vs (rn, v) (in_e:in_es) = (deeds, (h, PrimApply pop (in_vs ++ [(rn, annedValue tg_v v)]) in_es : k, in_e))
 
-    update :: Deeds -> Heap -> Stack -> Tag -> Anned (Out Var) -> In AnnedValue -> Maybe (Deeds, State)
+    update :: Deeds -> Heap -> Stack -> TagSet -> Anned (Out Var) -> In AnnedValue -> Maybe (Deeds, State)
     update deeds (Heap h ids) k tg_v x' (rn, v) = case claimDeed deeds' tg_v of
         Nothing      -> traceRender ("update: deed claim FAILURE", annee x') Nothing
         Just deeds'' -> Just (deeds'', (Heap (M.insert (annee x') (Concrete (rn, annedTerm tg_v (Value v))) h) ids, k, (rn, annedTerm tg_v (Value v))))

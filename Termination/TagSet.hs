@@ -11,32 +11,33 @@ import Utilities
 
 import qualified Data.IntSet as IS
 import qualified Data.Map as M
+import qualified Data.Set as S
 
 
 embedWithTagSets :: WQO State Generaliser
 embedWithTagSets = precomp stateTags $ postcomp (const generaliseNothing) equal
   where
     stateTags (Heap h _, k, (_, e)) = traceRender ("stateTags (TagSet)", M.map heapBindingTagSet h, map stackFrameTags' k, focusedTermTag' e) $
-                                      pureHeapTagSet h `IS.union` stackTagSet k `IS.union` tagTagSet (focusedTermTag' e)
+                                      pureHeapTagSet h `S.union` stackTagSet k `S.union` tagTagSet (focusedTermTag' e)
       where
-        heapBindingTagSet :: HeapBinding -> TagSet
-        heapBindingTagSet = maybe IS.empty (tagTagSet . pureHeapBindingTag') . heapBindingTag
+        heapBindingTagSet :: HeapBinding -> S.Set TagSet
+        heapBindingTagSet = maybe S.empty (tagTagSet . pureHeapBindingTag') . heapBindingTag
         
-        pureHeapTagSet :: PureHeap -> IS.IntSet
-        pureHeapTagSet = IS.unions . map heapBindingTagSet . M.elems
+        pureHeapTagSet :: PureHeap -> S.Set TagSet
+        pureHeapTagSet = S.unions . map heapBindingTagSet . M.elems
     
-        stackTagSet :: Stack -> IS.IntSet
-        stackTagSet = IS.fromList . concatMap stackFrameTags'
+        stackTagSet :: Stack -> S.Set TagSet
+        stackTagSet = S.fromList . concatMap stackFrameTags'
     
-        tagTagSet :: Tag -> IS.IntSet
-        tagTagSet = IS.singleton
+        tagTagSet :: TagSet -> S.Set TagSet
+        tagTagSet = S.singleton
 
 
-pureHeapBindingTag' :: Tag -> Tag
-pureHeapBindingTag' = injectTag 5
+pureHeapBindingTag' :: TagSet -> TagSet
+pureHeapBindingTag' = IS.map (injectTag 5)
 
-stackFrameTags' :: StackFrame -> [Tag]
-stackFrameTags' = map (injectTag 3) . stackFrameTags
+stackFrameTags' :: StackFrame -> [TagSet]
+stackFrameTags' = map (IS.map (injectTag 3)) . stackFrameTags
 
-focusedTermTag' :: AnnedTerm -> Tag
-focusedTermTag' = injectTag 2 . annedTag
+focusedTermTag' :: AnnedTerm -> TagSet
+focusedTermTag' = IS.map (injectTag 2) . annedTag
