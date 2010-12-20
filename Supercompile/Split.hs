@@ -609,9 +609,9 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
     -- Heap full of cheap expressions and any phantom stuff from the input heap.
     -- Used within the main loop in the process of computing h_inlineable -- see comments there for the full meaning of this stuff.
     extract_cheap_hb (Concrete (rn, e))
-      | Just v <- termValue e =                              Just (Unfolding (rn, v))
+      | Just v <- termValue e = Just (mkUnfolding (rn, v))
       | otherwise             = guard (isCheap (annee e)) >> Just (Concrete (rn, e))
-    extract_cheap_hb hb                       = Just hb -- Inline existing unfoldings/phantom stuff verbatim: there is no work duplication issue
+    extract_cheap_hb hb       = Just hb -- Inline existing unfoldings/phantom stuff verbatim: there is no work duplication issue
     h_cheap_and_phantom = M.mapMaybe extract_cheap_hb h
 
 
@@ -717,9 +717,9 @@ transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
                 PhantomLive  -> (deeds, M.insert x' hb h_inlineable, Phantom in_e) -- We want to inline only a *phantom* version if the binding is demanded by phantoms only, or madness ensues
               Unfolding (rn, v) -> case why_live of
                 ConcreteLive -> (deeds, h_inlineable, hb) -- We do not have to claim deeds for Unfoldings presently
-                PhantomLive  -> (deeds, M.insert x' hb h_inlineable, Phantom (rn, annedTerm (annedTag v) (Value (annee v)))) -- We want to inline only a *phantom* version if the binding is demanded by phantoms only, or madness ensues
+                PhantomLive  -> (deeds, M.insert x' hb h_inlineable, Phantom (rn, annedValueToAnnedTerm v)) -- We want to inline only a *phantom* version if the binding is demanded by phantoms only, or madness ensues
               _              -> (deeds, h_inlineable, hb)
-          , (x' `M.notMember` h && lOCAL_TIEBACKS) || (case inline_hb of Concrete _ -> True; _ -> False) -- The Hack: only inline stuff from h *concretely*
+          , (x' `M.notMember` h && lOCAL_TIEBACKS) || (case inline_hb of Concrete _ -> True; Unfolding _ -> True; _ -> False) -- The Hack: only inline stuff from h *concretely*
           = (deeds, h_inlineable, M.insert x' inline_hb h_output, live `plusLiveness` heapBindingLiveness inline_hb)
           | otherwise
           = (deeds, M.insert x' hb h_inlineable, h_output, live)
@@ -807,7 +807,7 @@ splitStackFrame ids kf scruts bracketed_hole
             -- ===>
             --  case x of C -> let unk = C; z = C in ...
             alt_in_es = alt_rns `zip` alt_es
-            alt_hs = zipWith3 (\alt_rn alt_con alt_tg -> M.fromList $ do { Just scrut_v <- [altConToValue alt_con]; scrut <- scruts; return (scrut, Unfolding (alt_rn, annedValue alt_tg scrut_v)) }) alt_rns alt_cons (map annedTag alt_es) -- NB: don't need to grab deeds for these just yet, due to the funny contract for transitiveInline
+            alt_hs = zipWith3 (\alt_rn alt_con alt_tg -> M.fromList $ do { Just scrut_v <- [altConToValue alt_con]; scrut <- scruts; return (scrut, mkUnfolding (alt_rn, annedValue alt_tg scrut_v)) }) alt_rns alt_cons (map annedTag alt_es) -- NB: don't need to grab deeds for these just yet, due to the funny contract for transitiveInline
             alt_bvss = map (\alt_con' -> fst $ altConOpenFreeVars alt_con' (S.empty, S.empty)) alt_cons'
             bracketed_alts = zipWith (\alt_h alt_in_e -> oneBracketed (Once ctxt_id, \ids -> (Heap alt_h ids, [], alt_in_e))) alt_hs alt_in_es
     PrimApply pop in_vs in_es -> zipBracketeds (primOp pop) S.unions (repeat id) (\_ -> Nothing) (bracketed_vs ++ bracketed_hole : bracketed_es)
@@ -855,3 +855,11 @@ splitQA :: IdSupply -> In QA -> Bracketed (Entered, IdSupply -> State)
 splitQA _   (rn, Question x) = noneBracketed (var x') (S.singleton x')
   where x' = rename rn x
 splitQA ids (rn, Answer v)   = splitValue ids (rn, v)
+
+
+annedValueToAnnedTerm :: Anned AnnedValue -> AnnedTerm
+annedValueToAnnedTerm v = annedTerm (annedTag v) (Value (annee v))
+
+mkUnfolding :: In (Anned AnnedValue) -> HeapBinding
+mkUnfolding | dUPLICATE_VALUES = Concrete . second annedValueToAnnedTerm
+            | otherwise        = Unfolding
