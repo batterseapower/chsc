@@ -67,8 +67,9 @@ step (deeds, _state@(h, k, (rn, e))) =
     releaseAltDeeds alts deeds = foldl' (\deeds (_, in_e) -> releaseDeedDeep deeds (annedTag in_e)) deeds alts
 
     primop :: Deeds -> Heap -> Stack -> TagSet -> PrimOp -> [In (Anned AnnedValue)] -> In AnnedValue -> [In AnnedTerm] -> (Deeds, State)
-    primop deeds h k tg_v2 pop [(_, Comp (Tagged tg_v1 (FVed _ (Literal (Int l1)))))] (_, Literal (Int l2)) [] = (releaseDeedDeep deeds (tg_v1 `IS.intersection` tg_v2), (h, k, (emptyRenaming, annedTerm tg_v' (Value (f pop l1 l2)))))
-      where tg_v' = tg_v1 `IS.union` tg_v2 -- TODO: release the deeds associated with one of the two components, not just their overlap..
+    primop deeds h k tg_v2 pop [(_, Comp (Tagged tg_v1 (FVed _ (Literal (Int l1)))))] (_, Literal (Int l2)) [] = (deeds', (h, k, (emptyRenaming, annedTerm tg_v' (Value (f pop l1 l2)))))
+      where (tg_v', deeds') | sINGLETON_TAGS = (tg_v1,                  releaseDeedDeep deeds tg_v2)
+                            | otherwise      = (tg_v1 `IS.union` tg_v2, releaseDeedDeep deeds (tg_v1 `IS.intersection` tg_v2)) -- TODO: release the deeds associated with one of the two components, not just their overlap..
             f pop = case pop of Add -> retInt (+); Subtract -> retInt (-);
                                 Multiply -> retInt (*); Divide -> retInt div; Modulo -> retInt mod;
                                 Equal -> retBool (==); LessThan -> retBool (<); LessThanEqual -> retBool (<=)
