@@ -42,5 +42,10 @@ LOCAL_H_OPTS=${VANILLA_OPTS/--no-local-tiebacks/}
 ./test-all ${LOCAL_H_OPTS/--no-deeds/--deeds-policy=fcfs} | tee results-local-tiebacks+deeds-fcfs.tex
 ./test-all ${LOCAL_H_OPTS/--no-deeds/--deeds-policy=proportional} | tee results-local-tiebacks+deeds-proportional.tex
 
+for bloat in 1 2 3 4 5 6 7 8 9 10; do
+  ./test-all ${LOCAL_H_OPTS/--no-deeds/--deeds-policy=fcfs --bloat-factor=$bloat} | tee results-local-tiebacks+deeds-fcfs+bloat-$bloat.tex
+  ./test-all ${LOCAL_H_OPTS/--no-deeds/--deeds-policy=proportional --bloat-factor=$bloat} | tee results-local-tiebacks+deeds-proportional+bloat-$bloat.tex
+done
+
 # ./test-all raw --no-deeds | tee nresults-deeds.tex
 # ./test-all raw --deeds-policy=proportional | tee nresults-proportional-deeds.tex
