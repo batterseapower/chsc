@@ -89,9 +89,14 @@ instance NFData Heap where
 instance Pretty HeapBinding where
     pPrintPrec _     _    Environmental    = angles empty
     pPrintPrec level _    (Updated x' _)   = angles (text "update" <+> pPrintPrec level noPrec x')
-    pPrintPrec level _    (Phantom in_e)   = angles (pPrintPrec level noPrec in_e)
-    pPrintPrec level _    (Unfolding in_v) = angles (angles (pPrintPrec level noPrec in_v))
+    pPrintPrec level _    (Phantom in_e)   = phantomDoc (pPrintPrec level noPrec in_e)
+    pPrintPrec level _    (Unfolding in_v) = unfoldingDoc (pPrintPrec level noPrec in_v)
     pPrintPrec level prec (Concrete in_e)  = pPrintPrec level prec in_e
+
+phantomDoc, unfoldingDoc :: Doc -> Doc
+phantomDoc = angles
+unfoldingDoc = angles . angles
+
 
 instance Pretty Heap where
     pPrintPrec level prec (Heap h _) = pPrintPrec level prec h
