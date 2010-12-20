@@ -187,7 +187,7 @@ type TagMap = IM.IntMap
 injectTag :: Int -> Tag -> Tag
 injectTag cls tg = cls * tg
 
-data Tagged a = Tagged { tag :: !Tag, tagee :: !a }
+data Tagged a = Tagged { tag :: !TagSet, tagee :: !a }
               deriving (Functor, Foldable.Foldable, Traversable.Traversable)
 
 instance Copointed Tagged where

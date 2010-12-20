@@ -25,7 +25,7 @@ annee = fvee . tagee . unComp
 annedFreeVars :: Anned a -> FreeVars
 annedFreeVars = freeVars . tagee . unComp
 
-annedTag :: Anned a -> Tag
+annedTag :: Anned a -> TagSet
 annedTag = tag . unComp
 
 
@@ -49,13 +49,13 @@ detagAnnedValue' = taggedFVedValue'ToFVedValue'
 detagAnnedAlts = taggedFVedAltsToFVedAlts
 
 
-annedVar :: Tag -> Var -> Anned Var
+annedVar :: TagSet -> Var -> Anned Var
 annedVar   tg x = Comp (Tagged tg (FVed (annedVarFreeVars' x)  x))
 
-annedTerm :: Tag -> TermF Anned -> AnnedTerm
+annedTerm :: TagSet -> TermF Anned -> AnnedTerm
 annedTerm  tg e = Comp (Tagged tg (FVed (annedTermFreeVars' e)  e))
 
-annedValue :: Tag -> ValueF Anned -> Anned AnnedValue
+annedValue :: TagSet -> ValueF Anned -> Anned AnnedValue
 annedValue tg v = Comp (Tagged tg (FVed (annedValueFreeVars' v) v))
 
 
@@ -67,7 +67,7 @@ type State = (Heap, Stack, In AnnedTerm)
 
 -- | We do not abstract the h functions over static variables. This helps typechecking and gives GHC a chance to inline the definitions.
 data HeapBinding = Environmental           -- ^ Corresponding variable is static and free in the original input, or the name of a h-function. No need to generalise either of these (remember that h-functions don't appear in the input).
-                 | Updated Tag FreeVars    -- ^ Variable is bound by a residualised update frame. TODO: this is smelly and should really be Phantom.
+                 | Updated TagSet FreeVars -- ^ Variable is bound by a residualised update frame. TODO: this is smelly and should really be Phantom.
                  | Phantom (In AnnedTerm)  -- ^ Corresponding variable is static static and generated from residualising a term in the splitter. Can use the term information to generalise these.
                  | Concrete (In AnnedTerm) -- ^ A genuine heap binding that we are actually allowed to look at.
                  deriving (Show)
@@ -125,13 +125,13 @@ heapBindingTerm (Updated _ _)   = Nothing
 heapBindingTerm (Phantom in_e)  = Just in_e
 heapBindingTerm (Concrete in_e) = Just in_e
 
-heapBindingTag :: HeapBinding -> Maybe Tag
+heapBindingTag :: HeapBinding -> Maybe TagSet
 heapBindingTag Environmental     = Nothing
 heapBindingTag (Updated tg _)    = Just tg
 heapBindingTag (Phantom (_, e))  = Just (annedTag e)
 heapBindingTag (Concrete (_, e)) = Just (annedTag e)
 
-stackFrameTags :: StackFrame -> [Tag]
+stackFrameTags :: StackFrame -> [TagSet]
 stackFrameTags kf = case kf of
     Apply x'                -> [annedTag x']
     Scrutinise in_alts      -> map (annedTag . snd) (snd in_alts)

@@ -6,12 +6,17 @@ import Utilities
 import Core.FreeVars
 import Core.Syntax
 
+import qualified Data.IntSet as IS
+
+
+tagged :: Tag -> a -> Tagged a
+tagged i x = Tagged (IS.singleton i) x
 
 tagTerm :: Term -> TaggedTerm
-tagTerm = mkTag (\i f (I e) -> Tagged (hashedId i) (f e))
+tagTerm = mkTag (\i f (I e) -> tagged (hashedId i) (f e))
 
 tagFVedTerm :: FVedTerm -> TaggedFVedTerm
-tagFVedTerm = mkTag (\i f (FVed fvs e) -> Comp (Tagged (hashedId i) (FVed fvs (f e))))
+tagFVedTerm = mkTag (\i f (FVed fvs e) -> Comp (tagged (hashedId i) (FVed fvs (f e))))
 
 
 {-# INLINE mkTag #-}
