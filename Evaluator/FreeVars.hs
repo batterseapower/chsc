@@ -66,13 +66,14 @@ inFreeVars :: (a -> FreeVars) -> In a -> FreeVars
 inFreeVars thing_fvs (rn, thing) = renameFreeVars rn (thing_fvs thing)
 
 heapBindingLiveness :: HeapBinding -> Liveness
-heapBindingLiveness Environmental   = emptyLiveness
-heapBindingLiveness (Updated _ fvs) = mkPhantomLiveness fvs
-heapBindingLiveness (Phantom in_e)  = mkPhantomLiveness  (inFreeVars annedTermFreeVars in_e)
-heapBindingLiveness (Concrete in_e) = mkConcreteLiveness (inFreeVars annedTermFreeVars in_e)
+heapBindingLiveness Environmental    = emptyLiveness
+heapBindingLiveness (Updated _ fvs)  = mkPhantomLiveness fvs
+heapBindingLiveness (Phantom in_e)   = mkPhantomLiveness  (inFreeVars annedTermFreeVars in_e)
+heapBindingLiveness (Unfolding in_v) = mkConcreteLiveness (inFreeVars annedValueFreeVars in_v)
+heapBindingLiveness (Concrete in_e)  = mkConcreteLiveness (inFreeVars annedTermFreeVars in_e)
 
 pureHeapBoundVars :: PureHeap -> BoundVars
-pureHeapBoundVars = M.keysSet . M.filter (not . heapBindingNonConcrete)
+pureHeapBoundVars = M.keysSet . M.filter heapBindingBindsVariable
 
 stackBoundVars :: Stack -> BoundVars
 stackBoundVars = S.unions . map stackFrameBoundVars

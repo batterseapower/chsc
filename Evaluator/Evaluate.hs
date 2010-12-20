@@ -58,11 +58,10 @@ step (deeds, _state@(h, k, (rn, e))) =
     lookupValue :: Heap -> Out Var -> Maybe (In (Anned AnnedValue))
     lookupValue (Heap h _) x' = do
         hb <- M.lookup x' h
-        -- As a special concession, the evaluator can look into phantom bindings as long as they are already values.
-        -- We also take care to residualise any non-linear values as phantoms in the splitter. This stops us from duplicating values.
-        (rn, anned_e) <- heapBindingTerm hb
-        anned_v <- traverse (\e -> do { Value v <- return e; return v }) anned_e
-        return (rn, anned_v)
+        case hb of
+          Unfolding (rn, anned_v) -> return (rn, anned_v)
+          Concrete  (rn, anned_e) -> fmap ((,) rn) $ traverse (\e -> do { Value v <- return e; return v }) anned_e
+          _                       -> Nothing
 
     force :: Deeds -> Heap -> Stack -> Tag -> Out Var -> Maybe (Deeds, State)
     force deeds (Heap h ids) k tg x'

@@ -369,12 +369,13 @@ optimiseSplit :: MonadStatics m
               -> m (Deeds, Out FVedTerm)
 optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
     -- 0) The "process tree" splits at this point. We can choose to distribute the deeds between the children in a number of ways
-    let stateSize (h, k, in_e) = heapSize h + stackSize k + termSize (snd in_e)
+    let stateSize (h, k, (_, e)) = heapSize h + stackSize k + termSize e
           where heapBindingSize hb = case hb of
-                    Environmental   -> 0
-                    Updated _ _     -> 0
-                    Phantom _       -> 0
-                    Concrete (_, e) -> termSize e
+                    Environmental    -> 0
+                    Updated _ _      -> 0
+                    Phantom _        -> 0
+                    Unfolding (_, v) -> valueSize v
+                    Concrete (_, e)  -> termSize e
                 heapSize (Heap h _) = sum (map heapBindingSize (M.elems h))
                 stackSize = sum . map stackFrameSize
                 stackFrameSize kf = 1 + case kf of
@@ -608,7 +609,7 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
     -- Heap full of cheap expressions and any phantom stuff from the input heap.
     -- Used within the main loop in the process of computing h_inlineable -- see comments there for the full meaning of this stuff.
     extract_cheap_hb (Concrete (rn, e)) = guard (isCheap (annee e)) >> Just (Concrete (rn, e))
-    extract_cheap_hb hb                 = Just hb -- Inline phantom stuff verbatim: there is no work duplication issue
+    extract_cheap_hb hb                 = Just hb -- Inline unfoldings/phantom stuff verbatim: there is no work duplication issue
     h_cheap_and_phantom = M.mapMaybe extract_cheap_hb h
 
 
@@ -713,7 +714,7 @@ transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
                                   Nothing    -> (deeds, M.insert x' hb h_inlineable, Phantom in_e)
                 PhantomLive  -> (deeds, M.insert x' hb h_inlineable, Phantom in_e) -- We want to inline only a *phantom* version if the binding is demanded by phantoms only, or madness ensues
               _              -> (deeds, h_inlineable, hb)
-          , (x' `M.notMember` h && lOCAL_TIEBACKS) || not (heapBindingNonConcrete inline_hb) -- The Hack: only inline stuff from h *concretely*
+          , (x' `M.notMember` h && lOCAL_TIEBACKS) || (case inline_hb of Concrete _ -> True; _ -> False) -- The Hack: only inline stuff from h *concretely*
           = (deeds, h_inlineable, M.insert x' inline_hb h_output, live `plusLiveness` heapBindingLiveness inline_hb)
           | otherwise
           = (deeds, M.insert x' hb h_inlineable, h_output, live)

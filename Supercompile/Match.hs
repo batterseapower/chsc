@@ -31,7 +31,7 @@ matchInTerm ids = matchAnned (matchInTerm' ids)
 
 matchInTerm' :: IdSupply -> In (TermF Anned) -> In (TermF Anned) -> Maybe [(Var, Var)]
 matchInTerm' _   (rn_l, Var x_l)           (rn_r, Var x_r)           = Just [matchInVar (rn_l, x_l) (rn_r, x_r)]
-matchInTerm' ids (rn_l, Value v_l)         (rn_r, Value v_r)         = matchInValue ids (rn_l, v_l) (rn_r, v_r)
+matchInTerm' ids (rn_l, Value v_l)         (rn_r, Value v_r)         = matchInValue' ids (rn_l, v_l) (rn_r, v_r)
 matchInTerm' ids (rn_l, App e_l x_l)       (rn_r, App e_r x_r)       = matchInTerm ids (rn_l, e_l) (rn_r, e_r) >>= \eqs -> return (matchAnned matchInVar (rn_l, x_l) (rn_r, x_r) : eqs)
 matchInTerm' ids (rn_l, PrimOp pop_l es_l) (rn_r, PrimOp pop_r es_r) = guard (pop_l == pop_r) >> matchInList (matchInTerm ids) (rn_l, es_l) (rn_r, es_r)
 matchInTerm' ids (rn_l, Case e_l alts_l)   (rn_r, Case e_r alts_r)   = liftM2 (++) (matchInTerm ids (rn_l, e_l) (rn_r, e_r)) (matchInAlts ids (rn_l, alts_l) (rn_r, alts_r))
@@ -40,14 +40,17 @@ matchInTerm' ids (rn_l, LetRec xes_l e_l)  (rn_r, LetRec xes_r e_r)  = matchInTe
         (ids'', rn_r', xes_r') = renameBounds (\_ x' -> x') ids' rn_r xes_r
 matchInTerm' _ _ _ = Nothing
 
-matchInValue :: IdSupply -> In AnnedValue -> In AnnedValue -> Maybe [(Var, Var)]
-matchInValue _   (rn_l, Indirect x_l)   (rn_r, Indirect x_r)   = Just [matchInVar (rn_l, x_l) (rn_r, x_r)]
-matchInValue ids (rn_l, Lambda x_l e_l) (rn_r, Lambda x_r e_r) = matchInTerm ids'' (rn_l', e_l) (rn_r', e_r) >>= \eqs -> matchRigidBinders [(x_l', x_r')] eqs
+matchInValue :: IdSupply -> In (Anned AnnedValue) -> In (Anned AnnedValue) -> Maybe [(Var, Var)]
+matchInValue ids = matchAnned (matchInValue' ids)
+
+matchInValue' :: IdSupply -> In AnnedValue -> In AnnedValue -> Maybe [(Var, Var)]
+matchInValue' _   (rn_l, Indirect x_l)   (rn_r, Indirect x_r)   = Just [matchInVar (rn_l, x_l) (rn_r, x_r)]
+matchInValue' ids (rn_l, Lambda x_l e_l) (rn_r, Lambda x_r e_r) = matchInTerm ids'' (rn_l', e_l) (rn_r', e_r) >>= \eqs -> matchRigidBinders [(x_l', x_r')] eqs
   where (ids',  rn_l', x_l') = renameBinder ids  rn_l x_l
         (ids'', rn_r', x_r') = renameBinder ids' rn_r x_r
-matchInValue _   (rn_l, Data dc_l xs_l) (rn_r, Data dc_r xs_r) = guard (dc_l == dc_r) >> matchInVars (rn_l, xs_l) (rn_r, xs_r)
-matchInValue _   (_,    Literal l_l)    (_,    Literal l_r)    = guard (l_l == l_r) >> return []
-matchInValue _ _ _ = Nothing
+matchInValue' _   (rn_l, Data dc_l xs_l) (rn_r, Data dc_r xs_r) = guard (dc_l == dc_r) >> matchInVars (rn_l, xs_l) (rn_r, xs_r)
+matchInValue' _   (_,    Literal l_l)    (_,    Literal l_r)    = guard (l_l == l_r) >> return []
+matchInValue' _ _ _ = Nothing
 
 matchInAlts :: IdSupply -> In [AnnedAlt] -> In [AnnedAlt] -> Maybe [(Var, Var)]
 matchInAlts ids (rn_l, alts_l) (rn_r, alts_r) = zipWithEqual (matchInAlt ids) (map (rn_l,) alts_l) (map (rn_r,) alts_r) >>= (fmap concat . sequence)
@@ -96,7 +99,7 @@ matchEC k_l k_r = fmap combine $ zipWithEqualM matchECFrame k_l k_r
 matchECFrame :: StackFrame -> StackFrame -> Maybe ([(Var, Var)], [(Var, Var)])
 matchECFrame (Apply x_l')                      (Apply x_r')                      = Just ([], [matchAnnedVar x_l' x_r'])
 matchECFrame (Scrutinise in_alts_l)            (Scrutinise in_alts_r)            = fmap ([],) $ matchInAlts matchIdSupply in_alts_l in_alts_r
-matchECFrame (PrimApply pop_l in_vs_l in_es_l) (PrimApply pop_r in_vs_r in_es_r) = fmap ([],) $ guard (pop_l == pop_r) >> liftM2 (++) (matchList (matchAnned (matchInValue matchIdSupply)) in_vs_l in_vs_r) (matchList (matchInTerm matchIdSupply) in_es_l in_es_r)
+matchECFrame (PrimApply pop_l in_vs_l in_es_l) (PrimApply pop_r in_vs_r in_es_r) = fmap ([],) $ guard (pop_l == pop_r) >> liftM2 (++) (matchList (matchInValue matchIdSupply) in_vs_l in_vs_r) (matchList (matchInTerm matchIdSupply) in_es_l in_es_r)
 matchECFrame (Update x_l')                     (Update x_r')                     = Just ([matchAnnedVar x_l' x_r'], [])
 matchECFrame _ _ = Nothing
 
@@ -185,11 +188,10 @@ matchPureHeap ids bound_eqs free_eqs init_h_l init_h_r = go bound_eqs free_eqs i
        -- The left side is free, so assume that we can instantiate x_l to x_r (x_l may be bound above, x_r may be bound here or above):
       | otherwise = go ((x_l, x_r) : known) free_eqs h_l h_r
 
+     -- We can match other possibilities "semantically", by peeking into ther definitions
+    matchHeapBinding x_l (Concrete in_e_l)  x_r (Concrete in_e_r)  = fmap (\extra_free_eqs -> (deleteExpensive x_l in_e_l, deleteExpensive x_r in_e_r, extra_free_eqs)) $ matchInTerm ids in_e_l in_e_r
+    matchHeapBinding _   (Unfolding in_v_l) _   (Unfolding in_v_r) = fmap (\extra_free_eqs -> (id, id, extra_free_eqs)) $ matchInValue ids in_v_l in_v_r
      -- Phantomish heap bindings (input FVs / things bound by update frames / phantoms) must match *exactly* since we know nothing about them.
      -- Even for cases where we do know something (i.e. Phantom bindings) we can't use that information since by definition we won't be able
      -- to rename any components of those static heap bindings when we tie back...
-    matchHeapBinding x_l (heapBindingNonConcrete -> True) x_r (heapBindingNonConcrete -> True) = guard (x_l == x_r) >> return (id, id, [])
-     -- We can match other possibilities "semantically", by peeking into ther definitions
-    matchHeapBinding x_l (Concrete in_e_l)                x_r (Concrete in_e_r)                = fmap (\extra_free_eqs -> (deleteExpensive x_l in_e_l, deleteExpensive x_r in_e_r, extra_free_eqs)) $ matchInTerm ids in_e_l in_e_r
-     -- Environment variables match *only* against themselves, not against anything other heap binding at all
-    matchHeapBinding _ _ _ _ = Nothing
+    matchHeapBinding x_l _ x_r _ = guard (x_l == x_r) >> return (id, id, [])
