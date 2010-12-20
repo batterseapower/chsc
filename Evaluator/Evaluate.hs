@@ -16,7 +16,6 @@ import Utilities
 
 import qualified Data.IntSet as IS
 import qualified Data.Map as M
-import Data.Traversable (traverse)
 
 
 type Losers = IS.IntSet
@@ -60,7 +59,7 @@ step (deeds, _state@(h, k, (rn, e))) =
         hb <- M.lookup x' h
         case hb of
           Unfolding (rn, anned_v) -> return (rn, anned_v)
-          Concrete  (rn, anned_e) -> fmap ((,) rn) $ traverse (\e -> do { Value v <- return e; return v }) anned_e
+          Concrete  (rn, anned_e) -> fmap ((,) rn) $ termValue anned_e
           _                       -> Nothing
 
     force :: Deeds -> Heap -> Stack -> Tag -> Out Var -> Maybe (Deeds, State)

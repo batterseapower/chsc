@@ -9,6 +9,7 @@ import StaticFlags
 
 import qualified Data.Foldable as Foldable
 import Data.Monoid (Sum(..))
+import Data.Traversable (Traversable(traverse))
 
 
 type Var = Name
@@ -177,6 +178,9 @@ isValue _         = False
 
 termIsValue :: Copointed ann => ann (TermF ann) -> Bool
 termIsValue = isValue . extract
+
+termValue :: Traversable ann => ann (TermF ann) -> Maybe (ann (ValueF ann))
+termValue = traverse (\e -> do { Value v <- return e; return v })
 
 isCheap :: Copointed ann => TermF ann -> Bool
 isCheap _ | cALL_BY_NAME = True -- A cunning hack. I think this is all that should be required...
