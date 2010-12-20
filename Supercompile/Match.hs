@@ -5,12 +5,14 @@ module Supercompile.Match (match) where
 import Core.Renaming
 import Core.Syntax
 
+import Evaluator.FreeVars
 import Evaluator.Syntax
 
 import Renaming
 import Utilities
 
 import qualified Data.Map as M
+import qualified Data.Set as S
 
 
 match :: State -- ^ Tieback semantics
@@ -144,10 +146,10 @@ matchPureHeapExact ids bound_eqs free_eqs init_h_l init_h_r = do
     --     on *free variables* of the two heaps, not any bound members).
     --    NB: Because some variables may be bound by update frames in the stack, we need to filter out those too...
     eqs <- --traceRender ("matchPureHeapExact", eqs, bound_eqs, init_h_l, init_h_r) $
-           return $ filter (\(x_l, _x_r) -> x_l `M.notMember` init_h_l && all ((/= x_l) . fst) bound_eqs) eqs
+           return $ filter (\(x_l, _x_r) -> x_l `S.notMember` pureHeapBoundVars init_h_l && all ((/= x_l) . fst) bound_eqs) eqs
     -- 3) Now the problem is that there might be some bindings in the Right heap that are referred
     --    to by eqs. We want an exact match, so we can't allow that.
-    guard $ all (\(_x_l, x_r) -> x_r `M.notMember` init_h_r && all ((/= x_r) . snd) bound_eqs) eqs
+    guard $ all (\(_x_l, x_r) -> x_r `S.notMember` pureHeapBoundVars init_h_r && all ((/= x_r) . snd) bound_eqs) eqs
     -- 4) We now know that all of the variables bound by both init_h_l and init_h_r are not mentioned
     --    in the outgoing equalities, which is what we want for an exact match.
     --     NB: We use this function when matching letrecs, so don't necessarily want to build a renaming immediately
@@ -194,4 +196,8 @@ matchPureHeap ids bound_eqs free_eqs init_h_l init_h_r = go bound_eqs free_eqs i
      -- Phantomish heap bindings (input FVs / things bound by update frames / phantoms) must match *exactly* since we know nothing about them.
      -- Even for cases where we do know something (i.e. Phantom bindings) we can't use that information since by definition we won't be able
      -- to rename any components of those static heap bindings when we tie back...
-    matchHeapBinding x_l _ x_r _ = guard (x_l == x_r) >> return (id, id, [])
+    matchHeapBinding x_l hb_l x_r hb_r = guard (heapBindingPhantom hb_l && heapBindingPhantom hb_r && x_l == x_r) >> return (id, id, [])
+    
+    heapBindingPhantom (Concrete _)  = False
+    heapBindingPhantom (Unfolding _) = False
+    heapBindingPhantom _             = True
