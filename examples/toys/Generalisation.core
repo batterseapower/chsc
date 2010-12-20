@@ -1,11 +1,8 @@
-silly f control acc = case control of
-    []           -> f True:acc -- NB: the extra call to (f True) is to test if we generalise away the cons as well as the (f True:) part. We shouldn't!
-    (_:control') -> silly f control' (f True:acc)
+foldl' c n xs = case xs of [] -> n; (x:xs) -> let n' = c n x in case n' of _ -> foldl' c n' xs
+length xs = foldl' (\len _ -> S len) Z xs
 
-root = silly Just
+root = length
 
--- NB: lists of () are isomorphic to Peano numbers
 tests = [
-    (root [()]     [], [Just True, Just True]),
-    (root [(), ()] [], [Just True, Just True, Just True])
+    (root "Hello", S (S (S (S (S Z)))))
   ]

@@ -1,10 +1,8 @@
-silly f acc = case acc' of
-    0 -> acc' + 1
-    _ -> silly f acc'
-  where acc' = f acc
+foldl' c n xs = case xs of [] -> n; (x:xs) -> let n' = c n x in case n' of _ -> foldl' c n' xs
+length xs = foldl' (\len _ -> len + 1) 0 xs
 
-root = silly (\x -> x - 1)
+root = length
 
 tests = [
-    (root 10, 1)
+    (root "Hello World", 11)
   ]
