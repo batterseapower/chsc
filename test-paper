@@ -8,7 +8,7 @@ VANILLA_OPTS="raw --no-primops --no-deeds --tag-collection=bags --no-generalisat
 
 ./test-all $VANILLA_OPTS > results-vanilla.tex
 
-# ./test-all > nresults-vanilla.tex
+# ./test-all raw > nresults-vanilla.tex
 
 ./test-all ${VANILLA_OPTS/--no-generalisation/} | tee results-generalisation.tex
 
@@ -18,22 +18,22 @@ VANILLA_OPTS="raw --no-primops --no-deeds --tag-collection=bags --no-generalisat
 ./test-all ${VANILLA_OPTS/--no-sc-rollback/} | tee results-sc-rollback.tex
 ./test-all ${VANILLA_OPTS/--no-reduce-rollback --no-sc-rollback/} | tee results-rollback.tex
 
-# ./test-all --no-reduce-rollback | tee nresults-reduce-rollback.tex
-# ./test-all --no-sc-rollback | tee nresults-sc-rollback.tex
-# ./test-all --no-reduce-rollback --no-sc-rollback | tee nresults-rollback.tex
+# ./test-all raw --no-reduce-rollback | tee nresults-reduce-rollback.tex
+# ./test-all raw --no-sc-rollback | tee nresults-sc-rollback.tex
+# ./test-all raw --no-reduce-rollback --no-sc-rollback | tee nresults-rollback.tex
 
 ./test-all ${VANILLA_OPTS/=bags/=sets} | tee results-tagsets.tex
 ./test-all ${VANILLA_OPTS/=bags/=graphs} | tee results-taggraphs.tex
 
-# ./test-all --tag-collection=sets | tee nresults-tagsets.tex
-# ./test-all --tag-collection=bags | tee nresults-tagbags.tex
-# ./test-all --tag-collection=graphs | tee nresults-taggraphs.tex
+# ./test-all raw --tag-collection=sets | tee nresults-tagsets.tex
+# ./test-all raw --tag-collection=bags | tee nresults-tagbags.tex
+# ./test-all raw --tag-collection=graphs | tee nresults-taggraphs.tex
 
 ./test-all ${VANILLA_OPTS/--no-local-tiebacks/} | tee results-local-tiebacks.tex
-#./test-all --no-local-tiebacks | tee nresults-local-tiebacks.tex
+#./test-all raw --no-local-tiebacks | tee nresults-local-tiebacks.tex
 
 ./test-all ${VANILLA_OPTS/--cheapification --no-speculation/} | tee results-speculation.tex
-#./test-all --cheapification --no-speculation | tee nresults-speculation.tex
+#./test-all raw --cheapification --no-speculation | tee nresults-speculation.tex
 
 # # You just can't use deeds without local tiebacks because the resulting programs are almost never typeable in Hindley Milner:
 # ./test-all ${VANILLA_OPTS/--no-deeds/--deeds-policy=fcfs} | tee results-deeds-fcfs.tex
@@ -42,5 +42,5 @@ LOCAL_H_OPTS=${VANILLA_OPTS/--no-local-tiebacks/}
 ./test-all ${LOCAL_H_OPTS/--no-deeds/--deeds-policy=fcfs} | tee results-local-tiebacks+deeds-fcfs.tex
 ./test-all ${LOCAL_H_OPTS/--no-deeds/--deeds-policy=proportional} | tee results-local-tiebacks+deeds-proportional.tex
 
-# ./test-all --no-deeds | tee nresults-deeds.tex
-# ./test-all --deeds-policy=proportional | tee nresults-proportional-deeds.tex
+# ./test-all raw --no-deeds | tee nresults-deeds.tex
+# ./test-all raw --deeds-policy=proportional | tee nresults-proportional-deeds.tex
