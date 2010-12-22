@@ -694,7 +694,7 @@ transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
         then (deeds', h_output') -- NB: it's important we use the NEW versions of h_output/deeds, because we might have inlined extra stuff even though live hasn't changed!
         else go (n + 1) deeds' h_inlineable' h_output' live' -- NB: the argument order to union is important because we want to overwrite an existing phantom binding (if any) with the concrete one
       where 
-        (deeds', h_inlineable', h_output', live') = M.foldWithKey consider_inlining (deeds, M.empty, h_output, live) h_inlineable
+        (deeds', h_inlineable', h_output', live') = M.foldrWithKey consider_inlining (deeds, M.empty, h_output, live) h_inlineable
         
         -- NB: we rely here on the fact that our caller will still be able to fill in bindings for stuff from h_inlineable
         -- even if we choose not to inline it into the State, and that such bindings will not be evaluated until they are

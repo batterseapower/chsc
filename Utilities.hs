@@ -1,5 +1,5 @@
 {-# LANGUAGE TupleSections, PatternGuards, ExistentialQuantification, DeriveFunctor, DeriveFoldable, DeriveTraversable,
-             TypeSynonymInstances, FlexibleInstances, IncoherentInstances, OverlappingInstances, TypeOperators #-}
+             TypeSynonymInstances, FlexibleInstances, IncoherentInstances, OverlappingInstances, TypeOperators, CPP #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Utilities (
     module IdSupply,
@@ -71,11 +71,17 @@ class Functor z => Zippable z where
     zipWith_ f as bs = fmap (uncurry f) (zip_ as bs)
 
 
+#if !MIN_VERSION_base(4, 2, 1)
+
+-- These instances are in base-4.3
+
 instance Monad (Either a) where
     return = Right
     
     Left l  >>= _    = Left l
     Right x >>= fxmy = fxmy x
+
+#endif
 
 
 class Show1 f where

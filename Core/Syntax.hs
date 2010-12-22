@@ -237,7 +237,7 @@ instance Symantics Identity where
 
 
 reify :: (forall ann. Symantics ann => ann (TermF ann)) -> Term
-reify = id
+reify x = x
 
 reflect :: Term -> (forall ann. Symantics ann => ann (TermF ann))
 reflect (I e) = case e of

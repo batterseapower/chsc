@@ -127,7 +127,7 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) emptyLosers
         -- TODO: I suspect we should accumulate Losers across the boundary of speculate as well
         -- TODO: there is a difference between losers due to termination-halting and losers because we didn't have neough
         -- information available to complete evaluation
-        (deeds'', Heap h'_winners' ids'', losers') = M.foldWithKey speculate_one (deeds', Heap h'_winners ids', losers) (h'_winners M.\\ h)
+        (deeds'', Heap h'_winners' ids'', losers') = M.foldrWithKey speculate_one (deeds', Heap h'_winners ids', losers) (h'_winners M.\\ h)
         speculate_one x' (Concrete in_e) (deeds, Heap h'_winners ids, losers)
           -- | not (isValue (annee (snd in_e))), traceRender ("speculate", depth, residualiseState (Heap (h {- `exclude` M.keysSet base_h -}) ids, k, in_e)) False = undefined
           | otherwise = case (go (depth + 1) hist losers) (deeds, (Heap (M.delete x' h'_winners) ids, [], in_e)) of

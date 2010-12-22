@@ -56,7 +56,7 @@ embedWithTagGraphs = precomp stateTags $ postcomp generaliserFromGrowing $ refin
         
         -- Find the *tags* referred to from the *names* referred to
         referrerEdges :: [Tag] -> FreeVars -> TagGraph
-        referrerEdges referrer_tgs fvs = M.foldWithKey go IM.empty referants
+        referrerEdges referrer_tgs fvs = M.foldrWithKey go IM.empty referants
           where go x referant_tgs edges
                   | x `S.notMember` fvs = edges
                   | otherwise           = foldr (\referrer_tg edges -> IM.singleton referrer_tg (referant_tgs, 0) `plusTagGraph` edges) edges referrer_tgs
