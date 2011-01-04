@@ -103,7 +103,11 @@ stateStaticBindersAndFreeVars (Heap h _, k, in_e) = (bvs_static', fvs' S.\\ bvs_
     ((bvs_static', bvs_nonstatic'), fvs') = pureHeapOpenFreeVars h (stackOpenFreeVars k (inFreeVars annedTermFreeVars in_e))
     
     pureHeapOpenFreeVars :: PureHeap -> (BoundVars, FreeVars) -> ((BoundVars, BoundVars), FreeVars)
-    pureHeapOpenFreeVars h (bvs, fvs) = M.foldrWithKey (\x' hb ((bvs_static, bvs_nonstatic), fvs) -> case hb of Concrete in_e -> ((bvs_static, S.insert x' bvs_nonstatic), fvs `S.union` inFreeVars annedTermFreeVars in_e); _ -> ((S.insert x' bvs_static, bvs_nonstatic), fvs)) ((S.empty, bvs), fvs) h
+    pureHeapOpenFreeVars h (bvs, fvs) = M.foldWithKey one ((S.empty, bvs), fvs) h
+      where
+        one x' (Concrete in_e) ((bvs_static, bvs_nonstatic), fvs) = ((bvs_static, S.insert x' bvs_nonstatic), fvs `S.union` inFreeVars annedTermFreeVars in_e)
+        one x' (Phantom  in_e) ((bvs_static, bvs_nonstatic), fvs) = ((S.insert x' bvs_static, bvs_nonstatic), fvs `S.union` inFreeVars annedTermFreeVars in_e) -- FVs of phantoms can become free after reduction
+        one x' _               ((bvs_static, bvs_nonstatic), fvs) = ((S.insert x' bvs_static, bvs_nonstatic), fvs)
     
     stackOpenFreeVars :: Stack -> FreeVars -> (BoundVars, FreeVars)
     stackOpenFreeVars k fvs = (S.unions *** (S.union fvs . S.unions)) . unzip . map stackFrameOpenFreeVars $ k
