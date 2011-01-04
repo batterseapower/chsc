@@ -491,7 +491,17 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
         need_not_resid_kf i kf
           | i `IS.member` gen_kfs
           = False
-          | Update (annee -> x') _ <- kf -- We infer the stack frames we're not residualising based on the *variables* we're not residualising
+          | Update (annee -> x') _ <- kf
+          -- We infer the stack frames we're not residualising based on the *variables* we're not residualising
+          -- Note that we do not insist that why_live is ConcreteLive. This means that we do transformations like this:
+          --
+          --   let <x = if unk then e1 else e2> in x + 1
+          -- ==>
+          --   if unk then D[let <x = e1> in x + 1]
+          --          else D[let <x = e2> in x + 2]
+          --
+          -- This *does* duplicates the work of dispatching on the unknown thing, but that's a pretty minor cost. I don't
+          -- think that doing this is particularly important though, so if it becomes a problem we can just change the below test.
           = x' `S.member` not_resid_xs
           | otherwise
           = True
