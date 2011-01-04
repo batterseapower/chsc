@@ -46,7 +46,7 @@ step (deeds, _state@(h, k, (rn, e))) =
       (in_e, why_live) <- heapBindingTerm hb
       deeds <- case why_live of
                  ConcreteLive -> Just deeds
-                 PhantomLive  -> claimDeed deeds (annedTag (snd in_e)) -- We may promote this phantom thing to concrete, so we need deeds for it
+                 PhantomLive  -> guard sPECULATION >> claimDeed deeds (annedTag (snd in_e)) -- We may promote this phantom thing to concrete, so we need deeds for it
       return (deeds, (Heap (M.delete x' h) ids, Update (annedVar tg x') why_live : k, in_e))
 
     unwind :: Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> Maybe (Deeds, State)
