@@ -32,7 +32,6 @@ import qualified Data.Foldable as Foldable
 import qualified Data.Map as M
 import Data.Ord
 import qualified Data.Set as S
-import qualified Data.IntSet as IS
 import Data.Tree
 
 
