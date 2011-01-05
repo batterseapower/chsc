@@ -672,11 +672,10 @@ transitiveInline :: PureHeap       -- ^ What to inline. We have not claimed deed
                  -> (Deeds, State)
 transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
     = -- (if not (S.null not_inlined_vs') then traceRender ("transitiveInline: generalise", not_inlined_vs') else id) $
-      -- traceRender ("transitiveInline", pureHeapBoundVars init_h_inlineable, state_fvs, pureHeapBoundVars h') $
+      -- traceRender ("transitiveInline", "had bindings for", pureHeapBoundVars init_h_inlineable, "FVs were", state_fvs, "so inlining", pureHeapBoundVars h') $
       (deeds', (Heap h' ids, k, in_e))
   where
-    state_fvs = stateFreeVars (Heap M.empty ids, k, in_e)
-    (deeds', h') = go 0 deeds (h `M.union` init_h_inlineable) M.empty (mkConcreteLiveness state_fvs)
+    (deeds', h') = go 0 deeds (h `M.union` init_h_inlineable) M.empty (stateLiveness (Heap M.empty ids, k, in_e))
       -- NB: we prefer bindings from h to those from init_h_inlineable if there is any conflict. This is motivated by
       -- the fact that bindings from case branches are usually more informative than e.g. a phantom binding for the scrutinee.
     
@@ -712,6 +711,7 @@ transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
                 PhantomLive  -> (deeds, M.insert x' hb h_inlineable, Phantom in_e) -- We want to inline only a *phantom* version if the binding is demanded by phantoms only, or madness ensues
               _              -> (deeds, h_inlineable, hb)
           , (x' `M.notMember` h && lOCAL_TIEBACKS) || not (heapBindingNonConcrete inline_hb) -- The Hack: only inline stuff from h *concretely*
+          -- , traceRender ("Extra liveness from", pPrint inline_hb, "is", heapBindingLiveness inline_hb) True
           = (deeds, h_inlineable, M.insert x' inline_hb h_output, live `plusLiveness` heapBindingLiveness inline_hb)
           | otherwise
           = (deeds, M.insert x' hb h_inlineable, h_output, live)
