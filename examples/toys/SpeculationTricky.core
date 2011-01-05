@@ -1,0 +1,8 @@
+root unk = let id = \x -> x
+               speculate_me = if unk then 1 else 2
+           in (if unk then speculate_me else -1, if unk then -2 else speculate_me) -- Only want to scrutinise unk once in the output
+
+tests = [
+    (root True,  (1, -2)),
+    (root False, (-1, 2))
+  ]
