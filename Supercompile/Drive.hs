@@ -87,8 +87,10 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ run
 -- TODO: have the garbage collector collapse indirections to indirections (but unlike GHC, not further!)
 -- TODO: have the garbage collector eliminate extra update frames
 gc :: (Deeds, State) -> (Deeds, State)
-gc (deeds, (Heap h ids, k, in_e)) = transitiveInline h (releasePureHeapDeeds deeds h, (Heap M.empty ids, k, in_e))
+gc (deeds, (Heap h ids, k, in_e)) = assertRender _violations (null _violations) $
+                                    (deeds', state')
   where
+    (deeds', state'@(Heap h' _, _, _)) = transitiveInline h (releasePureHeapDeeds deeds h, (Heap M.empty ids, k, in_e))
     -- We used to garbage-collect in the evaluator, when we executed the rule for update frames. This had two benefits:
     --  1) We don't have to actually update the heap or even claim a new deed
     --  2) We make the supercompiler less likely to terminate, because GCing so tends to reduce TagBag sizes
@@ -101,6 +103,12 @@ gc (deeds, (Heap h ids, k, in_e)) = transitiveInline h (releasePureHeapDeeds dee
     --  * It didn't seem to make any difference to the benchmark numbers anyway
     --
     -- So I nixed in favour of a bit of gc in this module. TODO: experiment with not GCing here either.
+
+    one_violation x' hb' viols = case M.lookup x' h of
+        Nothing -> (x', "Binding added by garbage collection") : viols
+        Just hb | heapBindingNonConcrete hb /= heapBindingNonConcrete hb' -> (x', "Concreteness changed by garbage collection") : viols
+        _  -> viols
+    _violations = M.foldrWithKey one_violation [] h'
 
 reduce :: (Deeds, State) -> (Deeds, State)
 reduce (deeds, orig_state) = go (mkHistory (extra wQO)) (deeds, orig_state)
