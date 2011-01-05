@@ -72,17 +72,18 @@ pureHeapBoundVars = M.keysSet -- I think its harmless to include variables bound
 
 -- | Returns all the variables bound by the stack that we might have to residualise in the splitter
 stackBoundVars :: Stack -> BoundVars
-stackBoundVars = S.unions . map stackFrameBoundVars
+stackBoundVars = S.unions . map stackFrameBoundVars -- It's *vital* to include variables bound by phantoms in this set
 
 stackFrameBoundVars :: StackFrame -> BoundVars
-stackFrameBoundVars = fst . stackFrameOpenFreeVars
+stackFrameBoundVars kf = bvs_static `S.union` bvs_nonstatic
+  where (bvs_static, bvs_nonstatic) = fst (stackFrameOpenFreeVars kf)
 
-stackFrameOpenFreeVars :: StackFrame -> (BoundVars, FreeVars)
+stackFrameOpenFreeVars :: StackFrame -> ((BoundVars, BoundVars), FreeVars)
 stackFrameOpenFreeVars kf = case kf of
-    Apply x'                -> (S.empty, annedFreeVars x')
-    Scrutinise in_alts      -> (S.empty, inFreeVars annedAltsFreeVars in_alts)
-    PrimApply _ in_vs in_es -> (S.empty, S.unions (map (inFreeVars annedValueFreeVars) in_vs) `S.union` S.unions (map (inFreeVars annedTermFreeVars) in_es))
-    Update x' _             -> (S.singleton (annee x'), S.empty)
+    Apply x'                -> ((S.empty, S.empty), annedFreeVars x')
+    Scrutinise in_alts      -> ((S.empty, S.empty), inFreeVars annedAltsFreeVars in_alts)
+    PrimApply _ in_vs in_es -> ((S.empty, S.empty), S.unions (map (inFreeVars annedValueFreeVars) in_vs) `S.union` S.unions (map (inFreeVars annedTermFreeVars) in_es))
+    Update x' why_live      -> (case why_live of ConcreteLive -> (S.empty, S.singleton (annee x')); PhantomLive -> (S.singleton (annee x'), S.empty), S.empty)
 
 -- | Returns (an overapproximation of) the free variables of the state that it would be useful to inline, and why that is so
 stateLiveness :: State -> Liveness
@@ -102,12 +103,12 @@ stateStaticBindersAndFreeVars (Heap h _, k, in_e) = (bvs_static', fvs' S.\\ bvs_
   where
     ((bvs_static', bvs_nonstatic'), fvs') = pureHeapOpenFreeVars h (stackOpenFreeVars k (inFreeVars annedTermFreeVars in_e))
     
-    pureHeapOpenFreeVars :: PureHeap -> (BoundVars, FreeVars) -> ((BoundVars, BoundVars), FreeVars)
-    pureHeapOpenFreeVars h (bvs, fvs) = M.foldWithKey one ((S.empty, bvs), fvs) h
+    pureHeapOpenFreeVars :: PureHeap -> ((BoundVars, BoundVars), FreeVars) -> ((BoundVars, BoundVars), FreeVars)
+    pureHeapOpenFreeVars h (bvs, fvs) = M.foldWithKey one (bvs, fvs) h
       where
         one x' (Concrete in_e) ((bvs_static, bvs_nonstatic), fvs) = ((bvs_static, S.insert x' bvs_nonstatic), fvs `S.union` inFreeVars annedTermFreeVars in_e)
         one x' (Phantom  in_e) ((bvs_static, bvs_nonstatic), fvs) = ((S.insert x' bvs_static, bvs_nonstatic), fvs `S.union` inFreeVars annedTermFreeVars in_e) -- FVs of phantoms can become free after reduction
         one x' _               ((bvs_static, bvs_nonstatic), fvs) = ((S.insert x' bvs_static, bvs_nonstatic), fvs)
     
-    stackOpenFreeVars :: Stack -> FreeVars -> (BoundVars, FreeVars)
-    stackOpenFreeVars k fvs = (S.unions *** (S.union fvs . S.unions)) . unzip . map stackFrameOpenFreeVars $ k
+    stackOpenFreeVars :: Stack -> FreeVars -> ((BoundVars, BoundVars), FreeVars)
+    stackOpenFreeVars k fvs = (((S.unions *** S.unions) . unzip) *** (S.union fvs . S.unions)) . unzip . map stackFrameOpenFreeVars $ k
