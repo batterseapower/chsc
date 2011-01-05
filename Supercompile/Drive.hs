@@ -113,7 +113,6 @@ reduce (deeds, orig_state) = go (mkHistory (extra wQO)) (deeds, orig_state)
           hist' <- case terminate hist (state, (deeds, state)) of
                       _ | intermediate state  -> Right hist
                       -- _ | traceRender ("reduce.go (non-intermediate)", pPrintFullState state) False -> undefined
-                      -- FIXME: have to roll back to the first history element without any Phantom update frames
                       Continue hist               -> Right hist
                       Stop (_gen, (deeds, state)) -> trace "reduce-stop" $ Left (guard rEDUCE_ROLLBACK >> return (deeds, state)) -- TODO: generalise?
           Right $ fmap (go hist') $ step (deeds, state)

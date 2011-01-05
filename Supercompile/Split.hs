@@ -781,7 +781,7 @@ splitStackFrame :: IdSupply
                     M.Map (Out Var) (HeapBinding, Bracketed (Entered, IdSupply -> State)),
                     Bracketed (Entered, IdSupply -> State))
 splitStackFrame ids kf scruts bracketed_hole
-  | Update x' _ <- kf = splitUpdate scruts x' bracketed_hole
+  | Update x' why_live <- kf = splitUpdate scruts x' why_live bracketed_hole
   | otherwise = ([], M.empty, case kf of
     Apply (annee -> x2') -> zipBracketeds (\[e] -> e `app` x2') (\[fvs] -> S.insert x2' fvs) [id] (\_ -> Nothing) [bracketed_hole]
     Scrutinise (rn, unzip -> (alt_cons, alt_es)) -> -- (if null k_remaining then id else traceRender ("splitStack: FORCED SPLIT", M.keysSet entered_hole, [x' | Tagged _ (Update x') <- k_remaining])) $
@@ -822,10 +822,11 @@ splitStackFrame ids kf scruts bracketed_hole
 -- You might think this is utterly worthless, since by definition the splitter will never be able to push the actual definition of
 -- x into this hole in the bracketed. However, the fact that we do this is *critical* to the algorithm I use to ensure that
 -- we can make variables bound by update frames as non-residualised: see Note [Residualisation of things referred to in extraFvs]
-splitUpdate :: [Out Var] -> Anned Var -> Bracketed (Entered, IdSupply -> State)
+splitUpdate :: [Out Var] -> Anned Var -> WhyLive -> Bracketed (Entered, IdSupply -> State)
             -> ([Out Var], M.Map (Out Var) (HeapBinding, Bracketed (Entered, IdSupply -> State)), Bracketed (Entered, IdSupply -> State))
-splitUpdate scruts x' bracketed_hole = (annee x' : scruts, M.singleton (annee x') (Updated (annedTag x') hole_fvs, bracketed_hole),
-                                        oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], (mkIdentityRenaming [annee x'], annedTerm (annedTag x') (Var (annee x'))))))
+splitUpdate scruts x' why_live bracketed_hole
+  = (annee x' : scruts, case why_live of ConcreteLive -> M.singleton (annee x') (Updated (annedTag x') hole_fvs, bracketed_hole); PhantomLive -> M.empty,
+     oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], (mkIdentityRenaming [annee x'], annedTerm (annedTag x') (Var (annee x'))))))
   where
     ctxt_id = fromJust (name_id (annee x'))
     hole_fvs = bracketedFreeVars (\(_, mk_state) -> stateFreeVars (mk_state matchIdSupply)) bracketed_hole
