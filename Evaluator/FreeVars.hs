@@ -1,16 +1,11 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, PatternGuards #-}
 module Evaluator.FreeVars (
-    WhyLive(..), Liveness,
-    emptyLiveness, plusLiveness, plusLivenesses,
-    whyLive,
-
     inFreeVars,
-    heapBindingReferences, heapBindingLiveness,
+    heapBindingReferences, heapBindingFreeVars,
     pureHeapBoundVars, stackBoundVars, stackFrameBoundVars,
-    stateLiveness, stateFreeVars, stateStaticBinders, stateStaticBindersAndFreeVars
+    stateFreeVars, stateStaticBinders, stateStaticBindersAndFreeVars
   ) where
 
-import Core.Syntax
 import Evaluator.Syntax
 
 import Core.FreeVars
@@ -18,32 +13,8 @@ import Core.Renaming
 
 import Utilities
 
-import Algebra.Lattice
-
 import qualified Data.Map as M
 import qualified Data.Set as S
-
-
-newtype Liveness = Liveness { unLiveness :: M.Map (Out Var) WhyLive }
-                 deriving (Eq, JoinSemiLattice, BoundedJoinSemiLattice)
-
-instance Pretty Liveness where
-    pPrintPrec level prec = pPrintPrec level prec . unLiveness
-
-mkLiveness :: FreeVars -> WhyLive -> Liveness
-mkLiveness fvs why_live = Liveness $ setToMap why_live fvs
-
-emptyLiveness :: Liveness
-emptyLiveness = bottom
-
-plusLiveness :: Liveness -> Liveness -> Liveness
-plusLiveness = join
-
-plusLivenesses :: [Liveness] -> Liveness
-plusLivenesses = joins
-
-whyLive :: Out Var -> Liveness -> Maybe WhyLive
-whyLive x' live = x' `M.lookup` unLiveness live
 
 
 inFreeVars :: (a -> FreeVars) -> In a -> FreeVars
@@ -61,10 +32,10 @@ heapBindingReferences (Concrete in_e) = inFreeVars annedTermFreeVars in_e
 --     things the update frame "references" as phantom bindings, even if they are otherwise dead.
 --  2) It causes assert failures in the matcher because we find ourselves unable to rename the free
 --     variables of the phantom bindings thus pulled in (they are dead, so the matcher doesn't get to them)
-heapBindingLiveness :: HeapBinding -> Liveness
-heapBindingLiveness hb = case heapBindingTerm hb of
-    Nothing               -> emptyLiveness
-    Just (in_e, why_live) -> mkLiveness (inFreeVars annedTermFreeVars in_e) why_live
+heapBindingFreeVars :: HeapBinding -> FreeVars
+heapBindingFreeVars hb = case heapBindingTerm hb of
+    Nothing                -> S.empty
+    Just (in_e, _why_live) -> inFreeVars annedTermFreeVars in_e
 
 -- | Returns all the variables bound by the heap that we might have to residualise in the splitter
 pureHeapBoundVars :: PureHeap -> BoundVars
@@ -84,10 +55,6 @@ stackFrameOpenFreeVars kf = case kf of
     Scrutinise in_alts      -> ((S.empty, S.empty), inFreeVars annedAltsFreeVars in_alts)
     PrimApply _ in_vs in_es -> ((S.empty, S.empty), S.unions (map (inFreeVars annedValueFreeVars) in_vs) `S.union` S.unions (map (inFreeVars annedTermFreeVars) in_es))
     Update x' why_live      -> (case why_live of ConcreteLive -> (S.empty, S.singleton (annee x')); PhantomLive -> (S.singleton (annee x'), S.empty), S.empty)
-
--- | Returns (an overapproximation of) the free variables of the state that it would be useful to inline, and why that is so
-stateLiveness :: State -> Liveness
-stateLiveness state = mkLiveness (stateFreeVars state) ConcreteLive
 
 -- | Returns (an overapproximation of) the free variables that the state would have if it were residualised right now (i.e. variables bound by phantom bindings *are* in the free vars set)
 stateFreeVars :: State -> FreeVars

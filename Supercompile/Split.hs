@@ -685,7 +685,7 @@ transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
       -- traceRender ("transitiveInline", "had bindings for", pureHeapBoundVars init_h_inlineable, "FVs were", state_fvs, "so inlining", pureHeapBoundVars h') $
       (deeds', (Heap h' ids, k, in_e))
   where
-    (deeds', h') = go 0 deeds (h `M.union` init_h_inlineable) M.empty (stateLiveness (Heap M.empty ids, k, in_e))
+    (deeds', h') = go 0 deeds (h `M.union` init_h_inlineable) M.empty (stateFreeVars (Heap M.empty ids, k, in_e))
       -- NB: we prefer bindings from h to those from init_h_inlineable if there is any conflict. This is motivated by
       -- the fact that bindings from case branches are usually more informative than e.g. a phantom binding for the scrutinee.
     
@@ -714,8 +714,8 @@ transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
     -- to be looked into by the evaluator, my original motivation for inlining concretes that are free only in phantoms in a
     -- phantom way has totally gone.
     --
-    -- TODO: since this new story makes the whole "liveness" thing totally irrelevant, I can just go back to a free variable set here.
-    go :: Int -> Deeds -> PureHeap -> PureHeap -> Liveness -> (Deeds, PureHeap)
+    -- This new story is a lot simpler too, because since this new story makes the whole "liveness" thing totally irrelevant, I can just go back to a free variable set here.
+    go :: Int -> Deeds -> PureHeap -> PureHeap -> FreeVars -> (Deeds, PureHeap)
     go n deeds h_inlineable h_output live
       = -- traceRender ("go", n, M.keysSet h_inlineable, M.keysSet h_output, fvs) $
         if live == live'
@@ -731,7 +731,7 @@ transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
         -- NB: we also rely here on the fact that the original h contains "optional" bindings in the sense that they are shadowed
         -- by something bound above - i.e. it just tells us how to unfold case scrutinees within a case branch.
         consider_inlining x' hb (deeds, h_inlineable, h_output, live)
-          | Just _why_live <- x' `whyLive` live -- Is the binding actually live at all?
+          | x' `S.member` live -- Is the binding actually live at all?
           , (deeds, h_inlineable, inline_hb) <- case hb of
               Concrete in_e@(_, e) -> case claimDeed deeds (annedTag e) of -- Do we have enough deeds to inline a concrete version at all?
                                         Just deeds -> (deeds,                h_inlineable, hb)
@@ -739,7 +739,7 @@ transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
               _              -> (deeds, h_inlineable, hb)
           , (x' `M.notMember` h && lOCAL_TIEBACKS) || not (heapBindingNonConcrete inline_hb) -- The Hack: only inline stuff from h *concretely*
           -- , traceRender ("Extra liveness from", pPrint inline_hb, "is", heapBindingLiveness inline_hb) True
-          = (deeds, h_inlineable, M.insert x' inline_hb h_output, live `plusLiveness` heapBindingLiveness inline_hb)
+          = (deeds, h_inlineable, M.insert x' inline_hb h_output, live `S.union` heapBindingFreeVars inline_hb)
           | otherwise
           = (deeds, M.insert x' hb h_inlineable, h_output, live)
 
