@@ -39,7 +39,7 @@ residualiseStackFrame :: IdSupply -> StackFrame -> Out FVedTerm -> ((Out [(Var, 
 residualiseStackFrame _   (Apply x2')               e1 = (([], []), e1 `app` annee x2')
 residualiseStackFrame ids (Scrutinise in_alts)      e  = (([], []), case_ e (detagAnnedAlts $ renameIn renameAnnedAlts ids in_alts))
 residualiseStackFrame ids (PrimApply pop in_vs es') e  = (([], []), primOp pop (map (value . fvee . detagAnnedValue . renameIn renameAnnedValue ids) in_vs ++ e : map (residualiseTerm ids) es'))
-residualiseStackFrame _   (Update x')               e  = (([], [(annee x', e)]), var (annee x'))
+residualiseStackFrame _   (Update x' why_live)      e  = (case why_live of ConcreteLive -> ([], [(annee x', e)]); PhantomLive -> ([(annee x', angles (pPrint e))], []), var (annee x'))
 
 
 pPrintFullState :: State -> Doc

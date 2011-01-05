@@ -41,14 +41,20 @@ step (deeds, _state@(h, k, (rn, e))) =
     deeds' = releaseDeedDescend_ deeds tg
 
     force :: Deeds -> Heap -> Stack -> Tag -> Out Var -> Maybe (Deeds, State)
-    force deeds (Heap h ids) k tg x' = do { Concrete in_e <- M.lookup x' h; return (deeds, (Heap (M.delete x' h) ids, Update (annedVar tg x') : k, in_e)) }
+    force deeds (Heap h ids) k tg x' = do
+      hb <- M.lookup x' h
+      (in_e, why_live) <- heapBindingTerm hb
+      deeds <- case why_live of
+                 ConcreteLive -> Just deeds
+                 PhantomLive  -> claimDeed deeds (annedTag (snd in_e)) -- We may promote this phantom thing to concrete, so we need deeds for it
+      return (deeds, (Heap (M.delete x' h) ids, Update (annedVar tg x') why_live : k, in_e))
 
     unwind :: Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> Maybe (Deeds, State)
     unwind deeds h k tg_v in_v = uncons k >>= \(kf, k) -> case kf of
         Apply x2'                 -> return $ apply      deeds h k tg_v in_v x2'
         Scrutinise in_alts        ->          scrutinise deeds h k tg_v in_v in_alts
         PrimApply pop in_vs in_es -> return $ primop     deeds h k tg_v pop in_vs in_v in_es
-        Update x'                 ->          update     deeds h k tg_v x' in_v
+        Update x' _why_live       ->          update     deeds h k tg_v x' in_v -- NB: potentially promotes a phantom binding to a concrete one
 
     apply :: Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> Out (Anned Var) -> (Deeds, State)
     apply deeds h k tg_v (rn, Lambda x e_body) x2' = (deeds', (h, k, (insertRenaming x (annee x2') rn, e_body)))

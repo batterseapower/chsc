@@ -103,39 +103,6 @@ gc (deeds, (Heap h ids, k, in_e)) = transitiveInline h (releasePureHeapDeeds dee
     --
     -- So I nixed in favour of a bit of gc in this module. TODO: experiment with not GCing here either.
 
-speculate :: ((Deeds, State) -> (Deeds, State))
-          -> (Deeds, State) -> (Deeds, State)
-speculate reduce = snd . go (0 :: Int) (mkHistory wQO) emptyLosers
-  where
-    go depth hist losers (deeds, state) = case terminate hist state of
-        Continue hist' | sPECULATION -> continue depth hist' losers (deeds, state)
-        _                            -> (losers, (deeds, state))
-    
-    continue depth hist losers (deeds, state@(Heap h _, _, _)) = (losers', (deeds'', (Heap (h'_winners' `M.union` h'_losers) ids'', k, in_e)))
-      where
-        (deeds', (Heap h' ids', k, in_e)) = reduce (deeds, state)
-        
-        -- It is *very important* that we prevent speculation from forcing heap-carried things that have proved
-        -- to be losers in the past. This prevents us discovering speculation failure of some head binding, and
-        -- then forcing several thunks that are each strict in it. This change was motivated by DigitsOfE2 -- it
-        -- speeds up supercompilation of that benchmark massively.
-        (h'_losers, h'_winners) | sPECULATE_ON_LOSERS = (M.empty, h')
-                                | otherwise           = M.partition (\hb -> maybe False (`IS.member` losers) (heapBindingTag_ hb)) h'
-        
-        -- NB: It is important that we accumulate losers across "go" invocations in a state-monady kind of way, or DigitsOfE2 blows out
-        -- even more than normal (it still takes 22s with this change).
-        -- TODO: I suspect we should accumulate Losers across the boundary of speculate as well
-        -- TODO: there is a difference between losers due to termination-halting and losers because we didn't have neough
-        -- information available to complete evaluation
-        (deeds'', Heap h'_winners' ids'', losers') = M.foldrWithKey speculate_one (deeds', Heap h'_winners ids', losers) (h'_winners M.\\ h)
-        speculate_one x' (Concrete in_e) (deeds, Heap h'_winners ids, losers)
-          -- | not (isValue (annee (snd in_e))), traceRender ("speculate", depth, residualiseState (Heap (h {- `exclude` M.keysSet base_h -}) ids, k, in_e)) False = undefined
-          | otherwise = case (go (depth + 1) hist losers) (deeds, (Heap (M.delete x' h'_winners) ids, [], in_e)) of
-            (losers', (deeds', (Heap h' ids', [], in_e'@(_, annee -> Value _)))) -> (deeds', Heap (M.insert x' (Concrete in_e') h')         ids', losers')
-            (losers', _)                                                         -> (deeds,  Heap (M.insert x' (Concrete in_e)  h'_winners) ids,  IS.insert (annedTag (snd in_e)) losers')
-        speculate_one x' hb              (deeds, Heap h'_winners ids, losers) 
-          = (deeds, Heap (M.insert x' hb h'_winners) ids, losers)
-
 reduce :: (Deeds, State) -> (Deeds, State)
 reduce (deeds, orig_state) = go (mkHistory (extra wQO)) (deeds, orig_state)
   where
@@ -146,6 +113,7 @@ reduce (deeds, orig_state) = go (mkHistory (extra wQO)) (deeds, orig_state)
           hist' <- case terminate hist (state, (deeds, state)) of
                       _ | intermediate state  -> Right hist
                       -- _ | traceRender ("reduce.go (non-intermediate)", pPrintFullState state) False -> undefined
+                      -- FIXME: have to roll back to the first history element without any Phantom update frames
                       Continue hist               -> Right hist
                       Stop (_gen, (deeds, state)) -> trace "reduce-stop" $ Left (guard rEDUCE_ROLLBACK >> return (deeds, state)) -- TODO: generalise?
           Right $ fmap (go hist') $ step (deeds, state)
@@ -267,7 +235,7 @@ sc' hist (deeds, state) = (\raise -> check raise) `catchScpM` \gen -> stop gen h
                        split gen               (sc hist) (deeds,  state)
     continue hist = do traceRenderScpM ("reduce end", pPrintFullState state')
                        split generaliseNothing (sc hist) (deeds', state')
-      where (deeds', state') = gc (speculate reduce (deeds, state)) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
+      where (deeds', state') = gc (reduce (deeds, state)) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
 
 memo :: ((Deeds, State) -> ScpM (Deeds, Out FVedTerm))
      ->  (Deeds, State) -> ScpM (Deeds, Out FVedTerm)

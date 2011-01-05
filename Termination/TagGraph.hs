@@ -52,7 +52,7 @@ embedWithTagGraphs = precomp stateTags $ postcomp generaliserFromGrowing $ refin
         
         -- Stores the tags associated with any bound name
         referants :: M.Map (Out Var) TagSet
-        referants = M.map (maybe IS.empty (IS.singleton . pureHeapBindingTag') . heapBindingTag_) h `M.union` M.fromList [(annee x', IS.fromList (stackFrameTags' kf)) | kf@(Update x') <- k]
+        referants = M.map (maybe IS.empty (IS.singleton . pureHeapBindingTag') . heapBindingTag_) h `M.union` M.fromList [(annee x', IS.fromList (stackFrameTags' kf)) | kf@(Update x' _) <- k]
         
         -- Find the *tags* referred to from the *names* referred to
         referrerEdges :: [Tag] -> FreeVars -> TagGraph

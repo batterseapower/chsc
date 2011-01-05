@@ -96,7 +96,7 @@ matchECFrame :: StackFrame -> StackFrame -> Maybe ([(Var, Var)], [(Var, Var)])
 matchECFrame (Apply x_l')                      (Apply x_r')                      = Just ([], [matchAnnedVar x_l' x_r'])
 matchECFrame (Scrutinise in_alts_l)            (Scrutinise in_alts_r)            = fmap ([],) $ matchInAlts matchIdSupply in_alts_l in_alts_r
 matchECFrame (PrimApply pop_l in_vs_l in_es_l) (PrimApply pop_r in_vs_r in_es_r) = fmap ([],) $ guard (pop_l == pop_r) >> liftM2 (++) (matchList (matchAnned (matchInValue matchIdSupply)) in_vs_l in_vs_r) (matchList (matchInTerm matchIdSupply) in_es_l in_es_r)
-matchECFrame (Update x_l')                     (Update x_r')                     = Just ([matchAnnedVar x_l' x_r'], [])
+matchECFrame (Update x_l' why_live_l)          (Update x_r' why_live_r)          = guard (why_live_l == why_live_r) >> Just ([matchAnnedVar x_l' x_r'], [])
 matchECFrame _ _ = Nothing
 
 -- Returns a renaming from the list only if the list maps a "left" variable to a unique "right" variable

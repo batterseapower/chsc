@@ -117,21 +117,21 @@ type Stack = [StackFrame]
 data StackFrame = Apply (Out (Anned Var))
                 | Scrutinise (In [AnnedAlt])
                 | PrimApply PrimOp [In (Anned AnnedValue)] [In AnnedTerm]
-                | Update (Out (Anned Var))
+                | Update (Out (Anned Var)) WhyLive
                 deriving (Show)
 
 instance NFData StackFrame where
     rnf (Apply a)         = rnf a
     rnf (Scrutinise a)    = rnf a
     rnf (PrimApply a b c) = rnf a `seq` rnf b `seq` rnf c
-    rnf (Update a)        = rnf a
+    rnf (Update a b)      = rnf a `seq` rnf b
 
 instance Pretty StackFrame where
     pPrintPrec level prec kf = case kf of
         Apply x'                  -> pPrintPrecApp level prec (text "[_]") x'
         Scrutinise in_alts        -> pPrintPrecCase level prec (text "[_]") (renameIn renameAnnedAlts prettyIdSupply in_alts)
         PrimApply pop in_vs in_es -> pPrintPrecPrimOp level prec pop (map SomePretty in_vs ++ map SomePretty in_es)
-        Update x'                 -> pPrintPrecApp level prec (text "update") x'
+        Update x' why_live        -> (case why_live of PhantomLive -> angles; ConcreteLive -> id) $ pPrintPrecApp level prec (text "update") x'
 
 
 heapBindingNonConcrete :: HeapBinding -> Bool
@@ -158,7 +158,7 @@ stackFrameTags kf = case kf of
     Apply x'                -> [annedTag x']
     Scrutinise in_alts      -> map (annedTag . snd) (snd in_alts)
     PrimApply _ in_vs in_es -> map (annedTag . snd) in_vs ++ map (annedTag . snd) in_es
-    Update x'               -> [annedTag x']
+    Update x' _             -> [annedTag x']
 
 releaseHeapBindingDeeds :: Deeds -> HeapBinding -> Deeds
 releaseHeapBindingDeeds deeds = maybe deeds (releaseTagDeeds deeds) . heapBindingTag

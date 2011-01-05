@@ -82,7 +82,7 @@ stackFrameOpenFreeVars kf = case kf of
     Apply x'                -> (S.empty, annedFreeVars x')
     Scrutinise in_alts      -> (S.empty, inFreeVars annedAltsFreeVars in_alts)
     PrimApply _ in_vs in_es -> (S.empty, S.unions (map (inFreeVars annedValueFreeVars) in_vs) `S.union` S.unions (map (inFreeVars annedTermFreeVars) in_es))
-    Update x'               -> (S.singleton (annee x'), S.empty)
+    Update x' _             -> (S.singleton (annee x'), S.empty)
 
 -- | Returns (an overapproximation of) the free variables of the state that it would be useful to inline, and why that is so
 stateLiveness :: State -> Liveness

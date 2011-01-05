@@ -374,12 +374,12 @@ optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
                     Phantom _       -> 0
                     Concrete (_, e) -> termSize e
                 heapSize (Heap h _) = sum (map heapBindingSize (M.elems h))
-                stackSize = sum . map stackFrameSize
-                stackFrameSize kf = 1 + case kf of
-                    Apply x'                -> varSize x'
-                    Scrutinise in_alts      -> sum (map altSize' (snd in_alts))
-                    PrimApply _ in_vs in_es -> sum (map (valueSize . snd) in_vs) + sum (map (termSize . snd) in_es)
-                    Update x'               -> varSize x'
+                stackSize = foldr stackFrameSize 0
+                stackFrameSize kf rest = 1 + case kf of
+                    Apply x'                -> rest + varSize x'
+                    Scrutinise in_alts      -> rest + sum (map altSize' (snd in_alts))
+                    PrimApply _ in_vs in_es -> rest + sum (map (valueSize . snd) in_vs) + sum (map (termSize . snd) in_es)
+                    Update x' why_live      -> (case why_live of ConcreteLive -> rest; PhantomLive -> 0) + varSize x'
         bracketSizes = map stateSize . fillers
         
         (heap_xs, bracketeds_heap_elts) = unzip (M.toList bracketeds_heap)
@@ -491,7 +491,7 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
         need_not_resid_kf i kf
           | i `IS.member` gen_kfs
           = False
-          | Update (annee -> x') <- kf -- We infer the stack frames we're not residualising based on the *variables* we're not residualising
+          | Update (annee -> x') _ <- kf -- We infer the stack frames we're not residualising based on the *variables* we're not residualising
           = x' `S.member` not_resid_xs
           | otherwise
           = True
@@ -781,7 +781,7 @@ splitStackFrame :: IdSupply
                     M.Map (Out Var) (HeapBinding, Bracketed (Entered, IdSupply -> State)),
                     Bracketed (Entered, IdSupply -> State))
 splitStackFrame ids kf scruts bracketed_hole
-  | Update x' <- kf = splitUpdate scruts x' bracketed_hole
+  | Update x' _ <- kf = splitUpdate scruts x' bracketed_hole
   | otherwise = ([], M.empty, case kf of
     Apply (annee -> x2') -> zipBracketeds (\[e] -> e `app` x2') (\[fvs] -> S.insert x2' fvs) [id] (\_ -> Nothing) [bracketed_hole]
     Scrutinise (rn, unzip -> (alt_cons, alt_es)) -> -- (if null k_remaining then id else traceRender ("splitStack: FORCED SPLIT", M.keysSet entered_hole, [x' | Tagged _ (Update x') <- k_remaining])) $
