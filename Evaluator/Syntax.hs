@@ -11,6 +11,8 @@ import Core.Tag
 import Renaming
 import Utilities
 
+import Algebra.Lattice
+
 import qualified Data.Map as M
 
 
@@ -61,6 +63,23 @@ annedValue tg v = Comp (Tagged tg (FVed (annedValueFreeVars' v) v))
 
 toAnnedTerm :: Term -> AnnedTerm
 toAnnedTerm = tagFVedTerm . reflect
+
+
+data WhyLive = PhantomLive | ConcreteLive
+             deriving (Eq, Show)
+
+instance Pretty WhyLive where
+    pPrint = text . show
+
+instance NFData WhyLive
+
+instance JoinSemiLattice WhyLive where
+    ConcreteLive `join` _            = ConcreteLive
+    _            `join` ConcreteLive = ConcreteLive
+    _            `join` _            = PhantomLive
+
+instance BoundedJoinSemiLattice WhyLive where
+    bottom = PhantomLive
 
 
 type State = (Heap, Stack, In AnnedTerm)
@@ -119,17 +138,20 @@ heapBindingNonConcrete :: HeapBinding -> Bool
 heapBindingNonConcrete (Concrete _) = False
 heapBindingNonConcrete _            = True
 
-heapBindingTerm :: HeapBinding -> Maybe (In AnnedTerm)
+heapBindingTerm :: HeapBinding -> Maybe (In AnnedTerm, WhyLive)
 heapBindingTerm Environmental   = Nothing
 heapBindingTerm (Updated _ _)   = Nothing
-heapBindingTerm (Phantom in_e)  = Just in_e
-heapBindingTerm (Concrete in_e) = Just in_e
+heapBindingTerm (Phantom in_e)  = Just (in_e, PhantomLive)
+heapBindingTerm (Concrete in_e) = Just (in_e, ConcreteLive)
 
-heapBindingTag :: HeapBinding -> Maybe Tag
+heapBindingTag_ :: HeapBinding -> Maybe Tag
+heapBindingTag_ = fmap fst . heapBindingTag
+
+heapBindingTag :: HeapBinding -> Maybe (Tag, WhyLive)
 heapBindingTag Environmental     = Nothing
-heapBindingTag (Updated tg _)    = Just tg
-heapBindingTag (Phantom (_, e))  = Just (annedTag e)
-heapBindingTag (Concrete (_, e)) = Just (annedTag e)
+heapBindingTag (Updated tg _)    = Just (tg,         PhantomLive)
+heapBindingTag (Phantom (_, e))  = Just (annedTag e, PhantomLive)
+heapBindingTag (Concrete (_, e)) = Just (annedTag e, ConcreteLive)
 
 stackFrameTags :: StackFrame -> [Tag]
 stackFrameTags kf = case kf of
@@ -139,8 +161,11 @@ stackFrameTags kf = case kf of
     Update x'               -> [annedTag x']
 
 releaseHeapBindingDeeds :: Deeds -> HeapBinding -> Deeds
-releaseHeapBindingDeeds deeds (Concrete (_, e)) = releaseDeedDeep deeds (annedTag e)
-releaseHeapBindingDeeds deeds _                 = deeds
+releaseHeapBindingDeeds deeds = maybe deeds (releaseTagDeeds deeds) . heapBindingTag
+
+releaseTagDeeds :: Deeds -> (Tag, WhyLive) -> Deeds
+releaseTagDeeds deeds (tg, ConcreteLive) = releaseDeedDeep deeds tg
+releaseTagDeeds deeds (_,  PhantomLive)  = deeds
 
 releasePureHeapDeeds :: Deeds -> PureHeap -> Deeds
 releasePureHeapDeeds = M.fold (flip releaseHeapBindingDeeds)

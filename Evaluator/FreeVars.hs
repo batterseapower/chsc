@@ -24,20 +24,6 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 
 
-data WhyLive = PhantomLive | ConcreteLive
-             deriving (Eq, Show)
-
-instance Pretty WhyLive where
-    pPrint = text . show
-
-instance JoinSemiLattice WhyLive where
-    ConcreteLive `join` _            = ConcreteLive
-    _            `join` ConcreteLive = ConcreteLive
-    _            `join` _            = PhantomLive
-
-instance BoundedJoinSemiLattice WhyLive where
-    bottom = PhantomLive
-
 newtype Liveness = Liveness { unLiveness :: M.Map (Out Var) WhyLive }
                  deriving (Eq, JoinSemiLattice, BoundedJoinSemiLattice)
 
