@@ -691,11 +691,30 @@ transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
     
     -- NB: in the presence of phantoms, this loop gets weird.
     --  1. We want to inline phantoms if they occur as free variables of the state, so we get staticness
-    --  2. We want to inline phantoms if they ocucr as free variables of inlined phantoms, so we get to see chains of staticness
-    --    arising from e.g. foldl', hence allowing us to do intelligent staticness generalisation
+    --  2. We want to inline phantoms if they occur as free variables of inlined phantoms, so we get to see chains of staticness
+    --     arising from e.g. foldl', hence allowing us to do intelligent staticness generalisation
+    --
+    -- We USED TO have these additional criteria:
     --  3. We want to inline phantom versions of non-phantom definitions if they occur as free variables of inlined phantoms
     --  4. If we inlined something according to criteria 3. and that definition later becomes a free variable of a non-phantom,
     --     we need to make sure that phantom definition is replaced with a real one
+    --
+    -- Now instead we have this criteria:
+    --  3. We want to inline concretes if they occur as free variables of any inlined thing
+    --
+    -- Why? The motivation is where we have a heap like this:
+    --   speculate_me |-> <if unk then 1 else 2>
+    --   unk |-> True
+    --
+    -- Let's say that speculate_me is live in the term we are inlining into, and that the "unk" binding arose from a residual
+    -- case scrutinisation. If I were to inline unk as a phantom (i.e. observing that it is only live in phantom bindings) then
+    -- The Hack would prevent me from inlining it at all :-(
+    --
+    -- This really leads to a loss of optimisation (see SpeculationTricky.core). Furthermore, now that I allow phantom bindings
+    -- to be looked into by the evaluator, my original motivation for inlining concretes that are free only in phantoms in a
+    -- phantom way has totally gone.
+    --
+    -- TODO: since this new story makes the whole "liveness" thing totally irrelevant, I can just go back to a free variable set here.
     go :: Int -> Deeds -> PureHeap -> PureHeap -> Liveness -> (Deeds, PureHeap)
     go n deeds h_inlineable h_output live
       = -- traceRender ("go", n, M.keysSet h_inlineable, M.keysSet h_output, fvs) $
@@ -712,13 +731,11 @@ transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
         -- NB: we also rely here on the fact that the original h contains "optional" bindings in the sense that they are shadowed
         -- by something bound above - i.e. it just tells us how to unfold case scrutinees within a case branch.
         consider_inlining x' hb (deeds, h_inlineable, h_output, live)
-          | Just why_live <- x' `whyLive` live -- Is the binding actually live at all?
+          | Just _why_live <- x' `whyLive` live -- Is the binding actually live at all?
           , (deeds, h_inlineable, inline_hb) <- case hb of
-              Concrete in_e@(_, e) -> case why_live of
-                ConcreteLive -> case claimDeed deeds (annedTag e) of -- Do we have enough deeds to inline a concrete version at all?
-                                  Just deeds -> (deeds,                h_inlineable, hb)
-                                  Nothing    -> (deeds, M.insert x' hb h_inlineable, Phantom in_e)
-                PhantomLive  -> (deeds, M.insert x' hb h_inlineable, Phantom in_e) -- We want to inline only a *phantom* version if the binding is demanded by phantoms only, or madness ensues
+              Concrete in_e@(_, e) -> case claimDeed deeds (annedTag e) of -- Do we have enough deeds to inline a concrete version at all?
+                                        Just deeds -> (deeds,                h_inlineable, hb)
+                                        Nothing    -> (deeds, M.insert x' hb h_inlineable, Phantom in_e)
               _              -> (deeds, h_inlineable, hb)
           , (x' `M.notMember` h && lOCAL_TIEBACKS) || not (heapBindingNonConcrete inline_hb) -- The Hack: only inline stuff from h *concretely*
           -- , traceRender ("Extra liveness from", pPrint inline_hb, "is", heapBindingLiveness inline_hb) True
