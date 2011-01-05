@@ -27,7 +27,7 @@ emptyLosers = IS.empty
 
 step :: (Deeds, State) -> Maybe (Deeds, State)
 step (deeds, _state@(h, k, (rn, e))) =
-  (\mb_res -> assertRender (hang (text "step: deeds lost or gained when stepping:") 2 (pPrint (residualiseState _state)))
+  (\mb_res -> assertRender (hang (text "step: deeds lost or gained when stepping:") 2 (pPrintFullState _state))
                            (not dEEDS || maybe True (\(deeds', state') -> noChange (releaseStateDeed deeds _state) (releaseStateDeed deeds' state')) mb_res) mb_res) $
   case annee e of
     Var x             -> force  deeds h k tg (rename rn x)

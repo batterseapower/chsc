@@ -23,8 +23,8 @@ newtype Renaming = Renaming { unRenaming :: M.Map (In Name) (Out Name) }
                  deriving (Show, NFData)
 
 instance Pretty Renaming where
-    pPrintPrec level _ rn = vcat [ pPrintPrec level 0 x <+> text "|->" <+> pPrintPrec level 0 x'
-                                 | (x, x') <- M.toList (unRenaming rn)]
+    pPrintPrec level _ rn = braces $ vcat [ pPrintPrec level 0 x <+> text "|->" <+> pPrintPrec level 0 x'
+                                          | (x, x') <- M.toList (unRenaming rn)]
 
 
 emptyRenaming :: Renaming

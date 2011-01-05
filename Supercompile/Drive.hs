@@ -140,12 +140,12 @@ reduce :: (Deeds, State) -> (Deeds, State)
 reduce (deeds, orig_state) = go (mkHistory (extra wQO)) (deeds, orig_state)
   where
     go hist (deeds, state)
-      -- | traceRender ("reduce.go", residualiseState state) False = undefined
+      -- | traceRender ("reduce.go", pPrintFullState state) False = undefined
       | not eVALUATE_PRIMOPS, (_, _, (_, annee -> PrimOp _ _)) <- state = (deeds, state)
       | otherwise = fromMaybe (deeds, state) $ either id id $ do
           hist' <- case terminate hist (state, (deeds, state)) of
                       _ | intermediate state  -> Right hist
-                      -- _ | traceRender ("reduce.go (non-intermediate)", residualiseState state) False -> undefined
+                      -- _ | traceRender ("reduce.go (non-intermediate)", pPrintFullState state) False -> undefined
                       Continue hist               -> Right hist
                       Stop (_gen, (deeds, state)) -> trace "reduce-stop" $ Left (guard rEDUCE_ROLLBACK >> return (deeds, state)) -- TODO: generalise?
           Right $ fmap (go hist') $ step (deeds, state)
@@ -265,7 +265,7 @@ sc' hist (deeds, state) = (\raise -> check raise) `catchScpM` \gen -> stop gen h
                       Stop (gen, rb) -> maybe (stop gen hist) ($ gen) $ guard sC_ROLLBACK >> Just rb
     stop gen hist = do traceRenderScpM "sc-stop"
                        split gen               (sc hist) (deeds,  state)
-    continue hist = do traceRenderScpM ("reduce end", residualiseState state')
+    continue hist = do traceRenderScpM ("reduce end", pPrintFullState state')
                        split generaliseNothing (sc hist) (deeds', state')
       where (deeds', state') = gc (speculate reduce (deeds, state)) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
 
@@ -277,23 +277,23 @@ memo opt (deeds, state) = do
          | p <- ps
          , Just rn_lr <- [-- (\res -> if isNothing res then traceRender ("no match:", fun p) res else res) $
                            match (meaning p) state]
-         , let bad_renames = S.fromList (abstracted p) `symmetricDifference` M.keysSet (unRenaming rn_lr) in assertRender (text "Renaming was inexhaustive or too exhaustive:" <+> pPrint bad_renames $$ pPrint rn_lr $$ pPrint (residualiseState state) $$ case state of (Heap h _, _, _) -> pPrint (M.filter heapBindingNonConcrete h)) (S.null bad_renames) True
+         , let bad_renames = S.fromList (abstracted p) `symmetricDifference` M.keysSet (unRenaming rn_lr) in assertRender (text "Renaming was inexhaustive or too exhaustive:" <+> pPrint bad_renames $$ pPrint rn_lr $$ pPrintFullState state) (S.null bad_renames) True
          , let rn_fvs = map (safeRename ("tieback: FVs for " ++ render (pPrint (fun p) $$ text "Us:" $$ pPrint state $$ text "Them:" $$ pPrint (meaning p)))
                                         rn_lr) -- NB: If tb contains a dead PureHeap binding (hopefully impossible) then it may have a free variable that I can't rename, so "rename" will cause an error. Not observed in practice yet.
                tb_dynamic_vs = rn_fvs (abstracted p)
          ] of
-      (_p, res):_ -> {- traceRender ("tieback", residualiseState state, fst res) $ -} do
-        traceRenderScpM ("=sc", fun _p, residualiseState state, deeds, res)
+      (_p, res):_ -> {- traceRender ("tieback", pPrintFullState state, fst res) $ -} do
+        traceRenderScpM ("=sc", fun _p, pPrintFullState state, deeds, res)
         return res
-      [] -> {- traceRender ("new drive", residualiseState state) $ -} do
+      [] -> {- traceRender ("new drive", pPrintFullState state) $ -} do
         let (static_vs, vs) = stateStaticBindersAndFreeVars state
         
         -- NB: promises are lexically scoped because they may refer to FVs
         x <- freshHName
         promise P { fun = x, abstracted = S.toList (vs S.\\ static_vs), meaning = state } $ do
-            traceRenderScpM (">sc", x, residualiseState state, case state of (Heap h _, _, _) -> M.filter heapBindingNonConcrete h, deeds)
+            traceRenderScpM (">sc", x, pPrintFullState state, deeds)
             res <- opt (deeds, case state of (Heap h ids, k, in_e) -> (Heap (M.insert x Environmental h) ids, k, in_e)) -- TODO: should I just put "h" functions into a different set of statics??
-            traceRenderScpM ("<sc", x, residualiseState state, res)
+            traceRenderScpM ("<sc", x, pPrintFullState state, res)
             return res
 
 traceRenderScpM :: Pretty a => a -> ScpM ()

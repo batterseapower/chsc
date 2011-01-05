@@ -524,6 +524,9 @@ safeFromLeft :: Either a b -> Maybe a
 safeFromLeft (Left x) = Just x
 safeFromLeft _        = Nothing
 
+fmapEither :: (a -> b) -> (c -> d) -> Either a c -> Either b d
+fmapEither f g = either (Left . f) (Right . g)
+
 safeHead :: [a] -> Maybe a
 safeHead []    = Nothing
 safeHead (x:_) = Just x
