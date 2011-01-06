@@ -54,6 +54,9 @@ detagAnnedAlts = taggedFVedAltsToFVedAlts
 annedVar :: Tag -> Var -> Anned Var
 annedVar   tg x = Comp (Tagged tg (FVed (annedVarFreeVars' x)  x))
 
+annedVarInAnnedTerm :: Anned Var -> In AnnedTerm
+annedVarInAnnedTerm x' = (mkIdentityRenaming [annee x'], annedTerm (annedTag x') (Var (annee x')))
+
 annedTerm :: Tag -> TermF Anned -> AnnedTerm
 annedTerm  tg e = Comp (Tagged tg (FVed (annedTermFreeVars' e)  e))
 
@@ -170,8 +173,8 @@ releaseTagDeeds deeds (_,  PhantomLive)  = deeds
 releasePureHeapDeeds :: Deeds -> PureHeap -> Deeds
 releasePureHeapDeeds = M.fold (flip releaseHeapBindingDeeds)
 
+releaseStackDeeds :: Deeds -> Stack -> Deeds
+releaseStackDeeds deeds k = foldl' (\deeds kf -> foldl' releaseDeedDeep deeds (stackFrameTags kf)) deeds k
+
 releaseStateDeed :: Deeds -> State -> Deeds
-releaseStateDeed deeds (Heap h _, k, (_, e))
-  = foldl' (\deeds kf -> foldl' releaseDeedDeep deeds (stackFrameTags kf))
-           (releasePureHeapDeeds (releaseDeedDeep deeds (annedTag e)) h)
-           k
+releaseStateDeed deeds (Heap h _, k, (_, e)) = releaseStackDeeds (releasePureHeapDeeds (releaseDeedDeep deeds (annedTag e)) h) k

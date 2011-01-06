@@ -379,7 +379,7 @@ optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
                     Apply x'                -> rest + varSize x'
                     Scrutinise in_alts      -> rest + sum (map altSize' (snd in_alts))
                     PrimApply _ in_vs in_es -> rest + sum (map (valueSize . snd) in_vs) + sum (map (termSize . snd) in_es)
-                    Update x' why_live      -> (case why_live of ConcreteLive -> rest; PhantomLive -> 0) + varSize x'
+                    Update x' ConcreteLive  -> rest + varSize x'
         bracketSizes = map stateSize . fillers
         
         (heap_xs, bracketeds_heap_elts) = unzip (M.toList bracketeds_heap)
@@ -491,7 +491,7 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
         need_not_resid_kf i kf
           | i `IS.member` gen_kfs
           = False
-          | Update (annee -> x') _ <- kf
+          | Update (annee -> x') ConcreteLive <- kf
           -- We infer the stack frames we're not residualising based on the *variables* we're not residualising
           -- Note that we do not insist that why_live is ConcreteLive. This means that we do transformations like this:
           --
@@ -851,9 +851,9 @@ splitStackFrame ids kf scruts bracketed_hole
 -- we can make variables bound by update frames as non-residualised: see Note [Residualisation of things referred to in extraFvs]
 splitUpdate :: [Out Var] -> Anned Var -> WhyLive -> Bracketed (Entered, IdSupply -> State)
             -> ([Out Var], M.Map (Out Var) (HeapBinding, Bracketed (Entered, IdSupply -> State)), Bracketed (Entered, IdSupply -> State))
-splitUpdate scruts x' why_live bracketed_hole
-  = (annee x' : scruts, case why_live of ConcreteLive -> M.singleton (annee x') (Updated (annedTag x') hole_fvs, bracketed_hole); PhantomLive -> M.empty,
-     oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], (mkIdentityRenaming [annee x'], annedTerm (annedTag x') (Var (annee x'))))))
+splitUpdate scruts x' ConcreteLive bracketed_hole
+  = (annee x' : scruts, M.singleton (annee x') (Updated (annedTag x') hole_fvs, bracketed_hole),
+     oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], annedVarInAnnedTerm x')))
   where
     ctxt_id = fromJust (name_id (annee x'))
     hole_fvs = bracketedFreeVars (\(_, mk_state) -> stateFreeVars (mk_state matchIdSupply)) bracketed_hole

@@ -110,8 +110,23 @@ gc (deeds, (Heap h ids, k, in_e)) = assertRender _violations (null _violations) 
         _  -> viols
     _violations = M.foldrWithKey one_violation [] h'
 
+concretise :: (Deeds, State) -> (Deeds, State)
+concretise (deeds, (Heap h ids, k, in_e)) = (deeds', (Heap h' ids, k', in_e'))
+  where
+    (deeds', h', in_e', k') = go deeds h in_e [] k
+    go deeds h in_e k'_rev [] = (deeds, h, in_e, reverse k'_rev)
+    go deeds h in_e k'_rev (kf:k)
+       -- By concretising before garbage collection, we can reclaim not only the deeds that become reusable because they belong to phantom update frames,
+       -- but also any heap bindings transitively used only by phantoms. This makes a big difference to results.
+      | Update x' PhantomLive <- kf = go (releaseDeedDeep (releaseStackDeeds deeds (kf:k'_rev)) (annedTag (snd in_e)))
+                                         (M.insert (annee x') (Updated (annedTag x') (inFreeVars annedTermFreeVars in_e)) h)
+                                         (annedVarInAnnedTerm x')
+                                         []
+                                         k
+      | otherwise                   = go deeds h in_e (kf:k'_rev) k
+
 reduce :: (Deeds, State) -> (Deeds, State)
-reduce (deeds, orig_state) = go (mkHistory (extra wQO)) (deeds, orig_state)
+reduce (deeds, orig_state) = concretise (go (mkHistory (extra wQO)) (deeds, orig_state))
   where
     go hist (deeds, state)
       -- | traceRender ("reduce.go", pPrintFullState state) False = undefined
