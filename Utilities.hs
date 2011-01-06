@@ -380,6 +380,14 @@ listContexts xs = zipWith (\is (t:ts) -> (is, t, ts)) (inits xs) (init (tails xs
 bagContexts :: [a] -> [(a, [a])]
 bagContexts xs = [(x, is ++ ts) | (is, x, ts) <- listContexts xs]
 
+seperate :: Eq a => a -> [a] -> [[a]]
+seperate c = go []
+  where
+    go sofar [] = [reverse sofar]
+    go sofar (x:xs)
+      | x == c    = reverse sofar : go [] xs
+      | otherwise = go (x:sofar) xs
+
 
 accumL :: (acc -> (acc, a)) -> acc -> Int -> (acc, [a])
 accumL f = go
