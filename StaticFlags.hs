@@ -108,9 +108,9 @@ sPECULATION = not $ "--no-speculation" `elem` unsafePerformIO getArgs
 -- sPECULATION :: Bool
 -- sPECULATION = "--speculation" `elem` unsafePerformIO getArgs
 
-{-# NOINLINE sPECULATE_ON_LOSERS #-}
-sPECULATE_ON_LOSERS :: Bool
-sPECULATE_ON_LOSERS = "--speculate-on-losers" `elem` unsafePerformIO getArgs
+{-# NOINLINE tREELIKE_SPECULATION #-}
+tREELIKE_SPECULATION :: Bool
+tREELIKE_SPECULATION = "--treelike-speculation" `elem` unsafePerformIO getArgs
 
 {-# NOINLINE lOCAL_TIEBACKS #-}
 lOCAL_TIEBACKS :: Bool

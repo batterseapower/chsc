@@ -103,36 +103,39 @@ gc (deeds, (Heap h ids, k, in_e)) = transitiveInline h (releasePureHeapDeeds dee
 
 speculate :: ((Deeds, State) -> (Deeds, State))
           -> (Deeds, State) -> (Deeds, State)
-speculate reduce = snd . go (0 :: Int) (mkHistory wQO) emptyLosers
+speculate reduce = snd . go (0 :: Int) (mkHistory wQO)
   where
-    go depth hist losers (deeds, state) = case terminate hist state of
-        Continue hist' | sPECULATION -> continue depth hist' losers (deeds, state)
-        _                            -> (losers, (deeds, state))
+    go depth hist (deeds, state) = case terminate hist state of
+        Continue hist' | sPECULATION -> continue depth hist' (deeds, state)
+        _                            -> (hist, (deeds, state))
     
-    continue depth hist losers (deeds, state@(Heap h _, _, _)) = (losers', (deeds'', (Heap (h'_winners' `M.union` h'_losers) ids'', k, in_e)))
+    continue depth hist (deeds, state@(Heap h _, _, _)) = (hist', (deeds'', (Heap h'' ids'', k, in_e)))
       where
         (deeds', (Heap h' ids', k, in_e)) = reduce (deeds, state)
         
-        -- It is *very important* that we prevent speculation from forcing heap-carried things that have proved
-        -- to be losers in the past. This prevents us discovering speculation failure of some head binding, and
-        -- then forcing several thunks that are each strict in it. This change was motivated by DigitsOfE2 -- it
-        -- speeds up supercompilation of that benchmark massively.
-        (h'_losers, h'_winners) | sPECULATE_ON_LOSERS = (M.empty, h')
-                                | otherwise           = M.partition (\hb -> maybe False (`IS.member` losers) (heapBindingTag_ hb)) h'
-        
-        -- NB: It is important that we accumulate losers across "go" invocations in a state-monady kind of way, or DigitsOfE2 blows out
-        -- even more than normal (it still takes 22s with this change).
-        -- TODO: I suspect we should accumulate Losers across the boundary of speculate as well
-        -- TODO: there is a difference between losers due to termination-halting and losers because we didn't have neough
-        -- information available to complete evaluation
-        (deeds'', Heap h'_winners' ids'', losers') = M.foldrWithKey speculate_one (deeds', Heap h'_winners ids', losers) (h'_winners M.\\ h)
-        speculate_one x' (Concrete in_e) (deeds, Heap h'_winners ids, losers)
+        -- Note [Controlling speculation]
+        -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        --
+        -- Speculation gets out of hand easily. A motivating example is DigitsOfE2: without some way to control
+        -- speculation, it blows up, and I have not observed it to terminate.
+        --
+        -- One approach is using "losers". In this approach, we prevent speculation from forcing heap-carried things
+        -- that have proved to be losers in the past, as indicated by their tags being part of an accumulated losers set.
+        -- The losers set was threaded through "go", and hence generated anew for each call to "speculate".
+        --
+        -- An attractive approach (inspired by Simon, as usual!) is to just thread the *history* through go. This should have a
+        -- similiar effect, but prevents multiplication of mechanisms.
+        --
+        -- In my tests, the losers set approach ensured that DigitsOfE2 terminated after ~13s. Changing to the threaded
+        -- history approach, I did not observe termination :-(
+        (deeds'', Heap h'' ids'', hist') = M.foldrWithKey speculate_one (deeds', Heap h' ids', hist) (h' M.\\ h)
+        speculate_one x' (Concrete in_e) (deeds, Heap h' ids, hist')
           -- | not (isValue (annee (snd in_e))), traceRender ("speculate", depth, residualiseState (Heap (h {- `exclude` M.keysSet base_h -}) ids, k, in_e)) False = undefined
-          | otherwise = case (go (depth + 1) hist losers) (normalise (deeds, (Heap (M.delete x' h'_winners) ids, [], in_e))) of
-            (losers', (deeds', (Heap h' ids', [], in_qa'@(_, annee -> Answer _)))) -> (deeds', Heap (M.insert x' (Concrete (fmap (fmap qaToAnnedTerm') in_qa')) h')         ids', losers')
-            (losers', _)                                                           -> (deeds,  Heap (M.insert x' (Concrete in_e)                                h'_winners) ids,  IS.insert (annedTag (snd in_e)) losers')
-        speculate_one x' hb              (deeds, Heap h'_winners ids, losers) 
-          = (deeds, Heap (M.insert x' hb h'_winners) ids, losers)
+          | otherwise = case (go (depth + 1) (if tREELIKE_SPECULATION then hist else hist')) (normalise (deeds, (Heap (M.delete x' h') ids, [], in_e))) of
+            (hist', (deeds', (Heap h' ids', [], in_qa'@(_, annee -> Answer _)))) -> (deeds', Heap (M.insert x' (Concrete (fmap (fmap qaToAnnedTerm') in_qa')) h') ids', hist')
+            (hist', _)                                                           -> (deeds,  Heap (M.insert x' (Concrete in_e)                                h') ids,  hist')
+        speculate_one x' hb              (deeds, Heap h'_winners ids, hist') 
+          = (deeds, Heap (M.insert x' hb h') ids, hist')
 
 reduce :: (Deeds, State) -> (Deeds, State)
 reduce (deeds, orig_state) = go (mkHistory (extra wQO)) (deeds, orig_state)
