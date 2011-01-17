@@ -101,6 +101,13 @@ gc (deeds, (Heap h ids, k, in_e)) = transitiveInline h (releasePureHeapDeeds dee
     --
     -- So I nixed in favour of a bit of gc in this module. TODO: experiment with not GCing here either.
 
+
+type Losers = IS.IntSet
+
+emptyLosers :: Losers
+emptyLosers = IS.empty
+
+
 speculate :: ((Deeds, State) -> (Deeds, State))
           -> (Deeds, State) -> (Deeds, State)
 speculate reduce = snd . go (0 :: Int) (mkHistory wQO) emptyLosers

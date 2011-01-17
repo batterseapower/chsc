@@ -1,5 +1,5 @@
 {-# LANGUAGE TupleSections, PatternGuards, ViewPatterns #-}
-module Evaluator.Evaluate (Losers, emptyLosers, normalise, step) where
+module Evaluator.Evaluate (normalise, step) where
 
 import Evaluator.FreeVars
 import Evaluator.Residualise
@@ -18,12 +18,6 @@ import Utilities
 
 import qualified Data.IntSet as IS
 import qualified Data.Map as M
-
-
-type Losers = IS.IntSet
-
-emptyLosers :: Losers
-emptyLosers = IS.empty
 
 
 -- | Non-expansive simplification we can do everywhere safely
