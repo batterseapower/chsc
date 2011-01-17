@@ -1,6 +1,7 @@
 {-# LANGUAGE TupleSections, PatternGuards, ViewPatterns #-}
 module Evaluator.Evaluate (Losers, emptyLosers, normalise, step) where
 
+import Evaluator.FreeVars
 import Evaluator.Residualise
 import Evaluator.Syntax
 
@@ -30,19 +31,24 @@ emptyLosers = IS.empty
 -- This function only ever returns deeds to the deed pool, but may add them.
 -- TODO: tag stack frames so we can lose the deeds argument altogether
 normalise :: (Deeds, UnnormalisedState) -> (Deeds, State)
-normalise (deeds, _state@(h, k, (rn, e))) =
-  (\(deeds', state') -> assertRender (hang (text "normalise: deeds lost or gained:") 2 (pPrintFullUnnormalisedState _state))
-                                     (not dEEDS || noChange (releaseStateDeed deeds _state) (releaseStateDeed deeds' state')) (deeds', state')) $
-  case annee e of
-    Var x             -> (deeds, (h, k, (rn, fmap (const (Question x)) e)))
-    Value v           -> (deeds, (h, k, (rn, fmap (const (Answer v)) e)))
-    App e1 x2         -> normalise (deeds', (h, Apply (renameAnnedVar rn x2)    : k, (rn, e1)))
-    PrimOp pop (e:es) -> normalise (deeds', (h, PrimApply pop [] (map (rn,) es) : k, (rn, e)))
-    Case e alts       -> normalise (deeds', (h, Scrutinise (rn, alts)           : k, (rn, e)))
-    LetRec xes e      -> normalise (allocate deeds' h k (rn, (xes, e)))
+normalise (deeds, state) =
+    (\(deeds', state') -> assertRender (hang (text "normalise: deeds lost or gained:") 2 (pPrintFullUnnormalisedState state))
+                                       (not dEEDS || noChange (releaseStateDeed deeds state) (releaseStateDeed deeds' state')) $
+                          assertRender (text "normalise: FVs") (stateFreeVars state == stateFreeVars state') $
+                          traceRender (text "normalising" $$ nest 2 (pPrintFullUnnormalisedState state) $$ text "to" $$ nest 2 (pPrintFullState state')) $
+                          (deeds', state')) $
+    go (deeds, state)
   where
-    tg = annedTag e
-    deeds' = releaseDeedDescend_ deeds tg
+    go (deeds, (h, k, (rn, e))) = case annee e of
+        Var x             -> (deeds, (h, k, (rn, fmap (const (Question x)) e)))
+        Value v           -> (deeds, (h, k, (rn, fmap (const (Answer v)) e)))
+        App e1 x2         -> normalise (deeds', (h, Apply (renameAnnedVar rn x2)    : k, (rn, e1)))
+        PrimOp pop (e:es) -> normalise (deeds', (h, PrimApply pop [] (map (rn,) es) : k, (rn, e)))
+        Case e alts       -> normalise (deeds', (h, Scrutinise (rn, alts)           : k, (rn, e)))
+        LetRec xes e      -> normalise (allocate deeds' h k (rn, (xes, e)))
+      where
+        tg = annedTag e
+        deeds' = releaseDeedDescend_ deeds tg
 
     allocate :: Deeds -> Heap -> Stack -> In ([(Var, AnnedTerm)], AnnedTerm) -> (Deeds, UnnormalisedState)
     allocate deeds (Heap h ids) k (rn, (xes, e)) = (deeds, (Heap (h `M.union` M.map Concrete (M.fromList xes')) ids', k, (rn', e)))
