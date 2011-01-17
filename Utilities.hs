@@ -71,7 +71,8 @@ class Functor z => Zippable z where
     zipWith_ f as bs = fmap (uncurry f) (zip_ as bs)
 
 
-#if !MIN_VERSION_base(4, 2, 1)
+#ifdef MIN_VERSION_base
+#if !(MIN_VERSION_base(4, 3, 0))
 
 -- These instances are in base-4.3
 
@@ -81,6 +82,7 @@ instance Monad (Either a) where
     Left l  >>= _    = Left l
     Right x >>= fxmy = fxmy x
 
+#endif
 #endif
 
 
