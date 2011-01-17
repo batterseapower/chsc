@@ -32,7 +32,7 @@ emptyLosers = IS.empty
 normalise :: (Deeds, UnnormalisedState) -> (Deeds, State)
 normalise (deeds, _state@(h, k, (rn, e))) =
   (\(deeds', state') -> assertRender (hang (text "normalise: deeds lost or gained:") 2 (pPrintFullUnnormalisedState _state))
-                                     (not dEEDS || noChange (releaseUnnormalisedStateDeed deeds _state) (releaseStateDeed deeds' state')) (deeds', state')) $
+                                     (not dEEDS || noChange (releaseStateDeed deeds _state) (releaseStateDeed deeds' state')) (deeds', state')) $
   case annee e of
     Var x             -> (deeds, (h, k, (rn, fmap (const (Question x)) e)))
     Value v           -> (deeds, (h, k, (rn, fmap (const (Answer v)) e)))

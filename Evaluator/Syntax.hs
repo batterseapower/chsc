@@ -186,11 +186,8 @@ releaseTagDeeds deeds (_,  PhantomLive)  = deeds
 releasePureHeapDeeds :: Deeds -> PureHeap -> Deeds
 releasePureHeapDeeds = M.fold (flip releaseHeapBindingDeeds)
 
-releaseUnnormalisedStateDeed :: Deeds -> UnnormalisedState -> Deeds
-releaseUnnormalisedStateDeed deeds (Heap h _, k, (_, e))
+releaseStateDeed :: Deeds -> (Heap, Stack, In (Anned a)) -> Deeds
+releaseStateDeed deeds (Heap h _, k, (_, e))
   = foldl' (\deeds kf -> foldl' releaseDeedDeep deeds (stackFrameTags kf))
            (releasePureHeapDeeds (releaseDeedDeep deeds (annedTag e)) h)
            k
-
-releaseStateDeed :: Deeds -> State -> Deeds
-releaseStateDeed deeds = releaseUnnormalisedStateDeed deeds . denormalise
