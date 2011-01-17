@@ -18,8 +18,8 @@ renameFreeVars :: Renaming -> FreeVars -> FreeVars
 renameFreeVars rn = S.map (rename rn)
 
 
-renameIn :: (IdSupply -> Renaming -> a -> a) -> IdSupply -> In a -> a
-renameIn f ids (rn, x) = f ids rn x
+renameIn :: (Renaming -> a -> a) -> In a -> a
+renameIn f (rn, x) = f rn x
 
 renameInRenaming :: Renaming -> In a -> In a
 renameInRenaming rn_by (rn, x) = (renameRenaming rn_by rn, x)
@@ -53,7 +53,7 @@ mkRename rec = (var, term, alternatives, value, value')
       App e1 x2 -> App (term ids rn e1) (var rn x2)
       PrimOp pop es -> PrimOp pop (map (term ids rn) es)
       Case e alts -> Case (term ids rn e) (alternatives ids rn alts)
-      LetRec xes e -> LetRec (map (second (renameIn term ids')) xes') (term ids' rn' e)
+      LetRec xes e -> LetRec (map (second (renameIn (term ids'))) xes') (term ids' rn' e)
         where (ids', rn', xes') = renameBounds (\_ x' -> x') ids rn xes
     
     value ids rn = rec (value' ids) rn

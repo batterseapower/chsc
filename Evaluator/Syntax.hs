@@ -31,6 +31,7 @@ annedTag :: Anned a -> Tag
 annedTag = tag . unComp
 
 
+annedVarFreeVars = taggedFVedVarFreeVars
 annedVarFreeVars' = taggedFVedVarFreeVars'
 annedTermFreeVars = taggedFVedTermFreeVars
 annedTermFreeVars' = taggedFVedTermFreeVars'
@@ -82,7 +83,22 @@ instance BoundedJoinSemiLattice WhyLive where
     bottom = PhantomLive
 
 
-type State = (Heap, Stack, In AnnedTerm)
+data QA = Question Var
+        | Answer   (ValueF Anned)
+
+instance Pretty QA where
+    pPrintPrec level prec = pPrintPrec level prec . qaToAnnedTerm'
+
+qaToAnnedTerm' :: QA -> TermF Anned
+qaToAnnedTerm' (Question x) = Var x
+qaToAnnedTerm' (Answer v)   = Value v
+
+
+type UnnormalisedState = (Heap, Stack, In AnnedTerm)
+type State = (Heap, Stack, In (Anned QA))
+
+denormalise :: State -> UnnormalisedState
+denormalise (h, k, (rn, qa)) = (h, k, (rn, fmap qaToAnnedTerm' qa))
 
 -- | We do not abstract the h functions over static variables. This helps typechecking and gives GHC a chance to inline the definitions.
 data HeapBinding = Environmental           -- ^ Corresponding variable is static and free in the original input, or the name of a h-function. No need to generalise either of these (remember that h-functions don't appear in the input).
@@ -129,7 +145,7 @@ instance NFData StackFrame where
 instance Pretty StackFrame where
     pPrintPrec level prec kf = case kf of
         Apply x'                  -> pPrintPrecApp level prec (text "[_]") x'
-        Scrutinise in_alts        -> pPrintPrecCase level prec (text "[_]") (renameIn renameAnnedAlts prettyIdSupply in_alts)
+        Scrutinise in_alts        -> pPrintPrecCase level prec (text "[_]") (renameIn (renameAnnedAlts prettyIdSupply) in_alts)
         PrimApply pop in_vs in_es -> pPrintPrecPrimOp level prec pop (map SomePretty in_vs ++ map SomePretty in_es)
         Update x'                 -> pPrintPrecApp level prec (text "update") x'
 
@@ -170,8 +186,11 @@ releaseTagDeeds deeds (_,  PhantomLive)  = deeds
 releasePureHeapDeeds :: Deeds -> PureHeap -> Deeds
 releasePureHeapDeeds = M.fold (flip releaseHeapBindingDeeds)
 
-releaseStateDeed :: Deeds -> State -> Deeds
-releaseStateDeed deeds (Heap h _, k, (_, e))
+releaseUnnormalisedStateDeed :: Deeds -> UnnormalisedState -> Deeds
+releaseUnnormalisedStateDeed deeds (Heap h _, k, (_, e))
   = foldl' (\deeds kf -> foldl' releaseDeedDeep deeds (stackFrameTags kf))
            (releasePureHeapDeeds (releaseDeedDeep deeds (annedTag e)) h)
            k
+
+releaseStateDeed :: Deeds -> State -> Deeds
+releaseStateDeed deeds = releaseUnnormalisedStateDeed deeds . denormalise

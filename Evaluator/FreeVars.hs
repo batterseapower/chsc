@@ -85,22 +85,22 @@ stackFrameOpenFreeVars kf = case kf of
     Update x'               -> (S.singleton (annee x'), S.empty)
 
 -- | Returns (an overapproximation of) the free variables of the state that it would be useful to inline, and why that is so
-stateLiveness :: State -> Liveness
+stateLiveness :: (Heap, Stack, In (Anned a)) -> Liveness
 stateLiveness state = mkLiveness (stateFreeVars state) ConcreteLive
 
 -- | Returns (an overapproximation of) the free variables that the state would have if it were residualised right now (i.e. variables bound by phantom bindings *are* in the free vars set)
-stateFreeVars :: State -> FreeVars
+stateFreeVars :: (Heap, Stack, In (Anned a)) -> FreeVars
 stateFreeVars = snd . stateStaticBindersAndFreeVars
 
-stateStaticBinders :: State -> BoundVars
+stateStaticBinders :: (Heap, Stack, In (Anned a)) -> BoundVars
 stateStaticBinders = fst . stateStaticBindersAndFreeVars
 
 -- | Returns the free variables that the state would have if it were residualised right now (i.e. excludes static binders),
 -- along with the static binders as a separate set.
-stateStaticBindersAndFreeVars :: State -> (BoundVars, FreeVars)
+stateStaticBindersAndFreeVars :: (Heap, Stack, In (Anned a)) -> (BoundVars, FreeVars)
 stateStaticBindersAndFreeVars (Heap h _, k, in_e) = (bvs_static', fvs' S.\\ bvs_nonstatic')
   where
-    ((bvs_static', bvs_nonstatic'), fvs') = pureHeapOpenFreeVars h (stackOpenFreeVars k (inFreeVars annedTermFreeVars in_e))
+    ((bvs_static', bvs_nonstatic'), fvs') = pureHeapOpenFreeVars h (stackOpenFreeVars k (inFreeVars annedFreeVars in_e))
     
     pureHeapOpenFreeVars :: PureHeap -> (BoundVars, FreeVars) -> ((BoundVars, BoundVars), FreeVars)
     pureHeapOpenFreeVars h (bvs, fvs) = M.foldrWithKey (\x' hb ((bvs_static, bvs_nonstatic), fvs) -> case hb of Concrete in_e -> ((bvs_static, S.insert x' bvs_nonstatic), fvs `S.union` inFreeVars annedTermFreeVars in_e); _ -> ((S.insert x' bvs_static, bvs_nonstatic), fvs)) ((S.empty, bvs), fvs) h

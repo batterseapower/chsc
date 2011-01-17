@@ -45,10 +45,8 @@ wQO | not tERMINATION_CHECK                        = postcomp (const generaliseN
 supercompile :: Term -> Term
 supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ runScpM $ fmap snd $ sc (mkHistory (extra wQO)) (deeds, state)
   where input_fvs = annedTermFreeVars anned_e
-        state = (Heap (setToMap Environmental input_fvs) reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, anned_e))
+        (deeds, state) = normalise (mkDeeds (bLOAT_FACTOR - 1) (t, pPrint . rb), (Heap (setToMap Environmental input_fvs) reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, anned_e)))
         anned_e = toAnnedTerm e
-        
-        deeds = mkDeeds (bLOAT_FACTOR - 1) (t, pPrint . rb)
         
         (t, rb) = extractDeeds (\f e -> let (ts, rb) = f (annee e)
                                         in (Node (annedTag e) ts, \(Node unc ts') -> Counted unc (rb ts'))) anned_e
@@ -130,9 +128,9 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) emptyLosers
         (deeds'', Heap h'_winners' ids'', losers') = M.foldrWithKey speculate_one (deeds', Heap h'_winners ids', losers) (h'_winners M.\\ h)
         speculate_one x' (Concrete in_e) (deeds, Heap h'_winners ids, losers)
           -- | not (isValue (annee (snd in_e))), traceRender ("speculate", depth, residualiseState (Heap (h {- `exclude` M.keysSet base_h -}) ids, k, in_e)) False = undefined
-          | otherwise = case (go (depth + 1) hist losers) (deeds, (Heap (M.delete x' h'_winners) ids, [], in_e)) of
-            (losers', (deeds', (Heap h' ids', [], in_e'@(_, annee -> Value _)))) -> (deeds', Heap (M.insert x' (Concrete in_e') h')         ids', losers')
-            (losers', _)                                                         -> (deeds,  Heap (M.insert x' (Concrete in_e)  h'_winners) ids,  IS.insert (annedTag (snd in_e)) losers')
+          | otherwise = case (go (depth + 1) hist losers) (normalise (deeds, (Heap (M.delete x' h'_winners) ids, [], in_e))) of
+            (losers', (deeds', (Heap h' ids', [], in_qa'@(_, annee -> Answer _)))) -> (deeds', Heap (M.insert x' (Concrete (fmap (fmap qaToAnnedTerm') in_qa')) h')         ids', losers')
+            (losers', _)                                                           -> (deeds,  Heap (M.insert x' (Concrete in_e)                                h'_winners) ids,  IS.insert (annedTag (snd in_e)) losers')
         speculate_one x' hb              (deeds, Heap h'_winners ids, losers) 
           = (deeds, Heap (M.insert x' hb h'_winners) ids, losers)
 
@@ -141,7 +139,8 @@ reduce (deeds, orig_state) = go (mkHistory (extra wQO)) (deeds, orig_state)
   where
     go hist (deeds, state)
       -- | traceRender ("reduce.go", pPrintFullState state) False = undefined
-      | not eVALUATE_PRIMOPS, (_, _, (_, annee -> PrimOp _ _)) <- state = (deeds, state)
+      -- FIXME: a replacement for eVALUATE_PRIMOPS
+      -- | not eVALUATE_PRIMOPS, (_, _, (_, annee -> PrimOp _ _)) <- state = (deeds, state)
       | otherwise = fromMaybe (deeds, state) $ either id id $ do
           hist' <- case terminate hist (state, (deeds, state)) of
                       _ | intermediate state  -> Right hist
@@ -151,7 +150,7 @@ reduce (deeds, orig_state) = go (mkHistory (extra wQO)) (deeds, orig_state)
           Right $ fmap (go hist') $ step (deeds, state)
     
     intermediate :: State -> Bool
-    intermediate (_, _, (_, annee -> Var _)) = False
+    intermediate (_, _, (_, annee -> Question _)) = False
     intermediate _ = True
 
 

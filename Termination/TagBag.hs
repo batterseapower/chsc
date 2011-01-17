@@ -19,8 +19,8 @@ embedWithTagBags :: WQO State Generaliser
 embedWithTagBags = precomp stateTags $ postcomp generaliserFromGrowing $ refineCollection (\discard -> postcomp discard $ natsWeak) -- TODO: have a version where I replace weakManyNat with (zippable nat)
   where
     -- NB: this is stronger than 
-    stateTags (Heap h _, k, (_, e)) = traceRender ("stateTags (TagBag)", M.map heapBindingTagBag h, map stackFrameTags' k, focusedTermTag' e) $
-                                      pureHeapTagBag h `plusTagBag` stackTagBag k `plusTagBag` tagTagBag (focusedTermTag' e)
+    stateTags (Heap h _, k, (_, qa)) = traceRender ("stateTags (TagBag)", M.map heapBindingTagBag h, map stackFrameTags' k, qaTag' qa) $
+                                       pureHeapTagBag h `plusTagBag` stackTagBag k `plusTagBag` tagTagBag (qaTag' qa)
       where
         heapBindingTagBag :: HeapBinding -> TagBag
         heapBindingTagBag = maybe (mkTagBag []) (tagTagBag . pureHeapBindingTag') . heapBindingTag_
@@ -57,5 +57,5 @@ pureHeapBindingTag' = injectTag 5
 stackFrameTags' :: StackFrame -> [Tag]
 stackFrameTags' = map (injectTag 3) . stackFrameTags
 
-focusedTermTag' :: AnnedTerm -> Tag
-focusedTermTag' = injectTag 2 . annedTag
+qaTag' :: Anned QA -> Tag
+qaTag' = injectTag 2 . annedTag

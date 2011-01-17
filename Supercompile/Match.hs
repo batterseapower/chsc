@@ -16,15 +16,20 @@ import qualified Data.Map as M
 match :: State -- ^ Tieback semantics
       -> State -- ^ This semantics
       -> Maybe Renaming -- ^ Renaming from left to right
-match (Heap h_l _, k_l, in_e_l) (Heap h_r _, k_r, in_e_r) = -- (\res -> traceRender ("match", M.keysSet h_l, residualiseDriveState (Heap h_l prettyIdSupply, k_l, in_e_l), M.keysSet h_r, residualiseDriveState (Heap h_r prettyIdSupply, k_r, in_e_r), res) res) $
+match (Heap h_l _, k_l, in_qa_l) (Heap h_r _, k_r, in_qa_r) = -- (\res -> traceRender ("match", M.keysSet h_l, residualiseDriveState (Heap h_l prettyIdSupply, k_l, in_e_l), M.keysSet h_r, residualiseDriveState (Heap h_r prettyIdSupply, k_r, in_e_r), res) res) $
   do
-    free_eqs1 <- matchInTerm matchIdSupply in_e_l in_e_r
+    free_eqs1 <- matchAnned (matchInQA matchIdSupply) in_qa_l in_qa_r
     (bound_eqs, free_eqs2) <- matchEC k_l k_r
     matchHeapExact h_l h_r (bound_eqs, free_eqs1 ++ free_eqs2)
 
 matchAnned :: (In a -> In a -> b)
            -> In (Anned a) -> In (Anned a) -> b
 matchAnned f (rn_l, annee -> e_l) (rn_r, annee -> e_r) = f (rn_l, e_l) (rn_r, e_r)
+
+matchInQA :: IdSupply -> In QA -> In QA -> Maybe [(Var, Var)]
+matchInQA _   (rn_l, Question x_l) (rn_r, Question x_r) = Just [matchInVar (rn_l, x_l) (rn_r, x_r)]
+matchInQA ids (rn_l, Answer v_l)   (rn_r, Answer v_r)   = matchInValue ids (rn_l, v_l) (rn_r, v_r)
+matchInQA _ _ _ = Nothing
 
 matchInTerm :: IdSupply -> In AnnedTerm -> In AnnedTerm -> Maybe [(Var, Var)]
 matchInTerm ids = matchAnned (matchInTerm' ids)

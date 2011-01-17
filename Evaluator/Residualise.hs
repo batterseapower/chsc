@@ -1,5 +1,5 @@
 {-# LANGUAGE ViewPatterns, TupleSections #-}
-module Evaluator.Residualise (pPrintFullState) where
+module Evaluator.Residualise (pPrintFullState, pPrintFullUnnormalisedState) where
 
 import Evaluator.Syntax
 
@@ -14,10 +14,10 @@ import qualified Data.Map as M
 
 
 residualiseTerm :: IdSupply -> In AnnedTerm -> Out FVedTerm
-residualiseTerm ids = detagAnnedTerm . renameIn renameAnnedTerm ids
+residualiseTerm ids = detagAnnedTerm . renameIn (renameAnnedTerm ids)
 
-residualiseState :: State -> (Out [(Var, Doc)], Out FVedTerm)
-residualiseState (heap, k, in_e) = residualiseHeap heap (\ids -> residualiseStack ids k (residualiseTerm ids in_e))
+residualiseUnnormalisedState :: UnnormalisedState -> (Out [(Var, Doc)], Out FVedTerm)
+residualiseUnnormalisedState (heap, k, in_e) = residualiseHeap heap (\ids -> residualiseStack ids k (residualiseTerm ids in_e))
 
 residualiseHeap :: Heap -> (IdSupply -> ((Out [(Var, Doc)], Out [(Var, FVedTerm)]), Out FVedTerm)) -> (Out [(Var, Doc)], Out FVedTerm)
 residualiseHeap (Heap h ids) (($ ids) -> ((floats_static_k, floats_nonstatic_k), e)) = (floats_static_h ++ floats_static_k, letRecSmart (floats_nonstatic_h ++ floats_nonstatic_k) e)
@@ -37,11 +37,15 @@ residualiseStack ids (kf:k) (residualiseStackFrame ids kf -> ((static_floats, no
 
 residualiseStackFrame :: IdSupply -> StackFrame -> Out FVedTerm -> ((Out [(Var, Doc)], Out [(Var, FVedTerm)]), Out FVedTerm)
 residualiseStackFrame _   (Apply x2')               e1 = (([], []), e1 `app` annee x2')
-residualiseStackFrame ids (Scrutinise in_alts)      e  = (([], []), case_ e (detagAnnedAlts $ renameIn renameAnnedAlts ids in_alts))
-residualiseStackFrame ids (PrimApply pop in_vs es') e  = (([], []), primOp pop (map (value . fvee . detagAnnedValue . renameIn renameAnnedValue ids) in_vs ++ e : map (residualiseTerm ids) es'))
+residualiseStackFrame ids (Scrutinise in_alts)      e  = (([], []), case_ e (detagAnnedAlts $ renameIn (renameAnnedAlts ids) in_alts))
+residualiseStackFrame ids (PrimApply pop in_vs es') e  = (([], []), primOp pop (map (value . fvee . detagAnnedValue . renameIn (renameAnnedValue ids)) in_vs ++ e : map (residualiseTerm ids) es'))
 residualiseStackFrame _   (Update x')               e  = (([], [(annee x', e)]), var (annee x'))
 
 
 pPrintFullState :: State -> Doc
-pPrintFullState state = pPrint (M.fromList floats_static) $$ pPrint e
-  where (floats_static, e) = residualiseState state
+pPrintFullState = pPrintFullUnnormalisedState . denormalise
+
+pPrintFullUnnormalisedState :: UnnormalisedState -> Doc
+pPrintFullUnnormalisedState state = pPrint (M.fromList floats_static) $$ pPrint e
+  where (floats_static, e) = residualiseUnnormalisedState state
+

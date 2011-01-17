@@ -30,12 +30,12 @@ embedWithTagGraphs = precomp stateTags $ postcomp generaliserFromGrowing $ refin
     -- consolidate :: (Functor f, Foldable.Foldable f) => f (TagSet, Nat) -> (TagSet, f Nat)
     --     consolidate (fmap fst &&& fmap snd -> (ims, counts)) = (Foldable.foldr (IM.unionWith (\() () -> ())) IM.empty ims, counts)
     
-    stateTags (Heap h _, k, in_e@(_, e)) = -- traceRender ("stateTags (TagGraph)", graph) $
-                                           graph
+    stateTags (Heap h _, k, in_qa@(_, qa)) = -- traceRender ("stateTags (TagGraph)", graph) $
+                                             graph
       where
         graph = pureHeapTagGraph h  
-                 `plusTagGraph` stackTagGraph [focusedTermTag' e] k
-                 `plusTagGraph` mkTermTagGraph (focusedTermTag' e) in_e
+                 `plusTagGraph` stackTagGraph [qaTag' qa] k
+                 `plusTagGraph` mkQATagGraph (qaTag' qa) in_qa
         
         heapBindingTagGraph :: HeapBinding -> TagGraph
         heapBindingTagGraph hb = maybe (mkTagGraph [] S.empty) (\tg -> mkTagGraph [pureHeapBindingTag' tg] (heapBindingReferences hb)) $ heapBindingTag_ hb
@@ -61,8 +61,8 @@ embedWithTagGraphs = precomp stateTags $ postcomp generaliserFromGrowing $ refin
                   | x `S.notMember` fvs = edges
                   | otherwise           = foldr (\referrer_tg edges -> IM.singleton referrer_tg (referant_tgs, 0) `plusTagGraph` edges) edges referrer_tgs
         
-        mkTermTagGraph :: Tag -> In AnnedTerm -> TagGraph
-        mkTermTagGraph e_tg in_e = mkTagGraph [e_tg] (inFreeVars annedTermFreeVars in_e)
+        mkQATagGraph :: Tag -> In (Anned QA) -> TagGraph
+        mkQATagGraph qa_tg in_qa = mkTagGraph [qa_tg] (inFreeVars annedFreeVars in_qa)
         
         mkTagGraph :: [Tag] -> FreeVars -> TagGraph
         mkTagGraph e_tgs fvs = plusTagGraphs [IM.singleton e_tg (IS.empty, 1) | e_tg <- e_tgs] `plusTagGraph` referrerEdges e_tgs fvs
@@ -81,8 +81,8 @@ pureHeapBindingTag' = injectTag 5
 stackFrameTags' :: StackFrame -> [Tag]
 stackFrameTags' = map (injectTag 3) . stackFrameTags
 
-focusedTermTag' :: AnnedTerm -> Tag
-focusedTermTag' = injectTag 2 . annedTag
+qaTag' :: Anned QA -> Tag
+qaTag' = injectTag 2 . annedTag
 
 
 emptyTagGraph :: TagGraph
