@@ -176,6 +176,26 @@ instance MonadStatics ScpM where
           | extra_statics == extra_statics' = (fs_now, fs_later)
           | otherwise                       = partition_fulfilments extra_statics' fs
           where
+            -- We would have a subtle bug here if (as in some branches) we let the evaluator look into
+            -- phantoms. Consider a term like:
+            --
+            --  x |-> <10>
+            --  x + 5
+            --
+            -- After supercompilation, we will have:
+            --
+            --  15
+            --
+            -- Since we check the *post supercompilation* free variables here, that h function will be floated
+            -- upwards, so it is visible to later supercompilations. But what if our context had looked like:
+            --
+            --   (let x = 10 in x + 5, let x = 11 in x + 5)
+            --
+            -- Since we only match phantoms by name, we are now in danger of tying back to this h-function when we
+            -- supercompile the second component of the pair!
+            --
+            -- I think this is responsible for the subtle bugs in some of the imaginary suite benchmarks (in particular,
+            -- integrate) that I saw on my phantom-lookthrough branches.
             (fs_now, fs_later)   = partition (Foldable.any (\x -> x `S.member` extra_statics) . fvedTermFreeVars . snd) fs
             extra_statics' = extra_statics `S.union` S.fromList (map (fun . fst) fs_now)
 
