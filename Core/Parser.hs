@@ -1,4 +1,5 @@
 {-# LANGUAGE PatternGuards, TupleSections, ViewPatterns #-}
+{-# OPTIONS_GHC -fno-warn-incomplete-patterns #-}
 module Core.Parser (parse) where
 
 import Core.Data
