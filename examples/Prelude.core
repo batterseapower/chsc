@@ -28,6 +28,7 @@ even x = x `mod` 2 == 0
 length xs = foldl' (\len _ -> len + 1) 0 xs
 map f xs = case xs of [] -> []; (x:xs) -> f x : map f xs
 concatMap f xs = concat (map f xs)
+filter p = foldr (\x ys -> if p x then x:ys else ys) []
 foldr c n xs = case xs of [] -> n; (x:xs) -> c x (foldr c n xs)
 foldl c n xs = case xs of [] -> n; (x:xs) -> foldl c (c n x) xs
 foldl' c n xs = case xs of [] -> n; (x:xs) -> let n' = c n x in case n' of _ -> foldl' c n' xs
