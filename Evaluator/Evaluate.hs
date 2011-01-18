@@ -29,7 +29,7 @@ normalise (deeds, state) =
     (\(deeds', state') -> assertRender (hang (text "normalise: deeds lost or gained:") 2 (pPrintFullUnnormalisedState state))
                                        (not dEEDS || noChange (releaseStateDeed deeds state) (releaseStateDeed deeds' state')) $
                           assertRender (text "normalise: FVs") (stateFreeVars state == stateFreeVars state') $
-                          traceRender (text "normalising" $$ nest 2 (pPrintFullUnnormalisedState state) $$ text "to" $$ nest 2 (pPrintFullState state')) $
+                          -- traceRender (text "normalising" $$ nest 2 (pPrintFullUnnormalisedState state) $$ text "to" $$ nest 2 (pPrintFullState state')) $
                           (deeds', state')) $
     go (deeds, state)
   where
