@@ -155,8 +155,6 @@ reduce (deeds, orig_state) = go (mkHistory (extra wQO)) (deeds, orig_state)
   where
     go hist (deeds, state)
       -- | traceRender ("reduce.go", pPrintFullState state) False = undefined
-      -- FIXME: a replacement for eVALUATE_PRIMOPS
-      -- | not eVALUATE_PRIMOPS, (_, _, (_, annee -> PrimOp _ _)) <- state = (deeds, state)
       | otherwise = fromMaybe (deeds, state) $ either id id $ do
           hist' <- case terminate hist (state, (deeds, state)) of
                       _ | intermediate state  -> Right hist
