@@ -154,6 +154,10 @@ heapBindingNonConcrete :: HeapBinding -> Bool
 heapBindingNonConcrete (Concrete _) = False
 heapBindingNonConcrete _            = True
 
+heapBindingEnvironmental :: HeapBinding -> Bool
+heapBindingEnvironmental Environmental = True
+heapBindingEnvironmental _             = False
+
 heapBindingTerm :: HeapBinding -> Maybe (In AnnedTerm, WhyLive)
 heapBindingTerm Environmental   = Nothing
 heapBindingTerm (Updated _ _)   = Nothing
