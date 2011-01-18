@@ -298,7 +298,7 @@ sc' hist (deeds, state) = (\raise -> check raise) `catchScpM` \gen -> stop gen h
     check this_rb = case terminate hist (state, this_rb) of
                       Continue hist' -> continue hist'
                       Stop (gen, rb) -> maybe (stop gen hist) ($ gen) $ guard sC_ROLLBACK >> Just rb
-    stop gen hist = do traceRenderScpM "sc-stop"
+    stop gen hist = do trace "sc-stop" $ return ()
                        split gen               (sc hist) (deeds,  state)
     continue hist = do traceRenderScpM ("reduce end", pPrintFullState state')
                        split generaliseNothing (sc hist) (deeds', state')
