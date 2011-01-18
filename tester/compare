@@ -7,9 +7,9 @@ results_a = Results(readfile(sys.argv[1]))
 results_b = Results(readfile(sys.argv[2]))
 
 def zip_values(header, left, right):
-    if header == "SC time" and left.strip() == "":
+    if header == "SC time" and left.strip() == "" or right.strip() == "":
         # Supercompilation time is special because it will be missing for GHC runs
-        return "(" + str(round(float(right.rstrip("s")))) + "s)"
+        return "(" + str(round(float((left.strip() or right.strip()).rstrip("s")))) + "s)"
     else:
         # Result a dimensionless number representing the "right" quantity as a fraction of the "left" quantity
         return str(round(float(right) / float(left), 2))
