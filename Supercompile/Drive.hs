@@ -114,7 +114,7 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) emptyLosers
   where
     go depth hist losers (deeds, state) = case terminate hist state of
         Continue hist' | sPECULATION -> continue depth hist' losers (deeds, state)
-        _                            -> (losers, (deeds, state))
+        _                            -> (losers, reduce (deeds, state)) -- It is very important we reduce in this branch, or we never call reduce with --no-speculation turned on!
     
     continue depth hist losers (deeds, state@(Heap h _, _, _)) = (losers', (deeds'', (Heap (h'_winners' `M.union` h'_losers) ids'', k, in_e)))
       where
