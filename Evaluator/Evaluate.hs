@@ -103,8 +103,8 @@ step (deeds, _state@(h, k, (rn, qa))) =
 
     update :: Deeds -> Heap -> Stack -> Tag -> Anned (Out Var) -> In AnnedValue -> Maybe (Deeds, UnnormalisedState)
     update deeds (Heap h ids) k tg_v x' (rn, v) = case claimDeed deeds' tg_v of
-        Nothing      -> traceRender ("update: deed claim FAILURE", annee x') Nothing
-        Just deeds'' -> Just (deeds'', (Heap (M.insert (annee x') (Concrete (rn, annedTerm tg_v (Value v))) h) ids, k, (rn, annedTerm tg_v (Value v))))
+        Nothing      -> trace (render (text "update-deeds:" <+> pPrint (annee x'))) Nothing
+        Just deeds'' ->                                                             Just (deeds'', (Heap (M.insert (annee x') (Concrete (rn, annedTerm tg_v (Value v))) h) ids, k, (rn, annedTerm tg_v (Value v))))
       where
         -- Unconditionally release the tag associated with the update frame
         deeds' = releaseDeedDeep deeds (annedTag x')

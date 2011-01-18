@@ -700,8 +700,8 @@ transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
           , (deeds, h_inlineable, inline_hb) <- case hb of
               Concrete in_e@(_, e) -> case why_live of
                 ConcreteLive -> case claimDeed deeds (annedTag e) of -- Do we have enough deeds to inline a concrete version at all?
-                                  Just deeds -> (deeds,                h_inlineable, hb)
-                                  Nothing    -> (deeds, M.insert x' hb h_inlineable, Phantom in_e)
+                                  Just deeds ->                                                     (deeds,                h_inlineable, hb)
+                                  Nothing    -> trace (render $ text "inline-deeds:" <+> pPrint x') (deeds, M.insert x' hb h_inlineable, Phantom in_e)
                 PhantomLive  -> (deeds, M.insert x' hb h_inlineable, Phantom in_e) -- We want to inline only a *phantom* version if the binding is demanded by phantoms only, or madness ensues
               _              -> (deeds, h_inlineable, hb)
           , (x' `M.notMember` h && (lOCAL_TIEBACKS || heapBindingEnvironmental inline_hb)) -- Be careful: even if we don't want local tiebacks, we don't want to abstract over free variables of the input
@@ -764,8 +764,8 @@ pushStackFrame kf deeds bracketed_hole = do
   where
     -- Inline parts of the evaluation context into each branch only if we can get that many deeds for duplication
     push fillers = case foldM (\deeds tag -> claimDeeds deeds tag (branch_factor - 1)) deeds (stackFrameTags kf) of -- NB: subtract one because one occurrence is already "paid for". It is OK if the result is negative (i.e. branch_factor 0)!
-            Nothing    -> traceRender ("pushStackFrames: deed claim failure", branch_factor) (Nothing, fillers)
-            Just deeds -> (Just deeds, map (\(ent, f) -> (ent, second3 (++ [kf]) . f)) fillers)
+            Nothing    -> trace (render $ text "pushStack-deeds" <+> pPrint branch_factor) (Nothing, fillers)
+            Just deeds ->                                                                  (Just deeds, map (\(ent, f) -> (ent, second3 (++ [kf]) . f)) fillers)
       where branch_factor = length fillers
 
 splitStackFrame :: IdSupply
