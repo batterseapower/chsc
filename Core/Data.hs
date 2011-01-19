@@ -37,6 +37,16 @@ dataTypes = [
      ("CCP"    , 4)]  -- Paraffins
   ]
 
+dataConFriendlyName :: DataCon -> Maybe String
+dataConFriendlyName dc = case dc of
+    "()"    -> Just "Tup0"
+    "(,)"   -> Just "Tup2"
+    "(,,)"  -> Just "Tup3"
+    "(,,,)" -> Just "Tup4"
+    "[]"    -> Just "Nil"
+    "(:)"   -> Just "Cons"
+    _       -> Nothing
+
 dataConArity :: DataCon -> Arity
 dataConArity have_dc = case [arity | dt <- dataTypes, (dc, arity) <- dt, dc == have_dc] of
   [arity] -> arity

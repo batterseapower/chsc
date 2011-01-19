@@ -123,24 +123,25 @@ appE :: Term -> Term -> ParseM Term
 appE e1 e2 = nameIt e2 >>= \x2 -> return (e1 `app` x2)
 
 dataConWrapper :: DataCon -> ParseM Var
-dataConWrapper = grabWrapper dcWrappers (\s x -> s { dcWrappers = x })
+dataConWrapper = grabWrapper dcWrappers (\s x -> s { dcWrappers = x }) (\dc -> dataConFriendlyName dc `orElse` dc)
 
 intWrapper :: Integer -> ParseM Var
-intWrapper = grabWrapper intWrappers (\s x -> s { intWrappers = x })
+intWrapper = grabWrapper intWrappers (\s x -> s { intWrappers = x }) show
 
 charWrapper :: Char -> ParseM Var
-charWrapper = grabWrapper charWrappers (\s x -> s { charWrappers = x })
+charWrapper = grabWrapper charWrappers (\s x -> s { charWrappers = x }) return
 
 primWrapper :: PrimOp -> ParseM Var
-primWrapper = grabWrapper primWrappers (\s x -> s { primWrappers = x })
+primWrapper = grabWrapper primWrappers (\s x -> s { primWrappers = x }) show
 
 grabWrapper :: Ord a
             => (ParseState -> M.Map a Var) -> (ParseState -> M.Map a Var -> ParseState)
+            -> (a -> String) -- For building human readable names for the wrapper invocations only
             -> a -> ParseM Var
-grabWrapper get set what = do
+grabWrapper get set describe what = do
     mb_x <- ParseM $ \s -> (s, [], M.lookup what (get s))
     case mb_x of Just x -> return x
-                 Nothing -> freshName "wrap" >>= \x -> ParseM $ \s -> (set s (M.insert what x (get s)), [], x)
+                 Nothing -> freshName ("wrap" ++ describe what) >>= \x -> ParseM $ \s -> (set s (M.insert what x (get s)), [], x)
 
 runParseM :: ParseM a -> ([(Var, Term)], a)
 runParseM act = (buildWrappers s ++ floats, x)
