@@ -1,15 +1,275 @@
 --no-primops --deeds-policy=proportional --bloat=8 --tag-collection=bags --no-generalisation --cheapification --no-speculation --no-reduce-rollback --no-sc-rollback -v0 --no-assertions
 Filename & SC time & Compile time & Run time & Heap size & Term size \\
-append & 1.1762142181396484e-2 & 0.7198660373687744 & 1.0003209114074707 & 1924805176 & 106 \\
-factorial & 7.2021484375e-3 & 0.7600991725921631 & 3.980112075805664e-2 & 16799392 & 123 \\
-raytracer & 7.807016372680664e-3 & 0.730273962020874 & 2.296239137649536 & 3971907240 & 298 \\
-sumtree & 1.18560791015625e-2 & 0.7880640029907227 & 0.5238528251647949 & 302829440 & 289 \\
-treeflip & 1.1700868606567383e-2 & 0.7411489486694336 & 0.6520800590515137 & 336878876 & 269 \\
-sumsquare & 2.5584936141967773e-2 & 0.7610428333282471 & 10.538493871688843 & 10041003508 & 572 \\
-bernouilli & 0.1453108787536621 & 1.6281421184539795 & 0.6694262027740479 & 252701408 & 1253 \\
-digitsofe2 & 0.13082599639892578 & 3.969257116317749 & 0.6753311157226563 & 297346032 & 1151 \\
-exp3\_8 & 1.685500144958496e-2 & 0.8560080528259277 & 2.2460591793060303 & 1944483104 & 326 \\
-primes & 2.9294967651367188e-2 & 0.812467098236084 & 1.04603910446167 & 431054972 & 494 \\
-rfib & 5.3479671478271484e-3 & 0.7910740375518799 & 0.9835460186004639 & 60800 & 84 \\
-tak & 1.1241912841796875e-2 & 0.7252631187438965 & 1.65037202835083 & 54440 & 205 \\
-x2n1 & 1.442408561706543e-2 & 0.7909281253814697 & 0.3686959743499756 & 208790736 & 351 \\
+append & 3.248929977416992e-3 & 1.4301669597625732 & 0.6155169010162354 & 1683569008 & 104 \\
+factorial & 4.3010711669921875e-3 & 1.4116809368133545 & 2.7271032333374023e-2 & 16797604 & 53 \\
+raytracer & 6.043910980224609e-3 & 1.418179988861084 & 0.6942219734191895 & 1795536104 & 144 \\
+sumtree & 7.152700424194336e-2 & 1.5912609100341797 & 0.3717629909515381 & 302826400 & 1778 \\
+treeflip & 5.41231632232666e-2 & 1.523427963256836 & 0.42815303802490234 & 336875176 & 1171 \\
+sumsquare & 0.2864201068878174 & 1.7218611240386963 & 6.723236083984375 & 10040995576 & 5680 \\
+bernouilli & 0.15711402893066406 & 2.0671138763427734 & 0.41687512397766113 & 239855284 & 1284 \\
+digitsofe2 & 1.0765202045440674 & 4.296674966812134 & 0.44992709159851074 & 297278788 & 10083 \\
+exp3\_8 & 0.1418318748474121 & 1.7805840969085693 & 1.4455111026763916 & 1943689660 & 2228 \\
+primes & 0.16295814514160156 & 1.5696940422058105 & 0.5361969470977783 & 459637536 & 1580 \\
+rfib & 1.5923023223876953e-2 & 1.4465677738189697 & 0.4619479179382324 & 62960 & 274 \\
+{-# LANGUAGE ExtendedDefaultRules, NoMonoPatBinds #-}
+module Main(main) where
+import Control.DeepSeq
+import Data.Time.Clock.POSIX (getPOSIXTime)
+import qualified Prelude
+import Prelude hiding ((+), (-), (*), div, mod)
+
+prelude_error = Prelude.error
+
+(+) = (Prelude.+) :: Int -> Int -> Int
+(-) = (Prelude.-) :: Int -> Int -> Int
+(*) = (Prelude.*) :: Int -> Int -> Int
+div = (Prelude.div) :: Int -> Int -> Int
+mod = (Prelude.mod) :: Int -> Int -> Int
+
+lit_1'Integer = -1 :: Integer
+lit0'Integer = 0 :: Integer
+lit1'Integer = 1 :: Integer
+lit2'Integer = 2 :: Integer
+
+lit_1'Double = -1 :: Double
+lit0'Double = 0 :: Double
+lit1'Double = 1 :: Double
+lit2'Double = 2 :: Double
+
+show'Int = show :: Int -> String
+show'Integer = show :: Integer -> String
+show'Double = show :: Double -> String
+
+read'Int = read :: String -> Int
+read'Integer = read :: String -> Integer
+read'Double = read :: String -> Double
+
+fromIntegral'Int'Integer = Prelude.fromIntegral :: Int -> Integer
+fromIntegral'Int'Double = Prelude.fromIntegral :: Int -> Double
+
+ipow'Double'Int = (Prelude.^) :: Double -> Int -> Double
+
+round'Double'Int = Prelude.round :: Double -> Int
+ceiling'Double'Int = Prelude.ceiling :: Double -> Int
+
+div'Int = Prelude.div :: Int -> Int -> Int
+max'Int = Prelude.max :: Int -> Int -> Int
+odd'Int = Prelude.odd :: Int -> Bool
+
+gt'Integer = (Prelude.>) :: Integer -> Integer -> Bool
+add'Integer = (Prelude.+) :: Integer -> Integer -> Integer
+subtract'Integer = (Prelude.-) :: Integer -> Integer -> Integer
+multiply'Integer = (Prelude.*) :: Integer -> Integer -> Integer
+div'Integer = (Prelude.div) :: Integer -> Integer -> Integer
+negate'Integer = Prelude.negate :: Integer -> Integer
+
+lte'Double = (Prelude.<=) :: Double -> Double -> Bool
+add'Double = (Prelude.+) :: Double -> Double -> Double
+subtract'Double = (Prelude.-) :: Double -> Double -> Double
+multiply'Double = (Prelude.*) :: Double -> Double -> Double
+divide'Double = (Prelude./) :: Double -> Double -> Double
+negate'Double = Prelude.negate :: Double -> Double
+
+eq'Char = (Prelude.==) :: Char -> Char -> Bool
+neq'Char = (Prelude./=) :: Char -> Char -> Bool
+lte'Char = (Prelude.<=) :: Char -> Char -> Bool
+lt'Char = (Prelude.<) :: Char -> Char -> Bool
+gte'Char = (Prelude.>=) :: Char -> Char -> Bool
+gt'Char = (Prelude.>) :: Char -> Char -> Bool
+
+succ'Char = Prelude.succ :: Char -> Char
+
+
+
+time_ :: IO a -> IO Double
+time_ act = do { start <- getTime; act; end <- getTime; return $! (Prelude.-) end start }
+
+getTime :: IO Double
+getTime = (fromRational . toRational) `fmap` getPOSIXTime
+
+main = do { t <- time_ (rnf results `seq` return ()); print t }
+  where results = map assertEq tests
+
+assertEq :: (Show a, Eq a) => (a, a) -> ()
+assertEq (x, y) = if x == y then () else error ("FAIL! " ++ show x ++ ", " ++ show y)
+
+root = let
+         h0 = \x_u18186 -> h1 x_u18186
+         h1 = \x_u18186 -> \y_u18191 -> h2 x_u18186 y_u18191
+         h2 = \x_u18186 -> \y_u18191 -> \zz_u18196 -> h3 x_u18186 y_u18191 zz_u18196
+         h3 = \x_u18186 -> \y_u18191 -> \zz_u18196 -> let
+                                                        anot1_u18200 = (<) y_u18191 (h12 x_u18186)
+                                                      in h4 x_u18186 y_u18191 zz_u18196 anot1_u18200
+         h4 = \x_u18186 -> \y_u18191 -> \zz_u18196 -> \anot1_u18200 -> case anot1_u18200 of
+                                                                         True ->
+                                                                           h5 x_u18186 y_u18191 zz_u18196
+                                                                         False ->
+                                                                           h57 x_u18186 y_u18191 zz_u18196
+         h5 = \x_u18186 -> \y_u18191 -> \zz_u18196 -> let
+                                                        h6 = \x_u18186 -> \y_u18191 -> \zz_u18196 -> \anot1_u18239 -> let
+                                                                                                                        h7 = \atak2_u18206 -> let
+                                                                                                                                                h8 = \atak2_u18206 -> \anot1_u18225 -> let
+                                                                                                                                                                                         atak3_u18235 = h15 atak1_u18202 atak2_u18206 atak1_u18233
+                                                                                                                                                                                         atak1_u18233 = h16 atak3_u18210
+                                                                                                                                                                                       in h9 atak1_u18202 atak3_u18210 anot1_u18225 atak1_u18227 atak3_u18235
+                                                                                                                                                h9 = \atak1_u18202 -> \atak3_u18210 -> \anot1_u18225 -> \atak1_u18227 -> \atak3_u18235 -> case case anot1_u18225 of
+                                                                                                                                                                                                                                                 True ->
+                                                                                                                                                                                                                                                   h10
+                                                                                                                                                                                                                                                 False ->
+                                                                                                                                                                                                                                                   h11 of
+                                                                                                                                                                                                                                            True ->
+                                                                                                                                                                                                                                              h12 atak3_u18210
+                                                                                                                                                                                                                                            False ->
+                                                                                                                                                                                                                                              h13 atak1_u18202 atak3_u18210 atak1_u18227 atak3_u18235
+                                                                                                                                                h11 = wTrue_u164
+                                                                                                                                                h13 = \atak1_u18202 -> \atak3_u18210 -> \atak1_u18227 -> \atak3_u18235 -> let
+                                                                                                                                                                                                                            atak2_u18231 = h14 atak1_u18202 atak3_u18210
+                                                                                                                                                                                                                          in tak_u340 atak1_u18227 atak2_u18231 atak3_u18235
+                                                                                                                                                h14 = \atak1_u18202 -> \atak3_u18210 -> tak_u340 atak1_u18229 atak3_u18210 atak1_u18202
+                                                                                                                                                h15 = \atak1_u18202 -> \atak2_u18206 -> \atak1_u18233 -> tak_u340 atak1_u18233 atak1_u18202 atak2_u18206
+                                                                                                                                                h16 = \atak3_u18210 -> let
+                                                                                                                                                                         w1_u167 = h17
+                                                                                                                                                                       in wSubtract_u247 atak3_u18210 w1_u167
+                                                                                                                                                wTrue_u164 = h18
+                                                                                                                                                wSubtract_u247 = h19
+                                                                                                                                                tak_u340 = h22
+                                                                                                                                                anot1_u18225 = (<) atak2_u18206 h30
+                                                                                                                                                h22 = \x_u18285 -> h23 x_u18285
+                                                                                                                                                h23 = \x_u18285 -> \y_u18287 -> h24 x_u18285 y_u18287
+                                                                                                                                                h24 = \x_u18285 -> \y_u18287 -> \zz_u18291 -> h25 x_u18285 y_u18287 zz_u18291
+                                                                                                                                                h25 = \x_u18285 -> \y_u18287 -> \zz_u18291 -> let
+                                                                                                                                                                                                anot1_u18292 = h29 x_u18285 y_u18287
+                                                                                                                                                                                              in case not_u338 anot1_u18292 of
+                                                                                                                                                                                                   True ->
+                                                                                                                                                                                                     h12 zz_u18291
+                                                                                                                                                                                                   False ->
+                                                                                                                                                                                                     h26 x_u18285 y_u18287 zz_u18291
+                                                                                                                                                h26 = \x_u18285 -> \y_u18287 -> \zz_u18291 -> let
+                                                                                                                                                                                                atak1_u18294 = h27 x_u18285 y_u18287 zz_u18291
+                                                                                                                                                                                                atak2_u18298 = h27 y_u18287 zz_u18291 x_u18285
+                                                                                                                                                                                                atak3_u18302 = h27 zz_u18291 x_u18285 y_u18287
+                                                                                                                                                                                              in tak_u340 atak1_u18294 atak2_u18298 atak3_u18302
+                                                                                                                                                h27 = \x_u18285 -> \y_u18287 -> \zz_u18291 -> let
+                                                                                                                                                                                                atak1_u18284 = h28 x_u18285
+                                                                                                                                                                                              in tak_u340 atak1_u18284 y_u18287 zz_u18291
+                                                                                                                                                h28 = \x_u18285 -> wSubtract_u247 x_u18285 w1_u167
+                                                                                                                                                h29 = \x_u18285 -> \y_u18287 -> wLessThan_u246 y_u18287 x_u18285
+                                                                                                                                                w1_u167 = h17
+                                                                                                                                                wLessThan_u246 = h31
+                                                                                                                                                not_u338 = h34
+                                                                                                                                                h34 = \b_u18285 -> h35 b_u18285
+                                                                                                                                                h35 = \b_u18285 -> case b_u18285 of
+                                                                                                                                                                     True ->
+                                                                                                                                                                       h36
+                                                                                                                                                                     False ->
+                                                                                                                                                                       h37
+                                                                                                                                                h36 = wFalse_u165
+                                                                                                                                                h37 = wTrue_u164
+                                                                                                                                                wFalse_u165 = h38
+                                                                                                                                              in h8 atak2_u18206 anot1_u18225
+                                                                                                                        h30 = atak1_u18202
+                                                                                                                        atak1_u18202 = h39 y_u18191 zz_u18196
+                                                                                                                        atak2_u18206 = case anot1_u18239 of
+                                                                                                                                         True ->
+                                                                                                                                           h40 x_u18186
+                                                                                                                                         False ->
+                                                                                                                                           h41 x_u18186
+                                                                                                                        atak3_u18210 = h42 x_u18186 y_u18191
+                                                                                                                        atak1_u18227 = h43 atak2_u18206
+                                                                                                                        atak1_u18229 = h46 atak2_u18206
+                                                                                                                        h39 = \y_u18191 -> \zz_u18196 -> tak_u340 atak1_u18199 y_u18191 zz_u18196
+                                                                                                                        h42 = \x_u18186 -> \y_u18191 -> tak_u340 atak1_u18208 x_u18186 y_u18191
+                                                                                                                        h43 = \atak2_u18206 -> let
+                                                                                                                                                 atak1_u18224 = h44
+                                                                                                                                               in tak_u340 atak1_u18224 atak2_u18206 atak3_u18210
+                                                                                                                        h44 = (-) atak1_u18202 h45
+                                                                                                                        tak_u340 = h47
+                                                                                                                        atak1_u18199 = h46 x_u18186
+                                                                                                                        h47 = \x_u18318 -> h48 x_u18318
+                                                                                                                        h48 = \x_u18318 -> \y_u18285 -> h49 y_u18285 x_u18318
+                                                                                                                        h49 = \y_u18285 -> \x_u18318 -> \zz_u18287 -> h50 y_u18285 zz_u18287 x_u18318
+                                                                                                                        h50 = \y_u18285 -> \zz_u18287 -> \x_u18318 -> let
+                                                                                                                                                                        anot1_u18290 = (<) y_u18285 (h12 x_u18318)
+                                                                                                                                                                      in h51 y_u18285 zz_u18287 anot1_u18290 x_u18318
+                                                                                                                        h51 = \y_u18285 -> \zz_u18287 -> \anot1_u18290 -> \x_u18318 -> case anot1_u18290 of
+                                                                                                                                                                                         True ->
+                                                                                                                                                                                           h52 y_u18285 zz_u18287 x_u18318
+                                                                                                                                                                                         False ->
+                                                                                                                                                                                           h55 y_u18285 zz_u18287 x_u18318
+                                                                                                                        h52 = \y_u18285 -> \zz_u18287 -> \x_u18318 -> let
+                                                                                                                                                                        wFalse_u165 = h38
+                                                                                                                                                                      in case wFalse_u165 of
+                                                                                                                                                                           True ->
+                                                                                                                                                                             h12 zz_u18287
+                                                                                                                                                                           False ->
+                                                                                                                                                                             h53 y_u18285 zz_u18287 x_u18318
+                                                                                                                        h53 = \y_u18285 -> \zz_u18287 -> \x_u18318 -> let
+                                                                                                                                                                        atak1_u18320 = h54 y_u18285 zz_u18287 x_u18318
+                                                                                                                                                                        atak2_u18324 = h54 zz_u18287 x_u18318 y_u18285
+                                                                                                                                                                        atak3_u18328 = h54 x_u18318 y_u18285 zz_u18287
+                                                                                                                                                                      in tak_u340 atak1_u18320 atak2_u18324 atak3_u18328
+                                                                                                                        h54 = \y_u18285 -> \zz_u18287 -> \x_u18318 -> let
+                                                                                                                                                                        atak1_u18281 = h46 x_u18318
+                                                                                                                                                                      in tak_u340 atak1_u18281 y_u18285 zz_u18287
+                                                                                                                      in h7 atak2_u18206
+                                                        atak1_u18208 = h46 zz_u18196
+                                                        anot1_u18239 = (<) zz_u18196 h56
+                                                        h56 = atak1_u18204
+                                                        atak1_u18204 = h46 y_u18191
+                                                      in h6 x_u18186 y_u18191 zz_u18196 anot1_u18239
+         h10 = False
+         h12 = \atak3_u18210 -> atak3_u18210
+         h17 = 1 :: Int
+         h18 = True
+         h19 = \x1_u18285 -> h20 x1_u18285
+         h20 = \x1_u18285 -> \x2_u18287 -> h21 x1_u18285 x2_u18287
+         h21 = \x1_u18285 -> \x2_u18287 -> (-) x1_u18285 (h12 x2_u18287)
+         h31 = \x1_u18285 -> h32 x1_u18285
+         h32 = \x1_u18285 -> \x2_u18287 -> h33 x1_u18285 x2_u18287
+         h33 = \x1_u18285 -> \x2_u18287 -> (<) x1_u18285 (h12 x2_u18287)
+         h38 = False
+         h40 = \x_u18186 -> h40 x_u18186
+         h41 = \x_u18186 -> x_u18186
+         h45 = 1 :: Int
+         h46 = \atak2_u18206 -> (-) atak2_u18206 h45
+         h55 = \y_u18285 -> \zz_u18287 -> \x_u18318 -> zz_u18287
+         h57 = \x_u18186 -> \y_u18191 -> \zz_u18196 -> zz_u18196
+       in h0
+tests = let
+          wTup2_a106 = \x1 -> \x2 -> (,) x1 x2
+          wCons_a104 = \x1 -> \x2 -> (:) x1 x2
+          wFalse_a107 = False
+          wTrue_a108 = True
+          wNil_a109 = []
+          w1_a111 = 1 :: Int
+          w8_a151 = 8 :: Int
+          w9_a123 = 9 :: Int
+          w16_a326 = 16 :: Int
+          w17_a332 = 17 :: Int
+          w24_a325 = 24 :: Int
+          w33_a330 = 33 :: Int
+          wSubtract_a150 = \x1 -> \x2 -> (-) x1 x2
+          wLessThan_a155 = \x1 -> \x2 -> (<) x1 x2
+          not = \b -> case b of
+                        True -> wFalse_a107
+                        False -> wTrue_a108
+          tak = \x -> \y -> \zz -> let
+                                     anot1_a103 = wLessThan_a155 y x
+                                     atak1_a125 = wSubtract_a150 x w1_a111
+                                     atak1_a146 = tak atak1_a125 y zz
+                                     atak1_a323 = wSubtract_a150 y w1_a111
+                                     atak2_a147 = tak atak1_a323 zz x
+                                     atak1_a324 = wSubtract_a150 zz w1_a111
+                                     atak3_a148 = tak atak1_a324 x y
+                                   in case not anot1_a103 of
+                                        True -> zz
+                                        False -> tak atak1_a146 atak2_a147 atak3_a148
+          tests = let
+                    awTup21_a328 = root w24_a325 w16_a326 w8_a151
+                    awTup21_a730 = root w33_a330 w17_a332 w8_a151
+                    awCons1_a1709 = wTup2_a106 awTup21_a730 w9_a123
+                    awCons1_a1711 = wTup2_a106 awTup21_a328 w9_a123
+                    awCons2_a4117 = wCons_a104 awCons1_a1709 wNil_a109
+                  in wCons_a104 awCons1_a1711 awCons2_a4117
+        in tests
+

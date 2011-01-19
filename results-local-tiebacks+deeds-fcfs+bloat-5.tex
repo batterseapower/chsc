@@ -1,15 +1,732 @@
 --no-primops --deeds-policy=fcfs --bloat=5 --tag-collection=bags --no-generalisation --cheapification --no-speculation --no-reduce-rollback --no-sc-rollback -v0 --no-assertions
 Filename & SC time & Compile time & Run time & Heap size & Term size \\
-append & 3.7240982055664063e-3 & 0.6666789054870605 & 0.9568729400634766 & 1924805428 & 106 \\
-factorial & 5.469083786010742e-3 & 0.6871280670166016 & 4.076409339904785e-2 & 16799840 & 123 \\
-raytracer & 7.40504264831543e-3 & 0.679163932800293 & 2.3055272102355957 & 3971907288 & 298 \\
-sumtree & 1.2367963790893555e-2 & 0.7274401187896729 & 0.5092251300811768 & 302829096 & 289 \\
-treeflip & 1.127004623413086e-2 & 0.6897480487823486 & 0.6406781673431396 & 336878848 & 269 \\
-sumsquare & 2.279496192932129e-2 & 0.7271938323974609 & 10.169750928878784 & 10041002952 & 572 \\
-bernouilli & 0.10422420501708984 & 1.661242961883545 & 0.619826078414917 & 252701132 & 1253 \\
-digitsofe2 & 0.11230897903442383 & 3.886638879776001 & 0.6301710605621338 & 297346032 & 1151 \\
-exp3\_8 & 1.540684700012207e-2 & 0.7457561492919922 & 2.1617109775543213 & 1944482668 & 326 \\
-primes & 2.7665138244628906e-2 & 0.7496190071105957 & 0.9683749675750732 & 431059492 & 494 \\
-rfib & 4.673957824707031e-3 & 0.7943799495697021 & 0.9530370235443115 & 60864 & 84 \\
-tak & 7.966995239257813e-3 & 0.6785471439361572 & 1.5578298568725586 & 54776 & 205 \\
-x2n1 & 3.038311004638672e-2 & 0.7887959480285645 & 0.3317561149597168 & 208790736 & 351 \\
+append & 2.995014190673828e-3 & 1.4095430374145508 & 0.6149988174438477 & 1683569296 & 104 \\
+factorial & 4.0509700775146484e-3 & 1.4216361045837402 & 2.7673006057739258e-2 & 16797392 & 53 \\
+raytracer & 5.5620670318603516e-3 & 1.4341130256652832 & 0.6940460205078125 & 1795535592 & 144 \\
+sumtree & 7.724499702453613e-2 & 1.610640048980713 & 0.39418482780456543 & 302826620 & 1700 \\
+treeflip & 6.391096115112305e-2 & 1.5441160202026367 & 0.4460129737854004 & 336875392 & 1476 \\
+sumsquare & 0.19365286827087402 & 1.6664600372314453 & 7.085451126098633 & 10040995548 & 4045 \\
+bernouilli & 0.15387487411499023 & 2.0460989475250244 & 0.4169130325317383 & 239854836 & 1284 \\
+digitsofe2 & 0.79152512550354 & 4.159860134124756 & 0.45090794563293457 & 297089616 & 7287 \\
+exp3\_8 & 0.1235039234161377 & 1.6816699504852295 & 1.449409008026123 & 1943689496 & 1963 \\
+{-# LANGUAGE ExtendedDefaultRules, NoMonoPatBinds #-}
+module Main(main) where
+import Control.DeepSeq
+import Data.Time.Clock.POSIX (getPOSIXTime)
+import qualified Prelude
+import Prelude hiding ((+), (-), (*), div, mod)
+
+prelude_error = Prelude.error
+
+(+) = (Prelude.+) :: Int -> Int -> Int
+(-) = (Prelude.-) :: Int -> Int -> Int
+(*) = (Prelude.*) :: Int -> Int -> Int
+div = (Prelude.div) :: Int -> Int -> Int
+mod = (Prelude.mod) :: Int -> Int -> Int
+
+lit_1'Integer = -1 :: Integer
+lit0'Integer = 0 :: Integer
+lit1'Integer = 1 :: Integer
+lit2'Integer = 2 :: Integer
+
+lit_1'Double = -1 :: Double
+lit0'Double = 0 :: Double
+lit1'Double = 1 :: Double
+lit2'Double = 2 :: Double
+
+show'Int = show :: Int -> String
+show'Integer = show :: Integer -> String
+show'Double = show :: Double -> String
+
+read'Int = read :: String -> Int
+read'Integer = read :: String -> Integer
+read'Double = read :: String -> Double
+
+fromIntegral'Int'Integer = Prelude.fromIntegral :: Int -> Integer
+fromIntegral'Int'Double = Prelude.fromIntegral :: Int -> Double
+
+ipow'Double'Int = (Prelude.^) :: Double -> Int -> Double
+
+round'Double'Int = Prelude.round :: Double -> Int
+ceiling'Double'Int = Prelude.ceiling :: Double -> Int
+
+div'Int = Prelude.div :: Int -> Int -> Int
+max'Int = Prelude.max :: Int -> Int -> Int
+odd'Int = Prelude.odd :: Int -> Bool
+
+gt'Integer = (Prelude.>) :: Integer -> Integer -> Bool
+add'Integer = (Prelude.+) :: Integer -> Integer -> Integer
+subtract'Integer = (Prelude.-) :: Integer -> Integer -> Integer
+multiply'Integer = (Prelude.*) :: Integer -> Integer -> Integer
+div'Integer = (Prelude.div) :: Integer -> Integer -> Integer
+negate'Integer = Prelude.negate :: Integer -> Integer
+
+lte'Double = (Prelude.<=) :: Double -> Double -> Bool
+add'Double = (Prelude.+) :: Double -> Double -> Double
+subtract'Double = (Prelude.-) :: Double -> Double -> Double
+multiply'Double = (Prelude.*) :: Double -> Double -> Double
+divide'Double = (Prelude./) :: Double -> Double -> Double
+negate'Double = Prelude.negate :: Double -> Double
+
+eq'Char = (Prelude.==) :: Char -> Char -> Bool
+neq'Char = (Prelude./=) :: Char -> Char -> Bool
+lte'Char = (Prelude.<=) :: Char -> Char -> Bool
+lt'Char = (Prelude.<) :: Char -> Char -> Bool
+gte'Char = (Prelude.>=) :: Char -> Char -> Bool
+gt'Char = (Prelude.>) :: Char -> Char -> Bool
+
+succ'Char = Prelude.succ :: Char -> Char
+
+
+time_ :: IO a -> IO Double
+time_ act = do { start <- getTime; act; end <- getTime; return $! (Prelude.-) end start }
+
+getTime :: IO Double
+getTime = (fromRational . toRational) `fmap` getPOSIXTime
+
+main = do { t <- time_ (rnf results `seq` return ()); print t }
+  where results = map assertEq tests
+
+assertEq :: (Show a, Eq a) => (a, a) -> ()
+assertEq (x, y) = if x == y then () else error ("FAIL! " ++ show x ++ ", " ++ show y)
+
+root = let
+         h0 = \n_u16052 -> h1 n_u16052
+         h1 = \n_u16052 -> case (==) n_u16052 h2 of
+                             True -> h3
+                             False -> h4 n_u16052
+         h2 = 0 :: Int
+         h3 = 2 :: Int
+         h4 = \n_u16052 -> let az33z332_u16068 = (-) n_u16052 h132
+                           in h5 az33z332_u16068
+         h5 = \az33z332_u16068 -> case (==) az33z332_u16068 h2 of
+                                    True -> h6
+                                    False -> h136 az33z332_u16068
+         h6 = let aiterate2_u16103 = (+) (2 :: Int) h132
+              in h7 aiterate2_u16103
+         h7 = \aiterate2_u16103 -> let
+                                     az47z611_u16115 = mod aiterate2_u16103 h131
+                                   in h8 aiterate2_u16103 az47z611_u16115
+         h8 = \aiterate2_u16103 -> \az47z611_u16115 -> let
+                                                         anot1_u16117 = (==) az47z611_u16115 h2
+                                                       in h9 aiterate2_u16103 anot1_u16117
+         h9 = \aiterate2_u16103 -> \anot1_u16117 -> case anot1_u16117 of
+                                                      True -> h10 aiterate2_u16103
+                                                      False -> h135 aiterate2_u16103
+         h10 = \aiterate2_u16103 -> let
+                                      aiterate2_u16111 = (+) aiterate2_u16103 h132
+                                    in h11 aiterate2_u16111
+         h11 = \aiterate2_u16111 -> let
+                                      az47z611_u16146 = mod aiterate2_u16111 h131
+                                    in h12 aiterate2_u16111 az47z611_u16146
+         h12 = \aiterate2_u16111 -> \az47z611_u16146 -> let
+                                                          anot1_u16148 = (==) az47z611_u16146 h2
+                                                        in h13 aiterate2_u16111 anot1_u16148
+         h13 = \aiterate2_u16111 -> \anot1_u16148 -> case anot1_u16148 of
+                                                       True -> h14 aiterate2_u16111
+                                                       False -> h134 aiterate2_u16111
+         h14 = \aiterate2_u16111 -> let wFalse_u164 = h105
+                                    in case wFalse_u164 of
+                                         True -> h15 aiterate2_u16111
+                                         False -> h17 aiterate2_u16111
+         h15 = \aiterate2_u16111 -> let awCons1_u16084 = aiterate2_u16111
+                                    in h16 awCons1_u16084
+         h16 = \awCons1_u16084 -> awCons1_u16084
+         h17 = \aiterate2_u16111 -> let
+                                      aiterate2_u16142 = (+) aiterate2_u16111 h132
+                                    in h18 aiterate2_u16142
+         h18 = \aiterate2_u16142 -> let
+                                      az47z611_u16186 = mod aiterate2_u16142 h131
+                                    in h19 aiterate2_u16142 az47z611_u16186
+         h19 = \aiterate2_u16142 -> \az47z611_u16186 -> let
+                                                          anot1_u16188 = (==) az47z611_u16186 h2
+                                                        in h20 aiterate2_u16142 anot1_u16188
+         h20 = \aiterate2_u16142 -> \anot1_u16188 -> case anot1_u16188 of
+                                                       True -> h21 aiterate2_u16142
+                                                       False -> h133 aiterate2_u16142
+         h21 = \aiterate2_u16142 -> let
+                                      aiterate2_u16182 = (+) aiterate2_u16142 h132
+                                    in h22 aiterate2_u16182
+         h22 = \aiterate2_u16182 -> let
+                                      az47z611_u16217 = mod aiterate2_u16182 h131
+                                    in h23 aiterate2_u16182 az47z611_u16217
+         h23 = \aiterate2_u16182 -> \az47z611_u16217 -> let
+                                                          anot1_u16219 = (==) az47z611_u16217 h2
+                                                        in h24 aiterate2_u16182 anot1_u16219
+         h24 = \aiterate2_u16182 -> \anot1_u16219 -> case anot1_u16219 of
+                                                       True -> h25 aiterate2_u16182
+                                                       False -> h130 aiterate2_u16182
+         h25 = \aiterate2_u16182 -> let
+                                      h26 = \aiterate2_u16182 -> let
+                                                                   h27 = \wCons_u165 -> \aiterate2_u16182 -> let
+                                                                                                               ac2_u16184 = wCons_u165 aiterate2_u16182 ac2_u16215
+                                                                                                               ac2_u16215 = h39
+                                                                                                               h39 = foldr_u3905 afoldr1_u16107 wNil_u247 awCons2_u16212
+                                                                                                               foldr_u3905 = h40
+                                                                                                               afoldr1_u16107 = h46 wCons_u165
+                                                                                                               awCons2_u16212 = h50
+                                                                                                               h40 = \c_u16298 -> h41 c_u16298
+                                                                                                               h41 = \c_u16298 -> \n_u16300 -> h42 c_u16298 n_u16300
+                                                                                                               h42 = \c_u16298 -> \n_u16300 -> \xs_u16302 -> h43 c_u16298 n_u16300 xs_u16302
+                                                                                                               h43 = \c_u16298 -> \n_u16300 -> \xs_u16302 -> case xs_u16302 of
+                                                                                                                                                               [] ->
+                                                                                                                                                                 h16 n_u16300
+                                                                                                                                                               (:) x_u16278 xs_u16296 ->
+                                                                                                                                                                 h44 x_u16278 xs_u16296 c_u16298 n_u16300
+                                                                                                               h44 = \x_u16278 -> \xs_u16296 -> \c_u16298 -> \n_u16300 -> let
+                                                                                                                                                                            ac2_u16270 = h45 xs_u16296 c_u16298 n_u16300
+                                                                                                                                                                          in c_u16298 x_u16278 ac2_u16270
+                                                                                                               h45 = \xs_u16296 -> \c_u16298 -> \n_u16300 -> foldr_u3905 c_u16298 n_u16300 xs_u16296
+                                                                                                               h46 = \wCons_u165 -> \x_u16298 -> h47 wCons_u165 x_u16298
+                                                                                                               h47 = \wCons_u165 -> \x_u16298 -> \ys_u16300 -> h48 wCons_u165 x_u16298 ys_u16300
+                                                                                                               h48 = \wCons_u165 -> \x_u16298 -> \ys_u16300 -> case afilter1_u16105 x_u16298 of
+                                                                                                                                                                 True ->
+                                                                                                                                                                   h49 wCons_u165 x_u16298 ys_u16300
+                                                                                                                                                                 False ->
+                                                                                                                                                                   h16 ys_u16300
+                                                                                                               h50 = iterate_u3907 suCC_u3911 aiterate2_u16213
+                                                                                                               iterate_u3907 = h51 wCons_u165
+                                                                                                               suCC_u3911 = h56
+                                                                                                               afilter1_u16105 = h58
+                                                                                                               h51 = \wCons_u165 -> \f_u16298 -> h52 wCons_u165 f_u16298
+                                                                                                               h52 = \wCons_u165 -> \f_u16298 -> \x_u16300 -> h53 wCons_u165 f_u16298 x_u16300
+                                                                                                               h53 = \wCons_u165 -> \f_u16298 -> \x_u16300 -> let
+                                                                                                                                                                awCons2_u16263 = h54 f_u16298 x_u16300
+                                                                                                                                                              in wCons_u165 x_u16300 awCons2_u16263
+                                                                                                               h54 = \f_u16298 -> \x_u16300 -> let
+                                                                                                                                                 aiterate2_u16301 = h55 f_u16298 x_u16300
+                                                                                                                                               in iterate_u3907 f_u16298 aiterate2_u16301
+                                                                                                               h58 = \x_u16298 -> h59 x_u16298
+                                                                                                               h59 = \x_u16298 -> let
+                                                                                                                                    az47z611_u16299 = h60 x_u16298
+                                                                                                                                  in z47z61_u2729 az47z611_u16299 w0_u246
+                                                                                                               z47z61_u2729 = h61
+                                                                                                             in h28 wCons_u165 ac2_u16184
+                                                                   h28 = \wCons_u165 -> \ac2_u16184 -> let
+                                                                                                         ac2_u16144 = ac2_u16184
+                                                                                                       in h29 wCons_u165 ac2_u16144
+                                                                   h29 = \wCons_u165 -> \ac2_u16144 -> let
+                                                                                                         ac2_u16113 = ac2_u16144
+                                                                                                       in h30 wCons_u165 ac2_u16113
+                                                                   h30 = \wCons_u165 -> \ac2_u16113 -> let
+                                                                                                         aiterate2_u16062 = ac2_u16113
+                                                                                                       in h31 wCons_u165 aiterate2_u16062
+                                                                   h31 = \wCons_u165 -> \aiterate2_u16062 -> case aiterate2_u16062 of
+                                                                                                               [] ->
+                                                                                                                 h32 wCons_u165
+                                                                                                               (:) x_u16278 __u16296 ->
+                                                                                                                 h38 x_u16278
+                                                                   h32 = \wCons_u165 -> let
+                                                                                          aerror1_u16274 = h33 wCons_u165
+                                                                                        in seq (prelude_error aerror1_u16274) undefined
+                                                                   h33 = \wCons_u165 -> let
+                                                                                          awCons2_u16272 = h34 wCons_u165
+                                                                                        in wCons_u165 wh_u922 awCons2_u16272
+                                                                   h34 = \wCons_u165 -> let
+                                                                                          we_u923 = h35
+                                                                                          awCons2_u16269 = h36 wCons_u165
+                                                                                        in wCons_u165 we_u923 awCons2_u16269
+                                                                   h36 = \wCons_u165 -> let
+                                                                                          awCons2_u16270 = h37 wCons_u165
+                                                                                        in wCons_u165 wa_u632 awCons2_u16270
+                                                                   h37 = \wCons_u165 -> wCons_u165 wd_u732 wNil_u247
+                                                                   h56 = \x_u16298 -> h57 x_u16298
+                                                                   h57 = \x_u16298 -> wAdd_u2370 x_u16298 w1_u338
+                                                                   h60 = \x_u16298 -> wModulo_u2374 x_u16298 w2_u340
+                                                                   h61 = \n_u16298 -> h62 n_u16298
+                                                                   h62 = \n_u16298 -> \m_u16300 -> h63 n_u16298 m_u16300
+                                                                   h63 = \n_u16298 -> \m_u16300 -> let
+                                                                                                     anot1_u16301 = h64 n_u16298 m_u16300
+                                                                                                   in not_u3897 anot1_u16301
+                                                                   h64 = \n_u16298 -> \m_u16300 -> wEqual_u2376 n_u16298 m_u16300
+                                                                   wCons_u165 = \x1_u16251 -> h65 x1_u16251
+                                                                   w0_u246 = h67
+                                                                   wNil_u247 = h68
+                                                                   w1_u338 = h69
+                                                                   w2_u340 = h70
+                                                                   wa_u632 = h71
+                                                                   wd_u732 = h72
+                                                                   wh_u922 = h73
+                                                                   wAdd_u2370 = h74
+                                                                   wModulo_u2374 = h77
+                                                                   wEqual_u2376 = h80
+                                                                   not_u3897 = h83
+                                                                   h83 = \b_u16325 -> h84 b_u16325
+                                                                   h84 = \b_u16325 -> case b_u16325 of
+                                                                                        True -> h85
+                                                                                        False -> h86
+                                                                   h85 = wFalse_u164
+                                                                   h86 = wTrue_u167
+                                                                   wFalse_u164 = h87
+                                                                   wTrue_u167 = h87
+                                                                 in h27 wCons_u165 aiterate2_u16182
+                                      h88 = let
+                                              ac2_u16215 = foldr_u3905 afoldr1_u16107 wNil_u247 awCons2_u16212
+                                              afoldr1_u16107 = h99
+                                              awCons2_u16212 = h104
+                                            in h89 ac2_u16215
+                                      h89 = \ac2_u16215 -> let ac2_u16184 = ac2_u16215
+                                                           in h90 ac2_u16184
+                                      h90 = \ac2_u16184 -> let ac2_u16144 = ac2_u16184
+                                                           in h91 ac2_u16144
+                                      h91 = \ac2_u16144 -> let ac2_u16113 = ac2_u16144
+                                                           in h92 ac2_u16113
+                                      h92 = \ac2_u16113 -> let aiterate2_u16062 = ac2_u16113
+                                                           in h93 aiterate2_u16062
+                                      h93 = \aiterate2_u16062 -> case aiterate2_u16062 of
+                                                                   [] -> h94
+                                                                   (:) x_u16278 __u16296 -> h38 x_u16278
+                                      h94 = let
+                                              awCons1_u16084 = error_u2730 aerror1_u16274
+                                              aerror1_u16274 = h95
+                                            in h16 awCons1_u16084
+                                      h95 = let
+                                              wh_u922 = h73
+                                              awCons2_u16272 = h96
+                                            in wCons_u165 wh_u922 awCons2_u16272
+                                      h96 = let
+                                              we_u923 = h35
+                                              awCons2_u16269 = h97
+                                            in wCons_u165 we_u923 awCons2_u16269
+                                      h97 = let awCons2_u16270 = h98
+                                            in wCons_u165 wa_u632 awCons2_u16270
+                                      h98 = let wd_u732 = h72
+                                            in wCons_u165 wd_u732 wNil_u247
+                                      h99 = \x_u16325 -> h100 x_u16325
+                                      h100 = \x_u16325 -> \ys_u16298 -> h101 ys_u16298 x_u16325
+                                      h101 = \ys_u16298 -> \x_u16325 -> let
+                                                                          az47z611_u16299 = h103 x_u16325
+                                                                        in case z47z61_u2729 az47z611_u16299 w0_u246 of
+                                                                             True ->
+                                                                               h102 ys_u16298 x_u16325
+                                                                             False -> h16 ys_u16298
+                                      h102 = \ys_u16298 -> \x_u16325 -> wCons_u165 x_u16325 ys_u16298
+                                      h103 = \x_u16325 -> wModulo_u2374 x_u16325 w2_u340
+                                      h104 = iterate_u3907 suCC_u3911 aiterate2_u16213
+                                      wFalse_u164 = h105
+                                      wCons_u165 = h106
+                                      w0_u246 = h67
+                                      wNil_u247 = h68
+                                      w2_u340 = h70
+                                      wa_u632 = h71
+                                      wModulo_u2374 = h77
+                                      z47z61_u2729 = h107
+                                      error_u2730 = h111
+                                      foldr_u3905 = h113
+                                      iterate_u3907 = h119
+                                      suCC_u3911 = h123
+                                      aiterate2_u16213 = h125 aiterate2_u16182
+                                      h107 = \n_u16251 -> h108 n_u16251
+                                      h108 = \n_u16251 -> \m_u16325 -> h109 n_u16251 m_u16325
+                                      h109 = \n_u16251 -> \m_u16325 -> let
+                                                                         anot1_u16297 = h110 n_u16251 m_u16325
+                                                                       in not_u3897 anot1_u16297
+                                      h110 = \n_u16251 -> \m_u16325 -> wEqual_u2376 n_u16251 m_u16325
+                                      h113 = \c_u16251 -> h114 c_u16251
+                                      h114 = \c_u16251 -> \n_u16325 -> h115 c_u16251 n_u16325
+                                      h115 = \c_u16251 -> \n_u16325 -> \xs_u16298 -> h116 c_u16251 xs_u16298 n_u16325
+                                      h116 = \c_u16251 -> \xs_u16298 -> \n_u16325 -> case xs_u16298 of
+                                                                                       [] -> h16 n_u16325
+                                                                                       (:) x_u16334 xs_u16336 ->
+                                                                                         h117 c_u16251 n_u16325 x_u16334 xs_u16336
+                                      h117 = \c_u16251 -> \n_u16325 -> \x_u16334 -> \xs_u16336 -> let
+                                                                                                    ac2_u16301 = h118 c_u16251 n_u16325 xs_u16336
+                                                                                                  in c_u16251 x_u16334 ac2_u16301
+                                      h118 = \c_u16251 -> \n_u16325 -> \xs_u16336 -> foldr_u3905 c_u16251 n_u16325 xs_u16336
+                                      h119 = \f_u16251 -> h120 f_u16251
+                                      h120 = \f_u16251 -> \x_u16325 -> h121 f_u16251 x_u16325
+                                      h121 = \f_u16251 -> \x_u16325 -> let
+                                                                         awCons2_u16257 = h122 f_u16251 x_u16325
+                                                                       in wCons_u165 x_u16325 awCons2_u16257
+                                      h122 = \f_u16251 -> \x_u16325 -> let
+                                                                         aiterate2_u16297 = h55 f_u16251 x_u16325
+                                                                       in iterate_u3907 f_u16251 aiterate2_u16297
+                                      h123 = \x_u16251 -> h124 x_u16251
+                                      h124 = \x_u16251 -> wAdd_u2370 x_u16251 w1_u338
+                                      h125 = \aiterate2_u16182 -> suCC_u3911 aiterate2_u16182
+                                      w1_u338 = h69
+                                      wAdd_u2370 = h74
+                                      wEqual_u2376 = h80
+                                      not_u3897 = h126
+                                      h126 = \b_u16251 -> h127 b_u16251
+                                      h127 = \b_u16251 -> case b_u16251 of
+                                                            True -> h128
+                                                            False -> h129
+                                      h128 = wFalse_u164
+                                      h129 = wTrue_u167
+                                      wTrue_u167 = h87
+                                    in case wFalse_u164 of
+                                         True -> h26 aiterate2_u16182
+                                         False -> h88
+         h35 = 'e'
+         h38 = \x_u16278 -> let awCons1_u16084 = x_u16278
+                            in h16 awCons1_u16084
+         h49 = \wCons_u165 -> \x_u16298 -> \ys_u16300 -> wCons_u165 x_u16298 ys_u16300
+         h55 = \f_u16298 -> \x_u16300 -> f_u16298 x_u16300
+         h65 = \x1_u16251 -> \x2_u16325 -> h66 x1_u16251 x2_u16325
+         h66 = \x1_u16251 -> \x2_u16325 -> (:) x1_u16251 x2_u16325
+         h67 = 0 :: Int
+         h68 = []
+         h69 = 1 :: Int
+         h70 = 2 :: Int
+         h71 = 'a'
+         h72 = 'd'
+         h73 = 'h'
+         h74 = \x1_u16325 -> h75 x1_u16325
+         h75 = \x1_u16325 -> \x2_u16298 -> h76 x2_u16298 x1_u16325
+         h76 = \x2_u16298 -> \x1_u16325 -> (+) x1_u16325 (h16 x2_u16298)
+         h77 = \x1_u16325 -> h78 x1_u16325
+         h78 = \x1_u16325 -> \x2_u16298 -> h79 x2_u16298 x1_u16325
+         h79 = \x2_u16298 -> \x1_u16325 -> mod x1_u16325 (h16 x2_u16298)
+         h80 = \x1_u16325 -> h81 x1_u16325
+         h81 = \x1_u16325 -> \x2_u16298 -> h82 x2_u16298 x1_u16325
+         h82 = \x2_u16298 -> \x1_u16325 -> (==) x1_u16325 (h16 x2_u16298)
+         h87 = True
+         h105 = False
+         h106 = \x1_u16251 -> h65 x1_u16251
+         h111 = \msg_u16251 -> h112 msg_u16251
+         h112 = \msg_u16251 -> seq (prelude_error msg_u16251) undefined
+         h130 = \aiterate2_u16182 -> let awCons1_u16084 = aiterate2_u16182
+                                     in h16 awCons1_u16084
+         h131 = 2 :: Int
+         h132 = 1 :: Int
+         h133 = \aiterate2_u16142 -> let awCons1_u16084 = aiterate2_u16142
+                                     in h16 awCons1_u16084
+         h134 = \aiterate2_u16111 -> let awCons1_u16084 = aiterate2_u16111
+                                     in h16 awCons1_u16084
+         h135 = \aiterate2_u16103 -> let awCons1_u16084 = aiterate2_u16103
+                                     in h16 awCons1_u16084
+         h136 = \az33z332_u16068 -> let
+                                      aiterate2_u16080 = h148 aiterate2_u16062
+                                      aiterate2_u16062 = h187
+                                    in h137 az33z332_u16068 aiterate2_u16080
+         h137 = \az33z332_u16068 -> \aiterate2_u16080 -> let
+                                                           az33z332_u16086 = (-) az33z332_u16068 h132
+                                                         in h138 aiterate2_u16080 az33z332_u16086
+         h138 = \aiterate2_u16080 -> \az33z332_u16086 -> case (==) az33z332_u16086 h2 of
+                                                           True -> h139 aiterate2_u16080
+                                                           False -> h145 aiterate2_u16080 az33z332_u16086
+         h139 = \aiterate2_u16080 -> case aiterate2_u16080 of
+                                       [] -> h140
+                                       (:) x_u16379 __u16618 -> h38 x_u16379
+         h140 = let aerror1_u16375 = h141
+                in seq (prelude_error aerror1_u16375) undefined
+         h141 = let
+                  wh_u922 = h73
+                  awCons2_u16373 = h142
+                in (:) wh_u922 awCons2_u16373
+         h142 = let
+                  we_u923 = h35
+                  awCons2_u16370 = h143
+                in (:) we_u923 awCons2_u16370
+         h143 = let
+                  wa_u632 = h71
+                  awCons2_u16371 = h144
+                in (:) wa_u632 awCons2_u16371
+         h144 = let
+                  wNil_u247 = h68
+                  wd_u732 = h72
+                in (:) wd_u732 wNil_u247
+         h145 = \aiterate2_u16080 -> \az33z332_u16086 -> let
+                                                           az33z332_u16351 = (-) az33z332_u16086 h132
+                                                         in h146 aiterate2_u16080 az33z332_u16351
+         h146 = \aiterate2_u16080 -> \az33z332_u16351 -> let
+                                                           aiterate2_u16345 = h148 aiterate2_u16080
+                                                           aiterate2_u16396 = h148 aiterate2_u16345
+                                                         in h147 aiterate2_u16345 az33z332_u16351 aiterate2_u16396
+         h147 = \aiterate2_u16345 -> \az33z332_u16351 -> \aiterate2_u16396 -> case (==) az33z332_u16351 h2 of
+                                                                                True ->
+                                                                                  h139 aiterate2_u16345
+                                                                                False ->
+                                                                                  h137 az33z332_u16351 aiterate2_u16396
+         h148 = \aiterate2_u16080 -> case aiterate2_u16080 of
+                                       (:) n_u16421 ns_u16423 -> h149 n_u16421 ns_u16423
+         h149 = \n_u16421 -> \ns_u16423 -> case ns_u16423 of
+                                             [] -> h150
+                                             (:) x_u16434 xs_u16436 -> h151 n_u16421 x_u16434 xs_u16436
+         h150 = []
+         h151 = \n_u16421 -> \x_u16434 -> \xs_u16436 -> let
+                                                          az47z611_u16441 = mod x_u16434 (h16 n_u16421)
+                                                        in h152 n_u16421 x_u16434 xs_u16436 az47z611_u16441
+         h152 = \n_u16421 -> \x_u16434 -> \xs_u16436 -> \az47z611_u16441 -> let
+                                                                              anot1_u16443 = (==) az47z611_u16441 h2
+                                                                            in h153 n_u16421 x_u16434 xs_u16436 anot1_u16443
+         h153 = \n_u16421 -> \x_u16434 -> \xs_u16436 -> \anot1_u16443 -> case anot1_u16443 of
+                                                                           True ->
+                                                                             h154 n_u16421 x_u16434 xs_u16436
+                                                                           False ->
+                                                                             h186 n_u16421 x_u16434 xs_u16436
+         h154 = \n_u16421 -> \x_u16434 -> \xs_u16436 -> case xs_u16436 of
+                                                          [] -> h155
+                                                          (:) x_u16466 xs_u16468 ->
+                                                            h156 n_u16421 x_u16466 xs_u16468
+         h155 = []
+         h156 = \n_u16421 -> \x_u16466 -> \xs_u16468 -> let
+                                                          az47z611_u16472 = mod x_u16466 (h16 n_u16421)
+                                                        in h157 n_u16421 x_u16466 xs_u16468 az47z611_u16472
+         h157 = \n_u16421 -> \x_u16466 -> \xs_u16468 -> \az47z611_u16472 -> let
+                                                                              anot1_u16474 = (==) az47z611_u16472 h2
+                                                                            in h158 n_u16421 x_u16466 xs_u16468 anot1_u16474
+         h158 = \n_u16421 -> \x_u16466 -> \xs_u16468 -> \anot1_u16474 -> case anot1_u16474 of
+                                                                           True ->
+                                                                             h159 n_u16421 x_u16466 xs_u16468
+                                                                           False ->
+                                                                             h185 n_u16421 x_u16466 xs_u16468
+         h159 = \n_u16421 -> \x_u16466 -> \xs_u16468 -> let
+                                                          wFalse_u164 = h105
+                                                        in case wFalse_u164 of
+                                                             True -> h160 n_u16421 x_u16466 xs_u16468
+                                                             False -> h166 n_u16421 xs_u16468
+         h160 = \n_u16421 -> \x_u16466 -> \xs_u16468 -> let
+                                                          ac2_u16470 = h161 n_u16421 xs_u16468
+                                                        in (:) x_u16466 ac2_u16470
+         h161 = \n_u16421 -> \xs_u16468 -> case xs_u16468 of
+                                             [] -> h150
+                                             (:) x_u16506 xs_u16508 -> h162 n_u16421 x_u16506 xs_u16508
+         h162 = \n_u16421 -> \x_u16506 -> \xs_u16508 -> let
+                                                          az47z611_u16512 = mod x_u16506 (h16 n_u16421)
+                                                        in h163 n_u16421 x_u16506 xs_u16508 az47z611_u16512
+         h163 = \n_u16421 -> \x_u16506 -> \xs_u16508 -> \az47z611_u16512 -> let
+                                                                              anot1_u16514 = (==) az47z611_u16512 h2
+                                                                            in h164 n_u16421 x_u16506 xs_u16508 anot1_u16514
+         h164 = \n_u16421 -> \x_u16506 -> \xs_u16508 -> \anot1_u16514 -> case anot1_u16514 of
+                                                                           True ->
+                                                                             h165 n_u16421 x_u16506 xs_u16508
+                                                                           False ->
+                                                                             h165 n_u16421 x_u16506 xs_u16508
+         h165 = \n_u16421 -> \x_u16506 -> \xs_u16508 -> let
+                                                          ac2_u16510 = h161 n_u16421 xs_u16508
+                                                        in (:) x_u16506 ac2_u16510
+         h166 = \n_u16421 -> \xs_u16468 -> case xs_u16468 of
+                                             [] -> h167
+                                             (:) x_u16537 xs_u16539 -> h168 n_u16421 x_u16537 xs_u16539
+         h167 = []
+         h168 = \n_u16421 -> \x_u16537 -> \xs_u16539 -> let
+                                                          az47z611_u16502 = mod x_u16537 (h16 n_u16421)
+                                                        in h169 n_u16421 az47z611_u16502 x_u16537 xs_u16539
+         h169 = \n_u16421 -> \az47z611_u16502 -> \x_u16537 -> \xs_u16539 -> let
+                                                                              anot1_u16542 = (==) az47z611_u16502 h2
+                                                                            in h170 n_u16421 x_u16537 xs_u16539 anot1_u16542
+         h170 = \n_u16421 -> \x_u16537 -> \xs_u16539 -> \anot1_u16542 -> case anot1_u16542 of
+                                                                           True ->
+                                                                             h171 n_u16421 x_u16537 xs_u16539
+                                                                           False ->
+                                                                             h184 n_u16421 x_u16537 xs_u16539
+         h171 = \n_u16421 -> \x_u16537 -> \xs_u16539 -> case xs_u16539 of
+                                                          [] -> h172
+                                                          (:) x_u16565 xs_u16567 ->
+                                                            h173 n_u16421 x_u16565 xs_u16567
+         h172 = []
+         h173 = \n_u16421 -> \x_u16565 -> \xs_u16567 -> let
+                                                          ac2_u16540 = afoldr1_u16427 x_u16565 ac2_u16569
+                                                          afoldr1_u16427 = h175 n_u16421
+                                                          ac2_u16569 = h182 n_u16421 xs_u16567
+                                                        in h174 ac2_u16540
+         h174 = \ac2_u16540 -> let ac2_u16470 = ac2_u16540
+                               in h38 ac2_u16470
+         h175 = \n_u16421 -> \x_u16578 -> h176 n_u16421 x_u16578
+         h176 = \n_u16421 -> \x_u16578 -> \ys_u16583 -> h177 n_u16421 x_u16578 ys_u16583
+         h177 = \n_u16421 -> \x_u16578 -> \ys_u16583 -> let
+                                                          az47z611_u16585 = mod x_u16578 (h16 n_u16421)
+                                                        in h178 x_u16578 ys_u16583 az47z611_u16585
+         h178 = \x_u16578 -> \ys_u16583 -> \az47z611_u16585 -> let
+                                                                 anot1_u16587 = (==) az47z611_u16585 h2
+                                                               in h179 x_u16578 ys_u16583 anot1_u16587
+         h179 = \x_u16578 -> \ys_u16583 -> \anot1_u16587 -> case anot1_u16587 of
+                                                              True -> h180 x_u16578 ys_u16583
+                                                              False -> h181 x_u16578 ys_u16583
+         h180 = \x_u16578 -> \ys_u16583 -> ys_u16583
+         h181 = \x_u16578 -> \ys_u16583 -> (:) x_u16578 ys_u16583
+         h182 = \n_u16421 -> \xs_u16567 -> case xs_u16567 of
+                                             [] -> h150
+                                             (:) x_u16607 xs_u16609 -> h183 n_u16421 x_u16607 xs_u16609
+         h183 = \n_u16421 -> \x_u16607 -> \xs_u16609 -> let
+                                                          az47z611_u16581 = mod x_u16607 (h16 n_u16421)
+                                                        in h152 n_u16421 x_u16607 xs_u16609 az47z611_u16581
+         h184 = \n_u16421 -> \x_u16537 -> \xs_u16539 -> let
+                                                          ac2_u16540 = h182 n_u16421 xs_u16539
+                                                        in (:) x_u16537 ac2_u16540
+         h185 = \n_u16421 -> \x_u16466 -> \xs_u16468 -> let
+                                                          ac2_u16470 = h182 n_u16421 xs_u16468
+                                                        in (:) x_u16466 ac2_u16470
+         h186 = \n_u16421 -> \x_u16434 -> \xs_u16436 -> let
+                                                          ac2_u16438 = h182 n_u16421 xs_u16436
+                                                        in (:) x_u16434 ac2_u16438
+         h187 = let aiterate2_u16345 = (+) (2 :: Int) h132
+                in h188 aiterate2_u16345
+         h188 = \aiterate2_u16345 -> let
+                                       az47z611_u16621 = mod aiterate2_u16345 h131
+                                     in h189 aiterate2_u16345 az47z611_u16621
+         h189 = \aiterate2_u16345 -> \az47z611_u16621 -> let
+                                                           anot1_u16623 = (==) az47z611_u16621 h2
+                                                         in h190 aiterate2_u16345 anot1_u16623
+         h190 = \aiterate2_u16345 -> \anot1_u16623 -> case anot1_u16623 of
+                                                        True -> h191 aiterate2_u16345
+                                                        False -> h217 aiterate2_u16345
+         h191 = \aiterate2_u16345 -> let
+                                       aiterate2_u16351 = (+) aiterate2_u16345 h132
+                                     in h192 aiterate2_u16351
+         h192 = \aiterate2_u16351 -> let
+                                       az47z611_u16652 = mod aiterate2_u16351 h131
+                                     in h193 aiterate2_u16351 az47z611_u16652
+         h193 = \aiterate2_u16351 -> \az47z611_u16652 -> let
+                                                           anot1_u16654 = (==) az47z611_u16652 h2
+                                                         in h194 aiterate2_u16351 anot1_u16654
+         h194 = \aiterate2_u16351 -> \anot1_u16654 -> case anot1_u16654 of
+                                                        True -> h195 aiterate2_u16351
+                                                        False -> h216 aiterate2_u16351
+         h195 = \aiterate2_u16351 -> let wFalse_u164 = h105
+                                     in case wFalse_u164 of
+                                          True -> h196 aiterate2_u16351
+                                          False -> h202 aiterate2_u16351
+         h196 = \aiterate2_u16351 -> let ac2_u16650 = h197 aiterate2_u16351
+                                     in (:) aiterate2_u16351 ac2_u16650
+         h197 = \aiterate2_u16351 -> let
+                                       aiterate2_u16648 = (+) aiterate2_u16351 h132
+                                     in h198 aiterate2_u16648
+         h198 = \aiterate2_u16648 -> let
+                                       az47z611_u16692 = mod aiterate2_u16648 h131
+                                     in h199 aiterate2_u16648 az47z611_u16692
+         h199 = \aiterate2_u16648 -> \az47z611_u16692 -> let
+                                                           anot1_u16694 = (==) az47z611_u16692 h2
+                                                         in h200 aiterate2_u16648 anot1_u16694
+         h200 = \aiterate2_u16648 -> \anot1_u16694 -> case anot1_u16694 of
+                                                        True -> h201 aiterate2_u16648
+                                                        False -> h201 aiterate2_u16648
+         h201 = \aiterate2_u16648 -> let ac2_u16690 = h197 aiterate2_u16648
+                                     in (:) aiterate2_u16648 ac2_u16690
+         h202 = \aiterate2_u16351 -> let
+                                       aiterate2_u16648 = (+) aiterate2_u16351 h132
+                                     in h203 aiterate2_u16648
+         h203 = \aiterate2_u16648 -> let
+                                       az47z611_u16723 = mod aiterate2_u16648 h131
+                                     in h204 aiterate2_u16648 az47z611_u16723
+         h204 = \aiterate2_u16648 -> \az47z611_u16723 -> let
+                                                           anot1_u16725 = (==) az47z611_u16723 h2
+                                                         in h205 aiterate2_u16648 anot1_u16725
+         h205 = \aiterate2_u16648 -> \anot1_u16725 -> case anot1_u16725 of
+                                                        True -> h206 aiterate2_u16648
+                                                        False -> h215 aiterate2_u16648
+         h206 = \aiterate2_u16648 -> let
+                                       aiterate2_u16719 = (+) aiterate2_u16648 h132
+                                     in h207 aiterate2_u16719
+         h207 = \aiterate2_u16719 -> let
+                                       az47z611_u16754 = mod aiterate2_u16719 h131
+                                     in h208 aiterate2_u16719 az47z611_u16754
+         h208 = \aiterate2_u16719 -> \az47z611_u16754 -> let
+                                                           anot1_u16756 = (==) az47z611_u16754 h2
+                                                         in h209 aiterate2_u16719 anot1_u16756
+         h209 = \aiterate2_u16719 -> \anot1_u16756 -> case anot1_u16756 of
+                                                        True -> h210 aiterate2_u16719
+                                                        False -> h214 aiterate2_u16719
+         h210 = \aiterate2_u16719 -> let wFalse_u164 = h105
+                                     in case wFalse_u164 of
+                                          True -> h211 aiterate2_u16719
+                                          False -> h212 aiterate2_u16719
+         h211 = \aiterate2_u16719 -> let ac2_u16752 = h197 aiterate2_u16719
+                                     in (:) aiterate2_u16719 ac2_u16752
+         h212 = \aiterate2_u16719 -> let
+                                       ac2_u16721 = ac2_u16752
+                                       ac2_u16752 = h213 aiterate2_u16719
+                                     in h174 ac2_u16721
+         h213 = \aiterate2_u16719 -> let
+                                       aiterate2_u16750 = (+) aiterate2_u16719 h132
+                                     in h188 aiterate2_u16750
+         h214 = \aiterate2_u16719 -> let ac2_u16752 = h213 aiterate2_u16719
+                                     in (:) aiterate2_u16719 ac2_u16752
+         h215 = \aiterate2_u16648 -> let ac2_u16721 = h213 aiterate2_u16648
+                                     in (:) aiterate2_u16648 ac2_u16721
+         h216 = \aiterate2_u16351 -> let ac2_u16650 = h213 aiterate2_u16351
+                                     in (:) aiterate2_u16351 ac2_u16650
+         h217 = \aiterate2_u16345 -> let ac2_u16354 = h213 aiterate2_u16345
+                                     in (:) aiterate2_u16345 ac2_u16354
+       in h0
+tests = let
+          wTup2_a106 = \x1 -> \x2 -> (,) x1 x2
+          wCons_a104 = \x1 -> \x2 -> (:) x1 x2
+          wFalse_a107 = False
+          wTrue_a108 = True
+          wNil_a109 = []
+          w0_a110 = 0 :: Int
+          w1_a111 = 1 :: Int
+          w2_a112 = 2 :: Int
+          w1500_a324 = 1500 :: Int
+          w5500_a326 = 5500 :: Int
+          w12569_a148 = 12569 :: Int
+          w54001_a151 = 54001 :: Int
+          wz33_a126 = '!'
+          wz40_a127 = '('
+          wz41_a128 = ')'
+          wa_a139 = 'a'
+          wd_a140 = 'd'
+          we_a141 = 'e'
+          wh_a142 = 'h'
+          wAdd_a149 = \x1 -> \x2 -> (+) x1 x2
+          wSubtract_a150 = \x1 -> \x2 -> (-) x1 x2
+          wModulo_a153 = \x1 -> \x2 -> mod x1 x2
+          wEqual_a154 = \x1 -> \x2 -> (==) x1 x2
+          error = \msg -> seq (prelude_error msg) undefined
+          z47z61 = \n -> \m -> let anot1_a1670 = wEqual_a154 n m
+                               in not anot1_a1670
+          not = \b -> case b of
+                        True -> wFalse_a107
+                        False -> wTrue_a108
+          head = \xs -> case xs of
+                          [] ->
+                            let
+                              awCons2_a3888 = wCons_a104 wd_a140 wNil_a109
+                              awCons2_a3889 = wCons_a104 wa_a139 awCons2_a3888
+                              awCons2_a3890 = wCons_a104 we_a141 awCons2_a3889
+                              aerror1_a3891 = wCons_a104 wh_a142 awCons2_a3890
+                            in error aerror1_a3891
+                          (:) x __a3894 -> x
+          map = \f -> \xs -> case xs of
+                               [] -> wNil_a109
+                               (:) x xs ->
+                                 let
+                                   awCons1_a2366 = f x
+                                   awCons2_a2367 = map f xs
+                                 in wCons_a104 awCons1_a2366 awCons2_a2367
+          filter = \p -> let
+                           afoldr1_a15687 = \x -> \ys -> case p x of
+                                                           True -> wCons_a104 x ys
+                                                           False -> ys
+                         in foldr afoldr1_a15687 wNil_a109
+          foldr = \c -> \n -> \xs -> case xs of
+                                       [] -> n
+                                       (:) x xs ->
+                                         let ac2_a2368 = foldr c n xs
+                                         in c x ac2_a2368
+          iterate = \f -> \x -> let
+                                  aiterate2_a3887 = f x
+                                  awCons2_a3886 = iterate f aiterate2_a3887
+                                in wCons_a104 x awCons2_a3886
+          z33z33 = \xs -> \y -> case xs of
+                                  [] ->
+                                    let
+                                      awCons2_a3869 = wCons_a104 wz41_a128 wNil_a109
+                                      awCons2_a3870 = wCons_a104 wz33_a126 awCons2_a3869
+                                      awCons2_a3871 = wCons_a104 wz33_a126 awCons2_a3870
+                                      aerror1_a3872 = wCons_a104 wz40_a127 awCons2_a3871
+                                    in error aerror1_a3872
+                                  (:) x xs ->
+                                    let az33z332_a3873 = wSubtract_a150 y w1_a111
+                                    in case wEqual_a154 y w0_a110 of
+                                         True -> x
+                                         False -> z33z33 xs az33z332_a3873
+          suCC = \x -> wAdd_a149 x w1_a111
+          isdivs = \n -> \x -> let az47z611_a103 = wModulo_a153 x n
+                               in z47z61 az47z611_a103 w0_a110
+          the_filter = \infx_a125 -> case infx_a125 of
+                                       (:) n ns ->
+                                         let afilter1_a146 = isdivs n
+                                         in filter afilter1_a146 ns
+          tests = let
+                    awTup21_a325 = root w1500_a324
+                    awTup21_a123 = root w5500_a326
+                    awCons1_a328 = wTup2_a106 awTup21_a123 w54001_a151
+                    awCons1_a330 = wTup2_a106 awTup21_a325 w12569_a148
+                    awCons2_a332 = wCons_a104 awCons1_a328 wNil_a109
+                  in wCons_a104 awCons1_a330 awCons2_a332
+        in tests
+
