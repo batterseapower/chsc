@@ -1,2 +1,2 @@
-:set -Wall -fno-warn-missing-signatures -fno-warn-name-shadowing -fno-warn-simple-patterns
+:set -Wall -fno-warn-missing-signatures -fno-warn-name-shadowing
 :l Main.hs
