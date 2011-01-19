@@ -70,7 +70,7 @@ typechecks wrapper term = do
     case ec of
       ExitSuccess -> return True
       _ -> do
-        putStrLn err
+        hPutStrLn stderr err
         return False
   where
     haskell = printingModule wrapper term
@@ -84,7 +84,7 @@ normalise wrapper term = do
         readProcessWithExitCode "ghc" ["--make", "-O2", file, "-ddump-simpl", "-fforce-recomp"] ""
     case ec of
       ExitSuccess   -> return (Right out)
-      ExitFailure _ -> putStrLn haskell >> return (Left err)
+      ExitFailure _ -> hPutStrLn stderr haskell >> return (Left err)
 
 ghcVersion :: IO [Int]
 ghcVersion = do
@@ -102,11 +102,11 @@ runCompiled wrapper e test_e = withTempFile "Main" $ \(exe_file, exe_h) -> do
         time $ readProcessWithExitCode "ghc" (["--make", "-O2", hs_file, "-fforce-recomp", "-o", exe_file] ++ ["-ddump-simpl" | not qUIET] ++ ["-rtsopts" | ghc_ver >= [7]]) ""
     compiled_size <- fileSize exe_file
     case ec of
-      ExitFailure _ -> putStrLn haskell >> return (haskell, Left compile_err)
+      ExitFailure _ -> hPutStrLn stderr haskell >> return (haskell, Left compile_err)
       ExitSuccess   -> do
           (ec, run_out, run_err) <- readProcessWithExitCode exe_file ["+RTS", "-t"] ""
           case ec of
-            ExitFailure _ -> putStrLn haskell >> return (haskell, Left (unlines [compile_out, run_err]))
+            ExitFailure _ -> hutStrLn stderr haskell >> return (haskell, Left (unlines [compile_out, run_err]))
             ExitSuccess -> do
               -- <<ghc: 7989172 bytes, 16 GCs, 20876/20876 avg/max bytes residency (1 samples), 1M in use, 0.00 INIT (0.00 elapsed), 0.02 MUT (0.51 elapsed), 0.00 GC (0.00 elapsed) :ghc>>
               let [t_str] = lines run_out

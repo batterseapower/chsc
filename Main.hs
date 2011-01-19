@@ -112,7 +112,7 @@ testOne (ghc_way, sc_way) file = do
             showRaw mb_res = intercalate " & " (benchmark:fields) ++ " \\\\"
               where fields = case mb_res of
                                Just ((_size, compile_t, heap_size, run_t), term_size, mb_super_t)
-                                -> [benchmark, maybe "" show mb_super_t, show compile_t, show run_t, show heap_size, show term_size]
+                                -> [maybe "" show mb_super_t, show compile_t, show run_t, show heap_size, show term_size]
                                Nothing
                                 -> ["", "", "", "", ""]
             
