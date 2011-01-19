@@ -11,7 +11,7 @@ def format_latex_table(rows):
 
 def zipwith_dict(f, left, right):
     thekeys = left.keys()
-    assert(thekeys == right.keys())
+    assert thekeys == right.keys(), repr(thekeys) + " != " + repr(right.keys())
     
     return dict([(key, f(key, left[key], right[key])) for key in thekeys])
 
@@ -42,7 +42,7 @@ class Results(object):
             self.description, lines = lines[0], [line.rstrip(" \\\\") for line in lines[1:] if line.strip() != ""]
     
             strip_all = lambda xs: [x.strip() for x in xs]
-            headers, valuess = (strip_all(lines[0].split(" & ")), [strip_all(line.split(" & ")) for line in lines[1:]])
+            headers, valuess = (strip_all(lines[0].split("&")), [strip_all(line.split("&")) for line in lines[1:]])
             
             def makeresult(values):
                 everything = dict(zip(headers, values))
@@ -64,7 +64,11 @@ class Results(object):
     @classmethod
     def zipresults(cls, zip_descriptions, zip_values, left, right):
         theheaders = left.headers
-        assert theheaders == right.headers
+        assert theheaders == right.headers, repr(theheaders) + " != " + repr(right.headers)
+        
+        print left.results
+        print "~~~"
+        print right.results
         
         combine_files = lambda _filename, left_values, right_values: zipwith_dict(zip_values, left_values, right_values)
         return Results(zip_descriptions(left.description, right.description), left.headers, zipwith_dict(combine_files, left.results, right.results))
