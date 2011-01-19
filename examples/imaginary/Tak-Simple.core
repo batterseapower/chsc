@@ -1,0 +1,15 @@
+-- code of unknown provenance (partain 95/01/25)
+
+--tak :: Int -> Int -> Int -> Int
+tak x y z = if y < x
+            then tak (tak (x-1) y z)
+                     (tak (y-1) z x)
+                     (tak (z-1) x y)
+            else z
+
+root x y z = tak x y z
+
+tests = [
+    (root 24 16 8, 9),
+    (root 33 17 8, 9)
+  ]
