@@ -40,7 +40,6 @@ annedValueFreeVars = taggedFVedValueFreeVars
 annedValueFreeVars' = taggedFVedValueFreeVars'
 annedAltsFreeVars = taggedFVedAltsFreeVars
 
-renameAnnedVar = renameTaggedFVedVar
 renameAnnedTerm = renameTaggedFVedTerm :: IdSupply -> Renaming -> AnnedTerm -> AnnedTerm
 renameAnnedValue = renameTaggedFVedValue
 renameAnnedValue' = renameTaggedFVedValue'
@@ -130,11 +129,11 @@ instance Pretty Heap where
     pPrintPrec level prec (Heap h _) = pPrintPrec level prec h
 
 
-type Stack = [StackFrame]
-data StackFrame = Apply (Out (Anned Var))
+type Stack = [Tagged StackFrame]
+data StackFrame = Apply (Out Var)
                 | Scrutinise (In [AnnedAlt])
                 | PrimApply PrimOp [In (Anned AnnedValue)] [In AnnedTerm]
-                | Update (Out (Anned Var))
+                | Update (Out Var)
                 deriving (Show)
 
 instance NFData StackFrame where
@@ -181,13 +180,6 @@ heapBindingTag (Updated tg _)    = Just (tg,         PhantomLive)
 heapBindingTag (Phantom (_, e))  = Just (annedTag e, PhantomLive)
 heapBindingTag (Concrete (_, e)) = Just (annedTag e, ConcreteLive)
 
-stackFrameTags :: StackFrame -> [Tag]
-stackFrameTags kf = case kf of
-    Apply x'                -> [annedTag x']
-    Scrutinise in_alts      -> map (annedTag . snd) (snd in_alts)
-    PrimApply _ in_vs in_es -> map (annedTag . snd) in_vs ++ map (annedTag . snd) in_es
-    Update x'               -> [annedTag x']
-
 releaseHeapBindingDeeds :: Deeds -> HeapBinding -> Deeds
 releaseHeapBindingDeeds deeds = maybe deeds (releaseTagDeeds deeds) . heapBindingTag
 
@@ -200,6 +192,6 @@ releasePureHeapDeeds = M.fold (flip releaseHeapBindingDeeds)
 
 releaseStateDeed :: Deeds -> (Heap, Stack, In (Anned a)) -> Deeds
 releaseStateDeed deeds (Heap h _, k, (_, e))
-  = foldl' (\deeds kf -> foldl' releaseDeedDeep deeds (stackFrameTags kf))
+  = foldl' (\deeds kf -> releaseDeedDeep deeds (tag kf))
            (releasePureHeapDeeds (releaseDeedDeep deeds (annedTag e)) h)
            k

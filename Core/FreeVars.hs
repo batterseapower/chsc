@@ -36,7 +36,7 @@ mkFreeVars rec = (var, var', term, term', alternatives, value, value')
     term = rec term'
     term' (Var x)        = S.singleton x
     term' (Value v)      = value' v
-    term' (App e x)      = term e `S.union` var x
+    term' (App e x)      = x `S.insert` term e
     term' (PrimOp _ es)  = S.unions $ map term es
     term' (Case e alts)  = term e `S.union` alternatives alts
     term' (LetRec xes e) = deleteList xs $ S.unions (map term es) `S.union` term e
@@ -92,7 +92,7 @@ type FVedValue = ValueF FVed
 instance Symantics FVed where
     var = fvedTerm . Var
     value = fvedTerm . Value
-    app e x = fvedTerm (App e (fvedVar x))
+    app e = fvedTerm . App e
     primOp pop = fvedTerm . PrimOp pop
     case_ e = fvedTerm . Case e
     letRec xes e = fvedTerm (LetRec xes e)

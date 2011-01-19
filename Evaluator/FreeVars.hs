@@ -72,17 +72,17 @@ pureHeapBoundVars = M.keysSet -- I think its harmless to include variables bound
 
 -- | Returns all the variables bound by the stack that we might have to residualise in the splitter
 stackBoundVars :: Stack -> BoundVars
-stackBoundVars = S.unions . map stackFrameBoundVars
+stackBoundVars = S.unions . map (stackFrameBoundVars . tagee)
 
 stackFrameBoundVars :: StackFrame -> BoundVars
 stackFrameBoundVars = fst . stackFrameOpenFreeVars
 
 stackFrameOpenFreeVars :: StackFrame -> (BoundVars, FreeVars)
 stackFrameOpenFreeVars kf = case kf of
-    Apply x'                -> (S.empty, annedFreeVars x')
+    Apply x'                -> (S.empty, S.singleton x')
     Scrutinise in_alts      -> (S.empty, inFreeVars annedAltsFreeVars in_alts)
     PrimApply _ in_vs in_es -> (S.empty, S.unions (map (inFreeVars annedValueFreeVars) in_vs) `S.union` S.unions (map (inFreeVars annedTermFreeVars) in_es))
-    Update x'               -> (S.singleton (annee x'), S.empty)
+    Update x'               -> (S.singleton x', S.empty)
 
 -- | Returns (an overapproximation of) the free variables of the state that it would be useful to inline, and why that is so
 stateLiveness :: (Heap, Stack, In (Anned a)) -> Liveness
@@ -106,4 +106,4 @@ stateStaticBindersAndFreeVars (Heap h _, k, in_e) = (bvs_static', fvs' S.\\ bvs_
     pureHeapOpenFreeVars h (bvs, fvs) = M.foldrWithKey (\x' hb ((bvs_static, bvs_nonstatic), fvs) -> case hb of Concrete in_e -> ((bvs_static, S.insert x' bvs_nonstatic), fvs `S.union` inFreeVars annedTermFreeVars in_e); _ -> ((S.insert x' bvs_static, bvs_nonstatic), fvs)) ((S.empty, bvs), fvs) h
     
     stackOpenFreeVars :: Stack -> FreeVars -> (BoundVars, FreeVars)
-    stackOpenFreeVars k fvs = (S.unions *** (S.union fvs . S.unions)) . unzip . map stackFrameOpenFreeVars $ k
+    stackOpenFreeVars k fvs = (S.unions *** (S.union fvs . S.unions)) . unzip . map (stackFrameOpenFreeVars . tagee) $ k

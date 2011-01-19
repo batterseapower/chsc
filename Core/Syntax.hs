@@ -62,7 +62,7 @@ data Literal = Int Integer | Char Char
 type Term = Identity (TermF Identity)
 type TaggedTerm = Tagged (TermF Tagged)
 type CountedTerm = Counted (TermF Counted)
-data TermF ann = Var Var | Value (ValueF ann) | App (ann (TermF ann)) (ann Var) | PrimOp PrimOp [ann (TermF ann)] | Case (ann (TermF ann)) [AltF ann] | LetRec [(Var, ann (TermF ann))] (ann (TermF ann))
+data TermF ann = Var Var | Value (ValueF ann) | App (ann (TermF ann)) Var | PrimOp PrimOp [ann (TermF ann)] | Case (ann (TermF ann)) [AltF ann] | LetRec [(Var, ann (TermF ann))] (ann (TermF ann))
                deriving (Eq, Show)
 
 type Alt = AltF Identity
@@ -188,12 +188,11 @@ termIsCheap = isCheap . unI
 
 
 -- NB: this group of bindings requires NoMonomorphismRestriction
-varSize :: Foldable.Foldable ann => ann Var -> Int
 termSize :: Foldable.Foldable ann => ann (TermF ann) -> Int
 altSize' :: Foldable.Foldable ann => AltF ann -> Int
 valueSize :: Foldable.Foldable ann => ann (ValueF ann) -> Int
 valueSize' :: Foldable.Foldable ann => ValueF ann -> Int
-(varSize, termSize, altSize', valueSize, valueSize') = (var, term, alt', value, value')
+(termSize, altSize', valueSize, valueSize') = (term, alt', value, value')
   where
     rec f x = 1 + getSum (Foldable.foldMap (Sum . f) x)
     
@@ -202,7 +201,7 @@ valueSize' :: Foldable.Foldable ann => ValueF ann -> Int
     term' e = case e of
         Var _ -> 0
         Value v -> value' v
-        App e x -> term e + var x
+        App e _ -> term e
         PrimOp _ es -> sum (map term es)
         Case e alts -> term e + sum (map alt' alts)
         LetRec xes e -> sum (map (term . snd) xes) + term e
@@ -215,8 +214,6 @@ valueSize' :: Foldable.Foldable ann => ValueF ann -> Int
         Lambda _ e -> term e
         Data _ _ -> 0
         Literal _ -> 0
-    
-    var = rec (\_ -> 0)
 
 
 class Symantics ann where
@@ -230,7 +227,7 @@ class Symantics ann where
 instance Symantics Identity where
     var = I . Var
     value = I . Value
-    app e x = I (App e (I x))
+    app e = I . App e
     primOp pop es = I (PrimOp pop es)
     case_ e = I . Case e
     letRec xes e = I $ LetRec xes e
@@ -245,7 +242,7 @@ reflect (I e) = case e of
     Value (Lambda x e) -> value (Lambda x (reflect e))
     Value (Data dc xs) -> value (Data dc xs)
     Value (Literal l)  -> value (Literal l)
-    App e1 (I x2)      -> app (reflect e1) x2
+    App e1 x2          -> app (reflect e1) x2
     PrimOp pop es      -> primOp pop (map reflect es)
     Case e alts        -> case_ (reflect e) (map (second reflect) alts)
     LetRec xes e       -> letRec (map (second reflect) xes) (reflect e)

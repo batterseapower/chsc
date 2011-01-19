@@ -66,9 +66,8 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ run
                 where (t, rb) = term e
               Value (Data dc xs) -> ([], \[] -> Value (Data dc xs))
               Value (Literal l)  -> ([], \[] -> Value (Literal l))
-              App e x            -> ([t1, t2], \[t1', t2'] -> App (rb1 t1') (rb2 t2'))
-                where (t1, rb1) = term e
-                      (t2, rb2) = var x
+              App e x            -> ([t], \[t'] -> App (rb t') x)
+                where (t, rb) = term e
               PrimOp pop es      -> (ts, \ts' -> PrimOp pop (zipWith ($) rbs ts'))
                 where (ts, rbs) = unzip (map term es)
               Case e (unzip -> (alt_cons, alt_es)) -> (t : ts, \(t':ts') -> Case (rb t') (alt_cons `zip` zipWith ($) rbs ts'))

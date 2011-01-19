@@ -33,13 +33,13 @@ residualiseHeapBinding _   hb              = Left (pPrint hb)
 
 residualiseStack :: IdSupply -> Stack -> Out FVedTerm -> ((Out [(Var, Doc)], Out [(Var, FVedTerm)]), Out FVedTerm)
 residualiseStack _   []     e = (([], []), e)
-residualiseStack ids (kf:k) (residualiseStackFrame ids kf -> ((static_floats, nonstatic_floats), e)) = first ((static_floats ++) *** (nonstatic_floats ++)) $ residualiseStack ids k e
+residualiseStack ids (kf:k) (residualiseStackFrame ids (tagee kf) -> ((static_floats, nonstatic_floats), e)) = first ((static_floats ++) *** (nonstatic_floats ++)) $ residualiseStack ids k e
 
 residualiseStackFrame :: IdSupply -> StackFrame -> Out FVedTerm -> ((Out [(Var, Doc)], Out [(Var, FVedTerm)]), Out FVedTerm)
-residualiseStackFrame _   (Apply x2')               e1 = (([], []), e1 `app` annee x2')
+residualiseStackFrame _   (Apply x2')               e1 = (([], []), e1 `app` x2')
 residualiseStackFrame ids (Scrutinise in_alts)      e  = (([], []), case_ e (detagAnnedAlts $ renameIn (renameAnnedAlts ids) in_alts))
 residualiseStackFrame ids (PrimApply pop in_vs es') e  = (([], []), primOp pop (map (value . fvee . detagAnnedValue . renameIn (renameAnnedValue ids)) in_vs ++ e : map (residualiseTerm ids) es'))
-residualiseStackFrame _   (Update x')               e  = (([], [(annee x', e)]), var (annee x'))
+residualiseStackFrame _   (Update x')               e  = (([], [(x', e)]), var x')
 
 
 pPrintFullState :: State -> Doc

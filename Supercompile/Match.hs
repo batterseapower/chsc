@@ -37,7 +37,7 @@ matchInTerm ids = matchAnned (matchInTerm' ids)
 matchInTerm' :: IdSupply -> In (TermF Anned) -> In (TermF Anned) -> Maybe [(Var, Var)]
 matchInTerm' _   (rn_l, Var x_l)           (rn_r, Var x_r)           = Just [matchInVar (rn_l, x_l) (rn_r, x_r)]
 matchInTerm' ids (rn_l, Value v_l)         (rn_r, Value v_r)         = matchInValue ids (rn_l, v_l) (rn_r, v_r)
-matchInTerm' ids (rn_l, App e_l x_l)       (rn_r, App e_r x_r)       = matchInTerm ids (rn_l, e_l) (rn_r, e_r) >>= \eqs -> return (matchAnned matchInVar (rn_l, x_l) (rn_r, x_r) : eqs)
+matchInTerm' ids (rn_l, App e_l x_l)       (rn_r, App e_r x_r)       = matchInTerm ids (rn_l, e_l) (rn_r, e_r) >>= \eqs -> return (matchInVar (rn_l, x_l) (rn_r, x_r) : eqs)
 matchInTerm' ids (rn_l, PrimOp pop_l es_l) (rn_r, PrimOp pop_r es_r) = guard (pop_l == pop_r) >> matchInList (matchInTerm ids) (rn_l, es_l) (rn_r, es_r)
 matchInTerm' ids (rn_l, Case e_l alts_l)   (rn_r, Case e_r alts_r)   = liftM2 (++) (matchInTerm ids (rn_l, e_l) (rn_r, e_r)) (matchInAlts ids (rn_l, alts_l) (rn_r, alts_r))
 matchInTerm' ids (rn_l, LetRec xes_l e_l)  (rn_r, LetRec xes_r e_r)  = matchInTerm ids'' (rn_l', e_l) (rn_r', e_r) >>= \eqs -> matchPureHeapExact ids'' [] eqs (M.map Concrete $ M.fromList xes_l') (M.map Concrete $ M.fromList xes_r')
@@ -70,9 +70,6 @@ matchAltCon _ _ = Nothing
 matchVar :: Out Var -> Out Var -> (Var, Var)
 matchVar x_l' x_r' = (x_l', x_r')
 
-matchAnnedVar :: Out (Anned Var) -> Out (Anned Var) -> (Var, Var)
-matchAnnedVar x_l' x_r' = matchVar (annee x_l') (annee x_r')
-
 matchInVar :: In Var -> In Var -> (Var, Var)
 matchInVar (rn_l, x_l) (rn_r, x_r) = (safeRename "matchInVar: Left" rn_l x_l, safeRename "matchInVar: Right" rn_r x_r)
 
@@ -97,12 +94,15 @@ matchEC :: Stack -> Stack -> Maybe ([(Var, Var)], [(Var, Var)])
 matchEC k_l k_r = fmap combine $ zipWithEqualM matchECFrame k_l k_r
   where combine = (concat *** concat) . unzip
 
-matchECFrame :: StackFrame -> StackFrame -> Maybe ([(Var, Var)], [(Var, Var)])
-matchECFrame (Apply x_l')                      (Apply x_r')                      = Just ([], [matchAnnedVar x_l' x_r'])
-matchECFrame (Scrutinise in_alts_l)            (Scrutinise in_alts_r)            = fmap ([],) $ matchInAlts matchIdSupply in_alts_l in_alts_r
-matchECFrame (PrimApply pop_l in_vs_l in_es_l) (PrimApply pop_r in_vs_r in_es_r) = fmap ([],) $ guard (pop_l == pop_r) >> liftM2 (++) (matchList (matchAnned (matchInValue matchIdSupply)) in_vs_l in_vs_r) (matchList (matchInTerm matchIdSupply) in_es_l in_es_r)
-matchECFrame (Update x_l')                     (Update x_r')                     = Just ([matchAnnedVar x_l' x_r'], [])
-matchECFrame _ _ = Nothing
+matchECFrame :: Tagged StackFrame -> Tagged StackFrame -> Maybe ([(Var, Var)], [(Var, Var)])
+matchECFrame kf_l kf_r = matchECFrame' (tagee kf_l) (tagee kf_r)
+
+matchECFrame' :: StackFrame -> StackFrame -> Maybe ([(Var, Var)], [(Var, Var)])
+matchECFrame' (Apply x_l')                      (Apply x_r')                      = Just ([], [matchVar x_l' x_r'])
+matchECFrame' (Scrutinise in_alts_l)            (Scrutinise in_alts_r)            = fmap ([],) $ matchInAlts matchIdSupply in_alts_l in_alts_r
+matchECFrame' (PrimApply pop_l in_vs_l in_es_l) (PrimApply pop_r in_vs_r in_es_r) = fmap ([],) $ guard (pop_l == pop_r) >> liftM2 (++) (matchList (matchAnned (matchInValue matchIdSupply)) in_vs_l in_vs_r) (matchList (matchInTerm matchIdSupply) in_es_l in_es_r)
+matchECFrame' (Update x_l')                     (Update x_r')                     = Just ([matchVar x_l' x_r'], [])
+matchECFrame' _ _ = Nothing
 
 -- Returns a renaming from the list only if the list maps a "left" variable to a unique "right" variable
 safeMkRenaming :: [(Var, Var)] -> Maybe Renaming

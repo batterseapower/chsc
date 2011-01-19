@@ -364,12 +364,12 @@ optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
                     Phantom _       -> 0
                     Concrete (_, e) -> termSize e
                 heapSize (Heap h _) = sum (map heapBindingSize (M.elems h))
-                stackSize = sum . map stackFrameSize
+                stackSize = sum . map (stackFrameSize . tagee)
                 stackFrameSize kf = 1 + case kf of
-                    Apply x'                -> varSize x'
+                    Apply _                 -> 0
                     Scrutinise in_alts      -> sum (map altSize' (snd in_alts))
                     PrimApply _ in_vs in_es -> sum (map (valueSize . snd) in_vs) + sum (map (termSize . snd) in_es)
-                    Update x'               -> varSize x'
+                    Update _                -> 0
         bracketSizes = map stateSize . fillers
         
         (heap_xs, bracketeds_heap_elts) = unzip (M.toList bracketeds_heap)
@@ -437,7 +437,7 @@ optimiseLetBinds opt leftover_deeds bracketeds_heap fvs' = -- traceRender ("opti
         (h_resid, bracketeds_deeded_heap_not_resid') = M.partitionWithKey (\x _br -> x `S.member` resid_fvs) bracketeds_deeded_heap_not_resid
         (xs_resid', bracks_resid) = unzip $ M.toList h_resid
 
-type NamedStack = [(Int, StackFrame)]
+type NamedStack = [(Int, Tagged StackFrame)]
 
 splitt :: (IS.IntSet, S.Set (Out Var))
        -> (Deeds, (Heap, NamedStack, ([Out Var], Bracketed (Entered, IdSupply -> UnnormalisedState))))         -- ^ The thing to split, and the Deeds we have available to do it
@@ -482,7 +482,7 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
         need_not_resid_kf i kf
           | i `IS.member` gen_kfs
           = False
-          | Update (annee -> x') <- kf -- We infer the stack frames we're not residualising based on the *variables* we're not residualising
+          | Update x' <- tagee kf -- We infer the stack frames we're not residualising based on the *variables* we're not residualising
           = x' `S.member` not_resid_xs
           | otherwise
           = True
@@ -739,7 +739,7 @@ cheapifyHeap (deeds, Heap h (splitIdSupply -> (ids, ids'))) = (deeds', Heap (M.m
 pushStack :: IdSupply
           -> Deeds
           -> [Out Var]
-          -> [(Bool, StackFrame)]
+          -> [(Bool, Tagged StackFrame)]
           -> Bracketed (Entered, IdSupply -> UnnormalisedState)
           -> (Deeds,
               M.Map (Out Var) (HeapBinding, Bracketed (Entered, IdSupply -> UnnormalisedState)),
@@ -755,7 +755,7 @@ pushStack ids deeds scruts ((may_push, kf):k) bracketed_hole = second3 (`M.union
       = (guard may_push >> fmap (\(deeds', bracketed_hole') -> (deeds', ([], M.empty, bracketed_hole'))) (pushStackFrame kf deeds bracketed_hole)) `orElse`
         (deeds, splitStackFrame ids1 kf scruts bracketed_hole)
 
-pushStackFrame :: StackFrame
+pushStackFrame :: Tagged StackFrame
                -> Deeds
                -> Bracketed (Entered, IdSupply -> UnnormalisedState)
                -> Maybe (Deeds, Bracketed (Entered, IdSupply -> UnnormalisedState))
@@ -764,22 +764,22 @@ pushStackFrame kf deeds bracketed_hole = do
     return (deeds', bracketed_hole')
   where
     -- Inline parts of the evaluation context into each branch only if we can get that many deeds for duplication
-    push fillers = case foldM (\deeds tag -> claimDeeds deeds tag (branch_factor - 1)) deeds (stackFrameTags kf) of -- NB: subtract one because one occurrence is already "paid for". It is OK if the result is negative (i.e. branch_factor 0)!
+    push fillers = case claimDeeds deeds (tag kf) (branch_factor - 1) of -- NB: subtract one because one occurrence is already "paid for". It is OK if the result is negative (i.e. branch_factor 0)!
             Nothing    -> trace (render $ text "pushStack-deeds" <+> pPrint branch_factor) (Nothing, fillers)
             Just deeds ->                                                                  (Just deeds, map (\(ent, f) -> (ent, second3 (++ [kf]) . f)) fillers)
       where branch_factor = length fillers
 
 splitStackFrame :: IdSupply
-                -> StackFrame
+                -> Tagged StackFrame
                 -> [Out Var]
                 -> Bracketed (Entered, IdSupply -> UnnormalisedState)
                 -> ([Out Var],
                     M.Map (Out Var) (HeapBinding, Bracketed (Entered, IdSupply -> UnnormalisedState)),
                     Bracketed (Entered, IdSupply -> UnnormalisedState))
 splitStackFrame ids kf scruts bracketed_hole
-  | Update x' <- kf = splitUpdate scruts x' bracketed_hole
-  | otherwise = ([], M.empty, case kf of
-    Apply (annee -> x2') -> zipBracketeds (\[e] -> e `app` x2') (\[fvs] -> S.insert x2' fvs) [id] (\_ -> Nothing) [bracketed_hole]
+  | Update x' <- tagee kf = splitUpdate (tag kf) scruts x' bracketed_hole
+  | otherwise = ([], M.empty, case tagee kf of
+    Apply x2' -> zipBracketeds (\[e] -> e `app` x2') (\[fvs] -> S.insert x2' fvs) [id] (\_ -> Nothing) [bracketed_hole]
     Scrutinise (rn, unzip -> (alt_cons, alt_es)) -> -- (if null k_remaining then id else traceRender ("splitStack: FORCED SPLIT", M.keysSet entered_hole, [x' | Tagged _ (Update x') <- k_remaining])) $
                                                     -- (if not (null k_not_inlined) then traceRender ("splitStack: generalise", k_not_inlined) else id) $
                                                     zipBracketeds (\(e_hole:es_alts) -> case_ e_hole (alt_cons' `zip` es_alts)) (\(fvs_hole:fvs_alts) -> fvs_hole `S.union` S.unions (zipWith (S.\\) fvs_alts alt_bvss)) (id:[\bvs -> bvs S.\\ alt_bvs | alt_bvs <- alt_bvss]) (\(_tails_hole:tailss_alts) -> liftM concat (sequence tailss_alts)) (bracketed_hole : bracketed_alts)
@@ -818,12 +818,12 @@ splitStackFrame ids kf scruts bracketed_hole
 -- You might think this is utterly worthless, since by definition the splitter will never be able to push the actual definition of
 -- x into this hole in the bracketed. However, the fact that we do this is *critical* to the algorithm I use to ensure that
 -- we can make variables bound by update frames as non-residualised: see Note [Residualisation of things referred to in extraFvs]
-splitUpdate :: [Out Var] -> Anned Var -> Bracketed (Entered, IdSupply -> UnnormalisedState)
+splitUpdate :: Tag -> [Out Var] -> Var -> Bracketed (Entered, IdSupply -> UnnormalisedState)
             -> ([Out Var], M.Map (Out Var) (HeapBinding, Bracketed (Entered, IdSupply -> UnnormalisedState)), Bracketed (Entered, IdSupply -> UnnormalisedState))
-splitUpdate scruts x' bracketed_hole = (annee x' : scruts, M.singleton (annee x') (Updated (annedTag x') hole_fvs, bracketed_hole),
-                                        oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], (mkIdentityRenaming [annee x'], annedTerm (annedTag x') (Var (annee x'))))))
+splitUpdate tg_kf scruts x' bracketed_hole = (x' : scruts, M.singleton x' (Updated tg_kf hole_fvs, bracketed_hole),
+                                              oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], (mkIdentityRenaming [x'], annedTerm tg_kf (Var x')))))
   where
-    ctxt_id = fromJust (name_id (annee x'))
+    ctxt_id = fromJust (name_id x')
     hole_fvs = bracketedFreeVars (\(_, mk_state) -> stateFreeVars (mk_state matchIdSupply)) bracketed_hole
   -- TODO: we get poor generalisation for variables bound by update frames because we don't record proper tags or whatever for them
   --

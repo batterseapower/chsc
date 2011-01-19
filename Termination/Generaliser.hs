@@ -5,9 +5,11 @@ import Core.Renaming (Out)
 
 import Evaluator.Syntax
 
+import Utilities (Tagged)
+
 
 data Generaliser = Generaliser {
-    generaliseStackFrame  :: StackFrame -> Bool,
+    generaliseStackFrame  :: Tagged StackFrame -> Bool,
     generaliseHeapBinding :: Out Var -> HeapBinding -> Bool
   }
 

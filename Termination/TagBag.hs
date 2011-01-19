@@ -19,7 +19,7 @@ embedWithTagBags :: WQO State Generaliser
 embedWithTagBags = precomp stateTags $ postcomp generaliserFromGrowing $ refineCollection (\discard -> postcomp discard $ natsWeak) -- TODO: have a version where I replace weakManyNat with (zippable nat)
   where
     -- NB: this is stronger than 
-    stateTags (Heap h _, k, (_, qa)) = traceRender ("stateTags (TagBag)", M.map heapBindingTagBag h, map stackFrameTags' k, qaTag' qa) $
+    stateTags (Heap h _, k, (_, qa)) = traceRender ("stateTags (TagBag)", M.map heapBindingTagBag h, map stackFrameTag' k, qaTag' qa) $
                                        pureHeapTagBag h `plusTagBag` stackTagBag k `plusTagBag` tagTagBag (qaTag' qa)
       where
         heapBindingTagBag :: HeapBinding -> TagBag
@@ -29,7 +29,7 @@ embedWithTagBags = precomp stateTags $ postcomp generaliserFromGrowing $ refineC
         pureHeapTagBag = plusTagBags . map heapBindingTagBag . M.elems
      
         stackTagBag :: Stack -> TagBag
-        stackTagBag = mkTagBag . concatMap stackFrameTags'
+        stackTagBag = mkTagBag . map stackFrameTag'
      
         tagTagBag :: Tag -> TagBag
         tagTagBag = mkTagBag . return
@@ -45,7 +45,7 @@ embedWithTagBags = precomp stateTags $ postcomp generaliserFromGrowing $ refineC
     
     generaliserFromGrowing :: TagMap Bool -> Generaliser
     generaliserFromGrowing growing = Generaliser {
-          generaliseStackFrame  = \kf   -> any strictly_growing (stackFrameTags' kf),
+          generaliseStackFrame  = \kf   -> strictly_growing (stackFrameTag' kf),
           generaliseHeapBinding = \_ hb -> maybe False (strictly_growing . pureHeapBindingTag') $ heapBindingTag_ hb
         }
       where strictly_growing tg = IM.findWithDefault False tg growing
@@ -54,8 +54,8 @@ embedWithTagBags = precomp stateTags $ postcomp generaliserFromGrowing $ refineC
 pureHeapBindingTag' :: Tag -> Tag
 pureHeapBindingTag' = injectTag 5
 
-stackFrameTags' :: StackFrame -> [Tag]
-stackFrameTags' = map (injectTag 3) . stackFrameTags
+stackFrameTag' :: Tagged StackFrame -> Tag
+stackFrameTag' = injectTag 3 . tag
 
 qaTag' :: Anned QA -> Tag
 qaTag' = injectTag 2 . annedTag
