@@ -116,6 +116,10 @@ sPECULATE_ON_LOSERS = "--speculate-on-losers" `elem` unsafePerformIO getArgs
 lOCAL_TIEBACKS :: Bool
 lOCAL_TIEBACKS = not $ "--no-local-tiebacks" `elem` unsafePerformIO getArgs
 
+{-# NOINLINE nAIVE_LOCAL_TIEBACKS #-}
+nAIVE_LOCAL_TIEBACKS :: Bool
+nAIVE_LOCAL_TIEBACKS = "--naive-local-tiebacks" `elem` unsafePerformIO getArgs
+
 {-# NOINLINE rEDUCE_ROLLBACK #-}
 rEDUCE_ROLLBACK :: Bool
 rEDUCE_ROLLBACK = not $ "--no-reduce-rollback" `elem` unsafePerformIO getArgs

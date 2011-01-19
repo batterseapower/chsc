@@ -158,6 +158,13 @@ heapBindingEnvironmental :: HeapBinding -> Bool
 heapBindingEnvironmental Environmental = True
 heapBindingEnvironmental _             = False
 
+-- A heap binding is a value if the binding above is likely to be discovered to be a value by GHC. Used for heuristics about local heap bindings.
+heapBindingProbablyValue :: HeapBinding -> Bool
+heapBindingProbablyValue Environmental   = True  -- Top level bindings are often functions and hence values
+heapBindingProbablyValue (Updated _ _)   = False -- Almost certainly not values since the supercompiler stopped in the process of evaluating them
+heapBindingProbablyValue (Phantom in_e)  = termIsValue (snd in_e)
+heapBindingProbablyValue (Concrete _)    = True  -- We can't really say yet since we may not have supercompiled the RHS
+
 heapBindingTerm :: HeapBinding -> Maybe (In AnnedTerm, WhyLive)
 heapBindingTerm Environmental   = Nothing
 heapBindingTerm (Updated _ _)   = Nothing
