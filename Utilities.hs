@@ -38,7 +38,7 @@ import qualified Data.Traversable as Traversable
 
 import Debug.Trace
 
-import Text.PrettyPrint.HughesPJClass hiding (render, int, char)
+import Text.PrettyPrint.HughesPJClass hiding (render, int, float, char)
 import qualified Text.PrettyPrint.HughesPJClass as Pretty
 
 import System.IO

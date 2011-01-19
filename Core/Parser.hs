@@ -83,20 +83,35 @@ freshFloatName :: String -> Term -> ParseM (Maybe (Var, Term), Name)
 freshFloatName _ (I (Var x)) = return (Nothing, x)
 freshFloatName n e           = freshName n >>= \x -> return (Just (x, e), x)
 
+float :: [(Var, Term)] -> ParseM ()
+float floats = ParseM $ \s -> (s, floats, ())
+
 nameIt :: Term -> ParseM Var
-nameIt e = freshFloatName "a" e >>= \(mb_float, x) -> ParseM $ \s -> (s, maybeToList mb_float, x)
+nameIt e = freshFloatName "a" e >>= \(mb_float, x) -> float (maybeToList mb_float) >> return x
 
 bindFloats :: ParseM Term -> ParseM Term
-bindFloats act = ParseM $ \s -> case unParseM act s of (s, floats, e) -> (s, [], bind floats e)
+bindFloats = bindFloatsWith . fmap ([],)
 
 bindFloatsWith :: ParseM ([(Var, Term)], Term) -> ParseM Term
 bindFloatsWith act = ParseM $ \s -> case unParseM act s of (s, floats, (xes, e)) -> (s, [], bind (xes ++ floats) e)
 
-nameThem :: [Term] -> ([Var] -> ParseM Term) -> ParseM Term
-nameThem es f = mapM (freshFloatName "a") es >>= \(unzip -> (mb_es, xs)) -> fmap (bind (catMaybes mb_es)) $ f xs
+tupleCore :: [Term] -> ParseM Term
+tupleCore es = case tupleDataCon (length es) of Nothing -> return (expectHead "tupleCore" es); Just dc -> dataConCore dc es
 
 listCore :: [Term] -> ParseM Term
-listCore es = nameThem es $ \es_xs -> replicateM (length es) (freshName "list") >>= \cons_xs -> return $ uncurry bind $ foldr (\(cons_x, e_x) (floats, tl) -> ((cons_x, tl) : floats, cons e_x cons_x)) ([], nil) (cons_xs `zip` es_xs)
+listCore es = nilCore >>= \e_nil -> foldrM consCore e_nil es
+  where
+    foldrM :: Monad m => (a -> b -> m b) -> b -> [a] -> m b
+    foldrM c n xs = foldM (flip c) n (reverse xs)
+
+nilCore :: ParseM Term
+nilCore = dataConCore nilDataCon []
+
+consCore :: Term -> Term -> ParseM Term
+consCore e1 e2 = dataConCore consDataCon [e1, e2]
+
+dataConCore :: DataCon -> [Term] -> ParseM Term
+dataConCore dc es = dataConWrapper dc >>= \wrap -> foldM appE (var wrap) es
 
 charCore :: Char -> ParseM Term
 charCore c = fmap var $ charWrapper c
@@ -153,6 +168,9 @@ declCore (LHE.PatBind _loc pat _mb_ty@Nothing (LHE.UnGuardedRhs e) _binds@(LHE.B
     return $ (x, e) : [(n, build (var n)) | n <- bound_ns, n /= x]
 declCore d = panic "declCore" (text $ show d)
 
+data Description = NonApp String
+                 | App String Int
+
 expCore :: LHE.Exp -> ParseM Term
 expCore (LHE.Var qname) = qNameCore qname
 expCore (LHE.Con qname) = fmap var $ dataConWrapper $ qNameDataCon qname
@@ -163,7 +181,7 @@ expCore (LHE.InfixApp e1 eop e2) = expCore e1 >>= \e1 -> nameIt e1 >>= \x1 -> ex
 expCore (LHE.Let (LHE.BDecls binds) e) = bindFloatsWith $ liftM2 (,) (declsCore binds) (expCore e)
 expCore (LHE.If e1 e2 e3) = expCore e1 >>= \e1 -> liftM2 (if_ e1) (expCore e2) (expCore e3)
 expCore (LHE.Case e alts) = expCore e >>= \e -> fmap (scrutinise e) (mapM altCore alts)
-expCore (LHE.Tuple es) = mapM expCore es >>= flip nameThem (return . tuple)
+expCore (LHE.Tuple es) = mapM expCore es >>= tupleCore
 expCore (LHE.Paren e) = expCore e
 expCore (LHE.List es) = mapM expCore es >>= listCore
 expCore (LHE.Lambda _ ps e) = patCores ps >>= \(xs, _bound_xs, build) -> fmap (lambdas xs) $ bindFloats $ fmap build (expCore e)
