@@ -4,11 +4,11 @@
 # The options that we should use to make the supercompiler as close as possible to the SbE paper
 VANILLA_OPTS="raw --no-primops --no-deeds --tag-collection=bags --no-generalisation --cheapification --no-speculation --no-local-tiebacks --no-reduce-rollback --no-sc-rollback"
 
-# ./test-all ghc > results-ghc.tex
+./test-all ghc > results-ghc.tex
 
 ./test-all $VANILLA_OPTS > results-vanilla.tex
 
-# ./test-all raw > nresults-vanilla.tex
+./test-all raw > nresults-vanilla.tex
 
 ./test-all ${VANILLA_OPTS/--no-generalisation/} | tee results-generalisation.tex
 
