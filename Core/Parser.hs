@@ -36,6 +36,30 @@ parse path = do
   where cpp = runCpphs (defaultCpphsOptions { boolopts = (boolopts defaultCpphsOptions) { locations = False }, defines = ("SUPERCOMPILE", "1") : defines defaultCpphsOptions }) path
 
 
+-- | Descriptions of terms: used for building readable names for ANF-introduced variables
+data Description = Opaque String | ArgumentOf Description
+
+descriptionString :: Description -> String
+descriptionString = go 0
+  where
+    go n (Opaque s)     = s ++ (if n > 0 then show n else "")
+    go n (ArgumentOf d) = go (n + 1) d
+
+desc :: Term -> Description
+desc = desc' . unI
+
+desc' :: TermF Identity -> Description
+desc' (Var x)         = Opaque (name_string x)
+desc' (Value _)       = Opaque "value"
+desc' (App e1 _)      = argOf (desc e1)
+desc' (PrimOp pop es) = foldr (\_ d -> argOf d) (Opaque (show pop)) es
+desc' (Case _ _)      = Opaque "case"
+desc' (LetRec _ e)    = desc e
+
+argOf :: Description -> Description
+argOf = ArgumentOf
+
+
 data ParseState = ParseState {
     ids :: IdSupply,
     dcWrappers :: M.Map DataCon Var,
@@ -86,8 +110,8 @@ freshFloatName n e           = freshName n >>= \x -> return (Just (x, e), x)
 float :: [(Var, Term)] -> ParseM ()
 float floats = ParseM $ \s -> (s, floats, ())
 
-nameIt :: Term -> ParseM Var
-nameIt e = freshFloatName "a" e >>= \(mb_float, x) -> float (maybeToList mb_float) >> return x
+nameIt :: Description -> Term -> ParseM Var
+nameIt d e = freshFloatName ("a" ++ descriptionString d) e >>= \(mb_float, x) -> float (maybeToList mb_float) >> return x
 
 bindFloats :: ParseM Term -> ParseM Term
 bindFloats = bindFloatsWith . fmap ([],)
@@ -120,7 +144,7 @@ stringCore :: String -> ParseM Term
 stringCore s = mapM charCore s >>= listCore
 
 appE :: Term -> Term -> ParseM Term
-appE e1 e2 = nameIt e2 >>= \x2 -> return (e1 `app` x2)
+appE e1 e2 = nameIt (argOf (desc e1)) e2 >>= \x2 -> return (e1 `app` x2)
 
 dataConWrapper :: DataCon -> ParseM Var
 dataConWrapper = grabWrapper dcWrappers (\s x -> s { dcWrappers = x }) (\dc -> dataConFriendlyName dc `orElse` dc)
@@ -141,7 +165,7 @@ grabWrapper :: Ord a
 grabWrapper get set describe what = do
     mb_x <- ParseM $ \s -> (s, [], M.lookup what (get s))
     case mb_x of Just x -> return x
-                 Nothing -> freshName ("wrap" ++ describe what) >>= \x -> ParseM $ \s -> (set s (M.insert what x (get s)), [], x)
+                 Nothing -> freshName ("w" ++ describe what) >>= \x -> ParseM $ \s -> (set s (M.insert what x (get s)), [], x)
 
 runParseM :: ParseM a -> ([(Var, Term)], a)
 runParseM act = (buildWrappers s ++ floats, x)
@@ -169,16 +193,13 @@ declCore (LHE.PatBind _loc pat _mb_ty@Nothing (LHE.UnGuardedRhs e) _binds@(LHE.B
     return $ (x, e) : [(n, build (var n)) | n <- bound_ns, n /= x]
 declCore d = panic "declCore" (text $ show d)
 
-data Description = NonApp String
-                 | App String Int
-
 expCore :: LHE.Exp -> ParseM Term
 expCore (LHE.Var qname) = qNameCore qname
 expCore (LHE.Con qname) = fmap var $ dataConWrapper $ qNameDataCon qname
 expCore (LHE.Lit lit) = literalCore lit
 expCore (LHE.NegApp e) = expCore $ LHE.App (LHE.Var (LHE.UnQual (LHE.Ident "negate"))) e
 expCore (LHE.App e1 e2) = expCore e1 >>= \e1 -> expCore e2 >>= appE e1
-expCore (LHE.InfixApp e1 eop e2) = expCore e1 >>= \e1 -> nameIt e1 >>= \x1 -> expCore e2 >>= \e2 -> nameIt e2 >>= \x2 -> qopCore eop >>= \eop -> return $ apps eop [x1, x2]
+expCore (LHE.InfixApp e1 eop e2) = qopCore eop >>= \eop -> expCore e1 >>= \e1 -> nameIt (argOf (desc eop)) e1 >>= \x1 -> expCore e2 >>= \e2 -> nameIt (argOf (argOf (desc eop))) e2 >>= \x2 -> return $ apps eop [x1, x2]
 expCore (LHE.Let (LHE.BDecls binds) e) = bindFloatsWith $ liftM2 (,) (declsCore binds) (expCore e)
 expCore (LHE.If e1 e2 e3) = expCore e1 >>= \e1 -> liftM2 (if_ e1) (expCore e2) (expCore e3)
 expCore (LHE.Case e alts) = expCore e >>= \e -> fmap (scrutinise e) (mapM altCore alts)
@@ -186,8 +207,8 @@ expCore (LHE.Tuple es) = mapM expCore es >>= tupleCore
 expCore (LHE.Paren e) = expCore e
 expCore (LHE.List es) = mapM expCore es >>= listCore
 expCore (LHE.Lambda _ ps e) = patCores ps >>= \(xs, _bound_xs, build) -> fmap (lambdas xs) $ bindFloats $ fmap build (expCore e)
-expCore (LHE.LeftSection e1 eop) = expCore e1 >>= \e1 -> nameIt e1 >>= \x1 -> qopCore eop >>= \eop -> return (eop `app` x1)
-expCore (LHE.RightSection eop e2) = expCore e2 >>= \e2 -> nameIt e2 >>= \x2 -> qopCore eop >>= \eop -> nameIt eop >>= \xop -> freshName "rsect" >>= \x1 -> return $ lambda x1 $ (var xop `app` x1) `app` x2  -- NB: careful about sharing!
+expCore (LHE.LeftSection e1 eop) = qopCore eop >>= \eop -> expCore e1 >>= \e1 -> nameIt (argOf (desc eop)) e1 >>= \x1 -> return (eop `app` x1)
+expCore (LHE.RightSection eop e2) = qopCore eop >>= \eop -> nameIt (desc eop) eop >>= \xop -> expCore e2 >>= \e2 -> nameIt (argOf (argOf (desc eop))) e2 >>= \x2 -> freshName "rsect" >>= \x1 -> return $ lambda x1 $ (var xop `app` x1) `app` x2  -- NB: careful about sharing!
 expCore (LHE.EnumFromTo e1 e2) = expCore $ LHE.Var (LHE.UnQual (LHE.Ident "enumFromTo")) `LHE.App` e1 `LHE.App` e2
 expCore (LHE.EnumFromThen e1 e2) = expCore $ LHE.Var (LHE.UnQual (LHE.Ident "enumFromThen")) `LHE.App` e1 `LHE.App` e2
 expCore (LHE.EnumFromThenTo e1 e2 e3) = expCore $ LHE.Var (LHE.UnQual (LHE.Ident "enumFromThenTo")) `LHE.App` e1 `LHE.App` e2 `LHE.App` e3
