@@ -630,6 +630,14 @@ mapAccumLM f = go []
       (acc, y) <- f acc x
       go (y:ys) acc xs
 
+concatMapM :: Monad m => (a -> m [b]) -> [a] -> m [b]
+concatMapM f = go
+  where
+    go [] = return []
+    go (x:xs) = do
+        ys <- f x
+        liftM (ys ++) $ go xs
+
 instance Ord k => Accumulatable (M.Map k) where
     mapAccumTM f acc = liftM (second M.fromList) . mapAccumTM (\acc (k, x) -> liftM (second (k,)) (f acc x)) acc . M.toList
 

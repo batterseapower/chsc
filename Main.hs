@@ -42,7 +42,10 @@ main = do
 test :: Ways -> [FilePath] -> IO ()
 test ways files = do
     putStrLn $ intercalate " & " ["Filename", "SC time", "Compile time", "Run time", "Heap size", "Term size"] ++ " \\\\"
-    mapM_ (testOne ways) files
+    test_errors <- concatMapM (\file -> liftM (maybeToList . fmap (file,)) $ testOne ways file) files
+    unless (null test_errors) $ do
+        hPutStrLn stderr $ "WARNING: " ++ show (length test_errors) ++ " test failures:"
+        mapM_ (\(fp, err) -> hPutStrLn stderr (fp ++ ": " ++ err)) test_errors
 
 splitModule :: [(Var, Term)] -> (Term, Maybe Term)
 splitModule xes = (letRecSmart (transitiveInline (S.singleton root)) (var root),
@@ -61,52 +64,73 @@ splitModule xes = (letRecSmart (transitiveInline (S.singleton root)) (var root),
     mb_test = findBinding "tests"
 
 
-testOne :: Ways -> FilePath -> IO ()
+testOne :: Ways -> FilePath -> IO (Maybe String)
 testOne (ghc_way, sc_way) file = do
     hPutStrLn stderr $ "% " ++ file
     (wrapper, binds) <- parse file
     case splitModule binds of
-      (_, Nothing) -> hPutStrLn stderr "Skipping: no tests"
+      (_, Nothing) -> hPutStrLn stderr "Skipping: no tests" >> return Nothing
       (e, Just test_e) -> do
-        mb_before <- if not ghc_way
-                     then return Nothing
-                     else fmap Just $ do
-                       (before_code, before_res) <- runCompiled wrapper e test_e
-                       
-                       -- Save a copy of the non-supercompiled code
-                       createDirectoryIfMissing True (takeDirectory $ "input" </> file)
-                       writeFile ("input" </> replaceExtension file ".hs") before_code
-                       
-                       fmap (,termSize e,Nothing) $ catchLeft before_res
-    
-        mb_after <- if not sc_way
-                    then return Nothing
-                    else fmap Just $ do
-                      rnf e `seq` return ()
-                      let e' = supercompile e
-                      super_t <- time_ (rnf e' `seq` return ())
-                      
-                      (after_code, after_res) <- runCompiled wrapper e' test_e
-                      
-                      -- Save a copy of the supercompiled code somewhere so I can consult it at my leisure
-                      let output_dir = "output" </> cODE_IDENTIFIER </> rUN_IDENTIFIER
-                      createDirectoryIfMissing True (takeDirectory $ output_dir </> file)
-                      writeFile (output_dir </> replaceExtension file ".hs") after_code
-                      
-                      fmap (,termSize e',Just super_t) $ catchLeft after_res
-    
+        -- TODO: excuse me while I barf
+        let try_ghc = do
+              (before_code, before_res) <- runCompiled wrapper e test_e
+              
+              -- Save a copy of the non-supercompiled code
+              createDirectoryIfMissing True (takeDirectory $ "input" </> file)
+              writeFile ("input" </> replaceExtension file ".hs") before_code
+              
+              return $ fmap (,termSize e,Nothing) before_res
+            try_sc = do
+              rnf e `seq` return ()
+              let e' = supercompile e
+              super_t <- time_ (rnf e' `seq` return ())
+              
+              (after_code, after_res) <- runCompiled wrapper e' test_e
+              
+              -- Save a copy of the supercompiled code somewhere so I can consult it at my leisure
+              let output_dir = "output" </> cODE_IDENTIFIER </> rUN_IDENTIFIER
+              createDirectoryIfMissing True (takeDirectory $ output_dir </> file)
+              writeFile (output_dir </> replaceExtension file ".hs") after_code
+              
+              return $ fmap (,termSize e',Just super_t) after_res
+        
         let benchmark = escape $ map toLower $ takeFileName $ dropExtension file
             dp1 x = showFFloat (Just 1) x ""
             dp2 x = showFFloat (Just 2) x ""
             ratio n m = fromIntegral n / fromIntegral m :: Double
             escape = concatMap (\c -> if c == '_' then "\\_" else [c])
-        case (mb_before, mb_after) of
-          (Just ((_before_size, before_compile_t, before_heap_size, before_run_t), before_term_size, Nothing),
-           Just ((_after_size,  after_compile_t,  after_heap_size,  after_run_t),  after_term_size,  Just after_super_t))
-            -> putStrLn $ intercalate " & " [benchmark, dp1 after_super_t ++ "s", dp2 (after_compile_t / before_compile_t), dp2 (after_run_t / before_run_t), dp2 (after_heap_size `ratio` before_heap_size), dp2 (after_term_size `ratio` before_term_size)] ++ " \\\\"
-          _ -> case mb_before `mplus` mb_after of
-                 Just ((_size, compile_t, heap_size, run_t), term_size, mb_super_t) -> putStrLn $ intercalate " & " [benchmark, maybe "" show mb_super_t, show compile_t, show run_t, show heap_size, show term_size] ++ " \\\\"
-
-catchLeft :: Either String b -> IO b
-catchLeft (Left err)  = hPutStrLn stderr err >> exitWith (ExitFailure 1)
-catchLeft (Right res) = return res
+            
+            showComparison mb_res = intercalate " & " (benchmark:fields) ++ " \\\\"
+              where fields = case mb_res of
+                                Just (((_before_size, before_compile_t, before_heap_size, before_run_t), before_term_size, Nothing),
+                                      ((_after_size,  after_compile_t,  after_heap_size,  after_run_t),  after_term_size,  Just after_super_t))
+                                 -> [dp1 after_super_t ++ "s", dp2 (after_compile_t / before_compile_t), dp2 (after_run_t / before_run_t), dp2 (after_heap_size `ratio` before_heap_size), dp2 (after_term_size `ratio` before_term_size)]
+                                _
+                                 -> ["", "", "", "", ""]
+            
+            showRaw :: Maybe ((Bytes, Seconds, Bytes, Seconds), Int, Maybe Seconds) -> String
+            showRaw mb_res = intercalate " & " (benchmark:fields) ++ " \\\\"
+              where fields = case mb_res of
+                               Just ((_size, compile_t, heap_size, run_t), term_size, mb_super_t)
+                                -> [benchmark, maybe "" show mb_super_t, show compile_t, show run_t, show heap_size, show term_size]
+                               Nothing
+                                -> ["", "", "", "", ""]
+            
+        case (ghc_way, sc_way) of
+            (True, True) -> do
+                ei_e_ghc_res <- try_ghc
+                ei_e_sc_res <- try_sc
+                let (mb_err, mb_res) = either (\e -> (Just e, Nothing)) (\res -> (Nothing, Just res)) $ liftM2 (,) ei_e_ghc_res ei_e_sc_res
+                putStrLn $ showComparison mb_res
+                return mb_err
+            (True, False) -> do
+                ei_e_ghc_res <- try_ghc
+                let (mb_err, mb_res) = either (\e -> (Just e, Nothing)) (\res -> (Nothing, Just res)) ei_e_ghc_res
+                putStrLn $ showRaw mb_res
+                return mb_err
+            (False, True) -> do
+                ei_e_sc_res <- try_sc
+                let (mb_err, mb_res) = either (\e -> (Just e, Nothing)) (\res -> (Nothing, Just res)) ei_e_sc_res
+                putStrLn $ showRaw mb_res
+                return mb_err
+            (False, False) -> error "testOne: invalid way"
