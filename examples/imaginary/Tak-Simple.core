@@ -1,11 +1,261 @@
 -- code of unknown provenance (partain 95/01/25)
 
 --tak :: Int -> Int -> Int -> Int
+
+-- Supercompilation of this terminates quickly (after 1 sc-stops and 6 reduce-stops):
+-- tak x y z = if x <= y
+--             then z
+--             else tak (tak (x-1) y z)
+--                      (tak (y-1) z x)
+--                      (tak (z-1) x y)
+
+-- Supercompilation of this has not been observed to terminate if we turn local tiebacks on (we have a long chain of reduce-stops):
 tak x y z = if y < x
             then tak (tak (x-1) y z)
                      (tak (y-1) z x)
                      (tak (z-1) x y)
             else z
+
+-- The difference is the order of evaluation of the arguments to tak
+-- (the order of the if branches) is irrelevant - I've only done it that
+-- way because there is no > operation built in.
+
+
+-- Here is a manual supercompilation run on the program (without any consideration of termination):
+--
+-- D[tak x y z]
+-- 
+-- if y < x
+-- then D[tak (tak (x-1) y z)
+--            (tak (y-1) z x)
+--            (tak (z-1) x y)]
+-- else D[z]
+-- 
+-- if y < x
+-- then D[let x0 = tak (x-1) y z
+--            y0 = tak (y-1) z x
+--            z0 = tak (z-1) x y
+--        in tak x0 y0 z0]
+-- else z
+-- 
+-- if y < x
+-- then D[let x0 = tak (x-1) y z
+--            y0 = tak (y-1) z x
+--            z0 = tak (z-1) x y
+--        in if y0 < x0
+--           then tak (tak (x0-1) y0 z0)
+--                    (tak (y0-1) z0 x0)
+--                    (tak (z0-1) x0 y0)
+--           else z0]
+-- else z
+-- 
+-- if y < x
+-- then D[let x0 = tak (x-1) y z
+--            y0 = let y0' = y - 1
+--                 in if z < y0'
+--                    then tak (tak (y0'-1) z x)
+--                             (tak (z-1) x y0')
+--                             (tak (x-1) y0' z)
+--                    else x
+--            z0 = tak (z-1) x y
+--        in if y0 < x0
+--           then tak (tak (x0-1) y0 z0)
+--                    (tak (y0-1) z0 x0)
+--                    (tak (z0-1) x0 y0)
+--           else z0]
+-- else z
+-- 
+-- if y < x
+-- then let y0' = y - 1
+--      in if z < y0'
+--         then D[let x0 = tak (x-1) y z
+--                    y0 = tak (tak (y0'-1) z x)
+--                             (tak (z-1) x y0')
+--                             (tak (x-1) y0' z)
+--                    z0 = tak (z-1) x y
+--                in if y0 < x0
+--                   then tak (tak (x0-1) y0 z0)
+--                            (tak (y0-1) z0 x0)
+--                            (tak (z0-1) x0 y0)
+--                   else z0]
+--         else D[let x0 = tak (x-1) y z
+--                    y0 = x
+--                    z0 = tak (z-1) x y
+--                in if y0 < x0
+--                   then tak (tak (x0-1) y0 z0)
+--                            (tak (y0-1) z0 x0)
+--                            (tak (z0-1) x0 y0)
+--                   else z0]
+-- else z
+-- 
+-- if y < x
+-- then let y0' = y - 1
+--      in if z < y0'
+--         then D[let x0 = tak (x-1) y z
+--                    y0 = let x1 = tak (y0'-1) z x
+--                             y1 = let z1' = z-1
+--                                  in tak z1' x y0'
+--                             z1 = tak (x-1) y0' z
+--                         in if y1 < x1
+--                            then tak (tak (x1-1) y1 z1)
+--                                     (tak (y1-1) z1 x1)
+--                                     (tak (z1-1) x1 y1)
+--                            else z1
+--                    z0 = tak (z-1) x y
+--                in if y0 < x0
+--                   then tak (tak (x0-1) y0 z0)
+--                            (tak (y0-1) z0 x0)
+--                            (tak (z0-1) x0 y0)
+--                   else z0]
+--         else let x0 = D[tak (x-1) y z]
+--                  y0 = x
+--              in if y0 < x0
+--                 then D[let z0 = tak (z-1) x y
+--                        in tak (tak (x0-1) y0 z0)
+--                               (tak (y0-1) z0 x0)
+--                               (tak (z0-1) x0 y0)]
+--                 else D[let z0 = tak (z-1) x y
+--                        in z0]
+-- else z
+-- 
+-- if y < x
+-- then let y0' = y - 1
+--      in if z < y0'
+--         then D[let x0 = tak (x-1) y z
+--                    y0 = let x1 = tak (y0'-1) z x
+--                             y1 = let z1' = z-1
+--                                  in if x < z1'
+--                                     then tak (tak (z1'-1) x y0')
+--                                              (tak (x-1) y0' z1')
+--                                              (tak (y0'-1) z1' x)
+--                                     else y0'
+--                             z1 = tak (x-1) y0' z
+--                         in if y1 < x1
+--                            then tak (tak (x1-1) y1 z1)
+--                                     (tak (y1-1) z1 x1)
+--                                     (tak (z1-1) x1 y1)
+--                            else z1
+--                    z0 = tak (z-1) x y
+--                in if y0 < x0
+--                   then tak (tak (x0-1) y0 z0)
+--                            (tak (y0-1) z0 x0)
+--                            (tak (z0-1) x0 y0)
+--                   else z0]
+--         else let x0 = D[tak (x-1) y z]
+--                  y0 = x
+--              in if y0 < x0
+--                 then D[let z0 = tak (z-1) x y
+--                        in tak (tak (x0-1) y0 z0)
+--                               (tak (y0-1) z0 x0)
+--                               (tak (z0-1) x0 y0)]
+--                 else D[let z0 = tak (z-1) x y
+--                        in z0]
+-- else z
+-- 
+-- if y < x
+-- then let y0' = y - 1
+--      in if z < y0'
+--         then let z1' = z - 1
+--              in if x < z1'
+--                 then D[let x0 = tak (x-1) y z
+--                            y0 = let x1 = tak (y0'-1) z x
+--                                     y1 = tak (tak (z1'-1) x y0')
+--                                              (tak (x-1) y0' z1')
+--                                              (tak (y0'-1) z1' x)
+--                                     z1 = tak (x-1) y0' z
+--                                 in if y1 < x1
+--                                    then tak (tak (x1-1) y1 z1)
+--                                             (tak (y1-1) z1 x1)
+--                                             (tak (z1-1) x1 y1)
+--                                    else z1
+--                            z0 = tak (z-1) x y
+--                        in if y0 < x0
+--                           then tak (tak (x0-1) y0 z0)
+--                                    (tak (y0-1) z0 x0)
+--                                    (tak (z0-1) x0 y0)
+--                           else z0]
+--                 else D[let x0 = tak (x-1) y z
+--                            y0 = let x1 = tak (y0'-1) z x
+--                                     y1 = y0'
+--                                     z1 = tak (x-1) y0' z
+--                                 in if y1 < x1
+--                                    then tak (tak (x1-1) y1 z1)
+--                                             (tak (y1-1) z1 x1)
+--                                             (tak (z1-1) x1 y1)
+--                                    else z1
+--                            z0 = tak (z-1) x y
+--                        in if y0 < x0
+--                           then tak (tak (x0-1) y0 z0)
+--                                    (tak (y0-1) z0 x0)
+--                                    (tak (z0-1) x0 y0)
+--                           else z0]
+--         else let x0 = D[tak (x-1) y z]
+--                  y0 = x
+--              in if y0 < x0
+--                 then D[let z0 = tak (z-1) x y
+--                        in tak (tak (x0-1) y0 z0)
+--                               (tak (y0-1) z0 x0)
+--                               (tak (z0-1) x0 y0)]
+--                 else D[let z0 = tak (z-1) x y
+--                        in z0]
+-- else z
+-- 
+-- if y < x
+-- then let y0' = y - 1
+--      in if z < y0'
+--         then let z1' = z - 1
+--              in if x < z1'
+--                 then D[let x0 = tak (x-1) y z
+--                            y0 = let x1 = tak (y0'-1) z x
+--                                     y1 = tak (tak (z1'-1) x y0')
+--                                              (tak (x-1) y0' z1')
+--                                              (tak (y0'-1) z1' x)
+--                                     z1 = tak (x-1) y0' z
+--                                 in if y1 < x1
+--                                    then tak (tak (x1-1) y1 z1)
+--                                             (tak (y1-1) z1 x1)
+--                                             (tak (z1-1) x1 y1)
+--                                    else z1
+--                            z0 = tak (z-1) x y
+--                        in if y0 < x0
+--                           then tak (tak (x0-1) y0 z0)
+--                                    (tak (y0-1) z0 x0)
+--                                    (tak (z0-1) x0 y0)
+--                           else z0]
+--                 else let x1 = D[tak (y0'-1) z x]
+--                          y1 = y0'
+--                      in if y1 < x1
+--                         then D[let x0 = tak (x-1) y z
+--                                    y0 = let z1 = tak (x-1) y0' z
+--                                         in tak (tak (x1-1) y1 z1)
+--                                                     (tak (y1-1) z1 x1)
+--                                                     (tak (z1-1) x1 y1)
+--                                    z0 = tak (z-1) x y
+--                                in if y0 < x0
+--                                   then tak (tak (x0-1) y0 z0)
+--                                            (tak (y0-1) z0 x0)
+--                                            (tak (z0-1) x0 y0)
+--                                   else z0]
+--                         else D[let x0 = tak (x-1) y z
+--                                    y0 = let z1 = tak (x-1) y0' z
+--                                         in z1
+--                                    z0 = tak (z-1) x y
+--                                in if y0 < x0
+--                                   then tak (tak (x0-1) y0 z0)
+--                                            (tak (y0-1) z0 x0)
+--                                            (tak (z0-1) x0 y0)
+--                                   else z0]
+--         else let x0 = D[tak (x-1) y z]
+--                  y0 = x
+--              in if y0 < x0
+--                 then D[let z0 = tak (z-1) x y
+--                        in tak (tak (x0-1) y0 z0)
+--                               (tak (y0-1) z0 x0)
+--                               (tak (z0-1) x0 y0)]
+--                 else D[let z0 = tak (z-1) x y
+--                        in z0]
+-- else z
+
 
 root x y z = tak x y z
 
