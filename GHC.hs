@@ -106,7 +106,7 @@ runCompiled wrapper e test_e = withTempFile "Main" $ \(exe_file, exe_h) -> do
       ExitSuccess   -> do
           (ec, run_out, run_err) <- readProcessWithExitCode exe_file ["+RTS", "-t"] ""
           case ec of
-            ExitFailure _ -> hutStrLn stderr haskell >> return (haskell, Left (unlines [compile_out, run_err]))
+            ExitFailure _ -> hPutStrLn stderr haskell >> return (haskell, Left (unlines [compile_out, run_err]))
             ExitSuccess -> do
               -- <<ghc: 7989172 bytes, 16 GCs, 20876/20876 avg/max bytes residency (1 samples), 1M in use, 0.00 INIT (0.00 elapsed), 0.02 MUT (0.51 elapsed), 0.00 GC (0.00 elapsed) :ghc>>
               let [t_str] = lines run_out
