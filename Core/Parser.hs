@@ -40,7 +40,7 @@ parse path = do
 data Description = Opaque String | ArgumentOf Description
 
 descriptionString :: Description -> String
-descriptionString = go 0
+descriptionString = go (0 :: Int)
   where
     go n (Opaque s)     = s ++ (if n > 0 then show n else "")
     go n (ArgumentOf d) = go (n + 1) d

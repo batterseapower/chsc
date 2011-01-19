@@ -23,9 +23,6 @@ import Utilities hiding (tails)
 
 import Algebra.Lattice
 
-import Control.Applicative (liftA2)
-import qualified Control.Monad.Trans.State as S
-
 import qualified Data.Foldable as Foldable
 import qualified Data.Traversable as Traversable
 import qualified Data.Map as M

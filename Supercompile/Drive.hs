@@ -56,9 +56,6 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ run
                      -> AnnedTerm -> (Tree Tag, Tree Int -> CountedTerm)
         extractDeeds rec = term
           where 
-            var = rec var'
-            var' x = ([], \[] -> x)
-            
             term = rec term'
             term' e = case e of
               Var x              -> ([], \[] -> Var x)

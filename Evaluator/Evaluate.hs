@@ -16,7 +16,6 @@ import Renaming
 import StaticFlags
 import Utilities
 
-import qualified Data.IntSet as IS
 import qualified Data.Map as M
 
 

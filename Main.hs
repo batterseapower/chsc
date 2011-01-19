@@ -17,7 +17,6 @@ import qualified Data.Set as S
 
 import System.Directory
 import System.Environment
-import System.Exit
 import System.FilePath ((</>), dropExtension, takeFileName, takeDirectory, replaceExtension)
 import System.IO
 

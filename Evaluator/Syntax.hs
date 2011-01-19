@@ -32,7 +32,6 @@ annedTag :: Anned a -> Tag
 annedTag = tag . unComp
 
 
-annedVarFreeVars = taggedFVedVarFreeVars
 annedVarFreeVars' = taggedFVedVarFreeVars'
 annedTermFreeVars = taggedFVedTermFreeVars
 annedTermFreeVars' = taggedFVedTermFreeVars'
@@ -45,7 +44,6 @@ renameAnnedValue = renameTaggedFVedValue
 renameAnnedValue' = renameTaggedFVedValue'
 renameAnnedAlts = renameTaggedFVedAlts
 
-detagAnnedVar = taggedFVedVarToFVedVar
 detagAnnedTerm = taggedFVedTermToFVedTerm
 detagAnnedValue = taggedFVedValueToFVedValue
 detagAnnedValue' = taggedFVedValue'ToFVedValue'
