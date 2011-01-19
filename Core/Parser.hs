@@ -67,24 +67,30 @@ buildWrappers ps
     [ (name "error", lam (name "msg") $ scrutinise (var (name "prelude_error") `app` name "msg") []) ] ++
     [ (name "uncoveredBranch", scrutinise (var (name "bAD")) []) ]
 
-newtype ParseM a = ParseM { unParseM :: ParseState -> (ParseState, a) }
+newtype ParseM a = ParseM { unParseM :: ParseState -> (ParseState, [(Var, Term)], a) }
 
 instance Functor ParseM where
     fmap = liftM
 
 instance Monad ParseM where
-    return x = ParseM $ \s -> (s, x)
-    mx >>= fxmy = ParseM $ \s -> case unParseM mx s of (s, x) -> unParseM (fxmy x) s
+    return x = ParseM $ \s -> (s, [], x)
+    mx >>= fxmy = ParseM $ \s -> case unParseM mx s of (s, floats1, x) -> case unParseM (fxmy x) s of (s, floats2, y) -> (s, floats1 ++ floats2, y)
 
 freshName :: String -> ParseM Name
-freshName n = ParseM $ \s -> let (ids', x) = Name.freshName (ids s) n in (s { ids = ids' }, x)
+freshName n = ParseM $ \s -> let (ids', x) = Name.freshName (ids s) n in (s { ids = ids' }, [], x)
 
 freshFloatName :: String -> Term -> ParseM (Maybe (Var, Term), Name)
 freshFloatName _ (I (Var x)) = return (Nothing, x)
 freshFloatName n e           = freshName n >>= \x -> return (Just (x, e), x)
 
-nameIt :: Term -> (Var -> ParseM Term) -> ParseM Term
-nameIt e f = freshFloatName "a" e >>= \(mb_float, x) -> fmap (bind (maybeToList mb_float)) $ f x
+nameIt :: Term -> ParseM Var
+nameIt e = freshFloatName "a" e >>= \(mb_float, x) -> ParseM $ \s -> (s, maybeToList mb_float, x)
+
+bindFloats :: ParseM Term -> ParseM Term
+bindFloats act = ParseM $ \s -> case unParseM act s of (s, floats, e) -> (s, [], bind floats e)
+
+bindFloatsWith :: ParseM ([(Var, Term)], Term) -> ParseM Term
+bindFloatsWith act = ParseM $ \s -> case unParseM act s of (s, floats, (xes, e)) -> (s, [], bind (xes ++ floats) e)
 
 nameThem :: [Term] -> ([Var] -> ParseM Term) -> ParseM Term
 nameThem es f = mapM (freshFloatName "a") es >>= \(unzip -> (mb_es, xs)) -> fmap (bind (catMaybes mb_es)) $ f xs
@@ -99,7 +105,7 @@ stringCore :: String -> ParseM Term
 stringCore s = mapM charCore s >>= listCore
 
 appE :: Term -> Term -> ParseM Term
-appE e1 e2 = e2 `nameIt` \x2 -> return (e1 `app` x2)
+appE e1 e2 = nameIt e2 >>= \x2 -> return (e1 `app` x2)
 
 dataConWrapper :: DataCon -> ParseM Var
 dataConWrapper = grabWrapper dcWrappers (\s x -> s { dcWrappers = x })
@@ -117,12 +123,14 @@ grabWrapper :: Ord a
             => (ParseState -> M.Map a Var) -> (ParseState -> M.Map a Var -> ParseState)
             -> a -> ParseM Var
 grabWrapper get set what = do
-    mb_x <- ParseM $ \s -> (s, M.lookup what (get s))
+    mb_x <- ParseM $ \s -> (s, [], M.lookup what (get s))
     case mb_x of Just x -> return x
-                 Nothing -> freshName "wrap" >>= \x -> ParseM $ \s -> (set s (M.insert what x (get s)), x)
+                 Nothing -> freshName "wrap" >>= \x -> ParseM $ \s -> (set s (M.insert what x (get s)), [], x)
 
 runParseM :: ParseM a -> ([(Var, Term)], a)
-runParseM = first buildWrappers . flip unParseM initParseState
+runParseM act = (buildWrappers s ++ floats, x)
+  where
+    (s, floats, x) = unParseM act initParseState
 
 
 moduleCore :: LHE.Module -> [(Var, Term)]
@@ -137,14 +145,12 @@ declCore :: LHE.Decl -> ParseM [(Name, Term)]
 declCore (LHE.FunBind [LHE.Match _loc n pats _mb_type@Nothing (LHE.UnGuardedRhs e) _binds@(LHE.BDecls where_decls)]) = do
     let x = name (nameString n)
     (ys, _bound_ns, build) <- patCores pats
-    xes <- declsCore where_decls
-    e <- expCore e
-    return [(x, lambdas ys $ build $ bind xes e)]
+    e <- bindFloatsWith $ liftM2 (,) (declsCore where_decls) (expCore e)
+    return [(x, lambdas ys $ build e)]
 declCore (LHE.PatBind _loc pat _mb_ty@Nothing (LHE.UnGuardedRhs e) _binds@(LHE.BDecls where_decls)) = do
     (x, bound_ns, build) <- patCore pat
-    xes <- declsCore where_decls
-    e <- expCore e
-    return $ (x, bind xes e) : [(n, build (var n)) | n <- bound_ns, n /= x]
+    e <- bindFloatsWith $ liftM2 (,) (declsCore where_decls) (expCore e)
+    return $ (x, e) : [(n, build (var n)) | n <- bound_ns, n /= x]
 declCore d = panic "declCore" (text $ show d)
 
 expCore :: LHE.Exp -> ParseM Term
@@ -153,18 +159,16 @@ expCore (LHE.Con qname) = fmap var $ dataConWrapper $ qNameDataCon qname
 expCore (LHE.Lit lit) = literalCore lit
 expCore (LHE.NegApp e) = expCore $ LHE.App (LHE.Var (LHE.UnQual (LHE.Ident "negate"))) e
 expCore (LHE.App e1 e2) = expCore e1 >>= \e1 -> expCore e2 >>= appE e1
-expCore (LHE.InfixApp e1 eop e2) = expCore e1 >>= \e1 -> e1 `nameIt` \x1 -> expCore e2 >>= \e2 -> e2 `nameIt` \x2 -> qopCore eop >>= \eop -> return $ apps eop [x1, x2]
-expCore (LHE.Let (LHE.BDecls binds) e) = do
-    xes <- declsCore binds
-    fmap (bind xes) $ expCore e
+expCore (LHE.InfixApp e1 eop e2) = expCore e1 >>= \e1 -> nameIt e1 >>= \x1 -> expCore e2 >>= \e2 -> nameIt e2 >>= \x2 -> qopCore eop >>= \eop -> return $ apps eop [x1, x2]
+expCore (LHE.Let (LHE.BDecls binds) e) = bindFloatsWith $ liftM2 (,) (declsCore binds) (expCore e)
 expCore (LHE.If e1 e2 e3) = expCore e1 >>= \e1 -> liftM2 (if_ e1) (expCore e2) (expCore e3)
 expCore (LHE.Case e alts) = expCore e >>= \e -> fmap (scrutinise e) (mapM altCore alts)
 expCore (LHE.Tuple es) = mapM expCore es >>= flip nameThem (return . tuple)
 expCore (LHE.Paren e) = expCore e
 expCore (LHE.List es) = mapM expCore es >>= listCore
-expCore (LHE.Lambda _ ps e) = patCores ps >>= \(xs, _bound_xs, build) -> expCore e >>= \e -> return $ lambdas xs $ build e
-expCore (LHE.LeftSection e1 eop) = expCore e1 >>= \e1 -> e1 `nameIt` \x1 -> qopCore eop >>= \eop -> return (eop `app` x1)
-expCore (LHE.RightSection eop e2) = expCore e2 >>= \e2 -> e2 `nameIt` \x2 -> qopCore eop >>= \eop -> eop `nameIt` \xop -> freshName "rsect" >>= \x1 -> return $ lambda x1 $ (var xop `app` x1) `app` x2  -- NB: careful about sharing!
+expCore (LHE.Lambda _ ps e) = patCores ps >>= \(xs, _bound_xs, build) -> fmap (lambdas xs) $ bindFloats $ fmap build (expCore e)
+expCore (LHE.LeftSection e1 eop) = expCore e1 >>= \e1 -> nameIt e1 >>= \x1 -> qopCore eop >>= \eop -> return (eop `app` x1)
+expCore (LHE.RightSection eop e2) = expCore e2 >>= \e2 -> nameIt e2 >>= \x2 -> qopCore eop >>= \eop -> nameIt eop >>= \xop -> freshName "rsect" >>= \x1 -> return $ lambda x1 $ (var xop `app` x1) `app` x2  -- NB: careful about sharing!
 expCore (LHE.EnumFromTo e1 e2) = expCore $ LHE.Var (LHE.UnQual (LHE.Ident "enumFromTo")) `LHE.App` e1 `LHE.App` e2
 expCore (LHE.EnumFromThen e1 e2) = expCore $ LHE.Var (LHE.UnQual (LHE.Ident "enumFromThen")) `LHE.App` e1 `LHE.App` e2
 expCore (LHE.EnumFromThenTo e1 e2 e3) = expCore $ LHE.Var (LHE.UnQual (LHE.Ident "enumFromThenTo")) `LHE.App` e1 `LHE.App` e2 `LHE.App` e3
@@ -183,9 +187,8 @@ literalCore (LHE.String s) = stringCore s
 altCore :: LHE.Alt -> ParseM Alt
 altCore (LHE.Alt _loc pat (LHE.UnGuardedAlt e) (LHE.BDecls binds)) = do
     (altcon, build) <- altPatCore pat
-    xes <- declsCore binds
-    e <- expCore e
-    return (altcon, build (bind xes e))
+    e <- bindFloatsWith $ liftM2 (,) (declsCore binds) (expCore e)
+    return (altcon, build e)
 
 -- | For irrefutible pattern matches a single level deep, where we need to make a choice based on the outer constructor *only*:
 altPatCore :: LHE.Pat -> ParseM (AltCon, Term -> Term)
@@ -211,13 +214,13 @@ listCompCore e_inner stmts = go stmts
         -- concatMap (\pat -> [[go stmts]]) e
         LHE.Generator _loc pat e -> do
             (x, _bound_xs, build) <- patCore pat
-            arg1 <- liftM (lambda x . build) (go stmts)
+            arg1 <- liftM (lambda x . build) $ bindFloats $ go stmts
             arg2 <- expCore e
             var (name "concatMap") `appE` arg1 >>= (`appE` arg2)
         -- if e then [[go stmts]] else []
         LHE.Qualifier e -> liftM3 if_ (expCore e) (go stmts) (listCore [])
         -- let [[binds]] in [[go stmts]]
-        LHE.LetStmt (LHE.BDecls binds) -> liftM2 bind (declsCore binds) (go stmts)
+        LHE.LetStmt (LHE.BDecls binds) -> bindFloatsWith $ liftM2 (,) (declsCore binds) (go stmts)
 
 
 specialConDataCon :: LHE.SpecialCon -> DataCon
