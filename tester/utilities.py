@@ -39,6 +39,9 @@ def union_dict(left, right):
     new.update(right)
     return new
 
+def map_dict(f, xs):
+    return dict([f(k, v) for k, v in xs.items()])
+
 def readfile(filename):
     if filename == "-":
         import sys

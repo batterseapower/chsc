@@ -8,7 +8,7 @@ def abbreviate(header):
     return abbreviations.get(header, header)
 
 def abbreviated(self):
-    return Results(self.description, abbreviate(self.key_header), [abbreviate(header) for header in self.headers], union_dict(self.results, dict(summary_rows)))
+    return Results(self.description, abbreviate(self.key_header), [abbreviate(header) for header in self.headers], map_dict(lambda filename, values: (filename, map_dict(lambda header, value: (abbreviate(header), value), values)), self.results))
 
 
 results = Results(readfile(list_get(sys.argv, 1, '-')))
