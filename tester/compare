@@ -15,6 +15,15 @@ def zip_values(header, left, right):
         return "N/A"
     else:
         # Result a dimensionless number representing the "right" quantity as a fraction of the "left" quantity
-        return str(round(float(right) / float(left), 2))
+        return show_round(float(right) / float(left), 2)
+
+def show_round(x, dp):
+    # There is probably a better way to do this, but I'm on a train and can't look it up
+    s = str(round(x, dp))
+    if '.' in s:
+        before, after = s.split('.')
+        return before + '.' + after + ('0' * (dp - len(after)))
+    else:
+        return s + '.' + ('0' * dp)
 
 print Results.zipresults(lambda a, b: "'" + b + "' as a fraction of '" + a + "'", zip_values, results_a, results_b)

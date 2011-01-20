@@ -31,6 +31,10 @@ def readfile(filename):
     
     return result
 
+abbreviations = { "Filename" : "Test", "SC time" : "SC", "Compile time" : "Cmp.", "Run time" : "Run", "Heap size" : "Mem.", "Term size" : "Size" }
+def abbreviate(header):
+    return abbreviations.get(header, header)
+
 
 class Results(object):
     def __init__(self, *args):
@@ -66,10 +70,6 @@ class Results(object):
         theheaders = left.headers
         assert theheaders == right.headers, repr(theheaders) + " != " + repr(right.headers)
         
-        print left.results
-        print "~~~"
-        print right.results
-        
         combine_files = lambda _filename, left_values, right_values: zipwith_dict(zip_values, left_values, right_values)
         return Results(zip_descriptions(left.description, right.description), left.headers, zipwith_dict(combine_files, left.results, right.results))
     
@@ -77,7 +77,7 @@ class Results(object):
         comparing = lambda f: lambda x, y, f=f: cmp(f(x), f(y))
         # NB: the point of this isupper() stuff is so that the "filenames" beginning with capital letters are sorted at the end.
         # I do this because in fact only the summary "filenames" (like Average and Maximum) begin with capital letters.
-        table = [["Filename"] + self.headers] + [[filename] + [values[header] for header in self.headers] for filename, values in sorted(self.results.items(), comparing(lambda x: (x[0][0].isupper(), x[0])))]
+        table = [[abbreviate(header) for header in ["Filename"] + self.headers]] + [[filename] + [values[header] for header in self.headers] for filename, values in sorted(self.results.items(), comparing(lambda x: (x[0][0].isupper(), x[0])))]
         return "\n".join([self.description, format_latex_table(table)])
     
     def columns(self):
