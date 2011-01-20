@@ -4,7 +4,7 @@ import sys
 from utilities import *
 
 results_a = Results(readfile(sys.argv[1]))
-results_b = Results(readfile(sys.argv[2]))
+results_b = Results(readfile(list_get(sys.argv, 2, '-')))
 
 def zip_values(header, left, right):
     if header == "SC time" and (left == "" or right == ""):
@@ -16,14 +16,5 @@ def zip_values(header, left, right):
     else:
         # Result a dimensionless number representing the "right" quantity as a fraction of the "left" quantity
         return show_round(float(right) / float(left), 2)
-
-def show_round(x, dp):
-    # There is probably a better way to do this, but I'm on a train and can't look it up
-    s = str(round(x, dp))
-    if '.' in s:
-        before, after = s.split('.')
-        return before + '.' + after + ('0' * (dp - len(after)))
-    else:
-        return s + '.' + ('0' * dp)
 
 print Results.zipresults(lambda a, b: "'" + b + "' as a fraction of '" + a + "'", zip_values, results_a, results_b)
