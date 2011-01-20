@@ -38,9 +38,10 @@ import Data.Tree
 
 wQO :: WQO State Generaliser
 wQO | not tERMINATION_CHECK                        = postcomp (const generaliseNothing) unsafeNever
-    | otherwise = case tAG_COLLECTION of TagBag   -> embedWithTagBags
-                                         TagGraph -> embedWithTagGraphs
-                                         TagSet   -> embedWithTagSets
+    | otherwise = case tAG_COLLECTION of TagBag       -> embedWithTagBags
+                                         TagBagStrong -> embedWithTagBagsStrong
+                                         TagGraph     -> embedWithTagGraphs
+                                         TagSet       -> embedWithTagSets
 
 supercompile :: Term -> Term
 supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ runScpM $ fmap snd $ sc (mkHistory (extra wQO)) (deeds, state)

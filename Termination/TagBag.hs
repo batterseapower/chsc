@@ -1,5 +1,7 @@
+{-# LANGUAGE Rank2Types #-}
 module Termination.TagBag (
-        embedWithTagBags
+        embedWithTagBags,
+        embedWithTagBagsStrong
     ) where
 
 import Termination.Terminate
@@ -9,14 +11,21 @@ import Evaluator.Syntax
 
 import Utilities
 
+import qualified Data.Foldable as Foldable
+import qualified Data.Traversable as Traversable
 import qualified Data.IntMap as IM
 import qualified Data.Map as M
 
 
 type TagBag = TagMap Nat
 
-embedWithTagBags :: WQO State Generaliser
-embedWithTagBags = precomp stateTags $ postcomp generaliserFromGrowing $ refineCollection (\discard -> postcomp discard $ natsWeak) -- TODO: have a version where I replace weakManyNat with (zippable nat)
+embedWithTagBags, embedWithTagBagsStrong :: WQO State Generaliser
+embedWithTagBags = embedWithTagBags' natsWeak
+embedWithTagBagsStrong = embedWithTagBags' (zippable nat)
+
+embedWithTagBags' :: (forall f. (Foldable.Foldable f, Traversable.Traversable f, Zippable f) => WQO (f Nat) (f Bool))
+                  -> WQO State Generaliser
+embedWithTagBags' nats = precomp stateTags $ postcomp generaliserFromGrowing $ refineCollection (\discard -> postcomp discard nats)
   where
     -- NB: this is stronger than 
     stateTags (Heap h _, k, (_, qa)) = traceRender ("stateTags (TagBag)", M.map heapBindingTagBag h, map stackFrameTag' k, qaTag' qa) $
