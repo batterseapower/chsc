@@ -5,7 +5,7 @@ from utilities import *
 
 abbreviations = { "Filename" : "Test", "SC time" : "SC", "Compile time" : "Cmp.", "Run time" : "Run", "Heap size" : "Mem.", "Term size" : "Size" }
 def abbreviate(header):
-    return abbreviations.get(header, header)
+    return "\\textbf{" + abbreviations.get(header, header) + "}"
 
 def abbreviated(self):
     return Results(self.description, abbreviate(self.key_header), [abbreviate(header) for header in self.headers], map_dict(lambda filename, values: (filename, map_dict(lambda header, value: (abbreviate(header), value), values)), self.results))
