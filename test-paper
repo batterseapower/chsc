@@ -7,6 +7,7 @@ VANILLA_OPTS="raw --no-primops --no-deeds --tag-collection=bags --no-generalisat
 ./test-all ghc > results-ghc.tex
 
 ./test-all $VANILLA_OPTS > results-vanilla.tex
+./test-all ${VANILLA_OPTS/--cheapification/} > results-no-cheapification.tex
 
 ./test-all raw > nresults-vanilla.tex
 
