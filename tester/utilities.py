@@ -6,15 +6,17 @@ def list_get(xs, i, default):
         return default
 
 def format_latex_table(rows):
-    if True:
-        col_width = {}
-        for row in rows:
-            for col_i, cell in enumerate(row):
-                col_width[col_i] = max(col_width.get(col_i, 0), len(cell))
-        
-        rows = [[cell.ljust(col_width[col_i]) for col_i, cell in enumerate(row)] for row in rows]
+    col_width = {}
+    for row in rows:
+        for col_i, cell in enumerate(row):
+            col_width[col_i] = max(col_width.get(col_i, 0), len(cell))
+    
+    rows = [[cell.ljust(col_width[col_i]) for col_i, cell in enumerate(row)] for row in rows]
     
     return "\n".join([" & ".join(row) + " \\\\" for row in rows])    
+
+def format_csv(rows):
+    return "\n".join([",".join(row) for row in rows])
 
 def show_round(x, dp):
     # There is probably a better way to do this, but I'm on a train and can't look it up
@@ -94,11 +96,19 @@ class Results(object):
         return Results(zip_descriptions(left.description, right.description), left.key_header, left.headers, zipwith_dict(combine_files, left.results, right.results))
     
     def __str__(self):
+        return self.latex()
+    
+    def latex(self):
+        return "\n".join([self.description, format_latex_table(self.table())])
+    
+    def csv(self):
+        return format_csv(self.table())
+    
+    def table(self):
         comparing = lambda f: lambda x, y, f=f: cmp(f(x), f(y))
         # NB: the point of this isupper() stuff is so that the "filenames" beginning with capital letters are sorted at the end.
         # I do this because in fact only the summary "filenames" (like Average and Maximum) begin with capital letters.
-        table = [[self.key_header] + self.headers] + [[filename] + [values[header] for header in self.headers] for filename, values in sorted(self.results.items(), comparing(lambda x: (x[0][0].isupper(), x[0])))]
-        return "\n".join([self.description, format_latex_table(table)])
+        return [[self.key_header] + self.headers] + [[filename] + [values[header] for header in self.headers] for filename, values in sorted(self.results.items(), comparing(lambda x: (x[0][0].isupper(), x[0])))]
     
     def columns(self):
         columns = {}
