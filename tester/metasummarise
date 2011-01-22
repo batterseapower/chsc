@@ -1,0 +1,32 @@
+#!/usr/bin/env python
+
+from utilities import *
+compare = load_source(__name__, "compare")
+
+def summarised(file, self):
+    def lift_string(f, xs):
+        ys = []
+        for x in xs:
+            try:
+                ys.insert(0, float(x))
+            except ValueError, e:
+                # Ignore missing values! NB: this *differs* from the behaviour of summarise. Is this OK?
+                pass
+        
+        return show_round(f(ys), 2)
+
+    columns = self.columns()
+    summary_cols = dict([(header, lift_string(mean, columns[header])) for header in self.headers])
+    return Results(self.description, "Filename", self.headers, dict([(file, summary_cols)]))
+
+
+if __name__ == '__main__':
+    import sys
+    # Input files
+    results = [(file, Results(readfile(file))) for file in sys.argv[1:]]
+    # Normalise raw results against the first argument as a baseline
+    baseline = results[0][1]
+    results = [(file, compare.compare(baseline, result)) for file, result in results]
+    # Summarise each result individually ready for combination into the metasummary
+    results = [summarised(file, result) for file, result in results]
+    print reduce(lambda left, right: Results.combineresults(lambda leftdesc, rightdesc: leftdesc + " vs. " + rightdesc, lambda leftresults, rightresults: union_dict(leftresults, rightresults), left, right), results)

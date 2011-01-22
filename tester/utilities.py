@@ -1,3 +1,14 @@
+def modulepath(name, *path):
+    import sys
+    import os.path
+    return os.path.join(os.path.realpath(os.path.dirname(sys.modules[name].__file__)), *path)
+
+def load_source(name, module_name):
+    import imp
+    return imp.load_source(module_name, modulepath(__name__, module_name))
+
+mean = lambda xs: sum(xs) / len(xs)
+
 # Like dict.get, but for lists
 def list_get(xs, i, default):
     if i < len(xs):
@@ -89,11 +100,16 @@ class Results(object):
 
     @classmethod
     def zipresults(cls, zip_descriptions, zip_values, left, right):
+        combine_files = lambda _filename, left_values, right_values: zipwith_dict(zip_values, left_values, right_values)
+        combine_results = lambda leftresults, rightresults: zipwith_dict(combine_files, leftresults, rightresults)
+        return cls.combineresults(zip_descriptions, combine_results, left, right)
+    
+    @classmethod
+    def combineresults(cls, combine_descriptions, combine_results, left, right):
         assert_eq(left.key_header, right.key_header)
         assert_eq(left.headers, right.headers)
         
-        combine_files = lambda _filename, left_values, right_values: zipwith_dict(zip_values, left_values, right_values)
-        return Results(zip_descriptions(left.description, right.description), left.key_header, left.headers, zipwith_dict(combine_files, left.results, right.results))
+        return Results(combine_descriptions(left.description, right.description), left.key_header, left.headers, combine_results(left.results, right.results))
     
     def __str__(self):
         return self.latex()

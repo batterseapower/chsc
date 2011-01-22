@@ -1,10 +1,8 @@
 #!/usr/bin/env python
 
-import sys
 from utilities import *
 
 def summarised(self):
-    mean = lambda xs: sum(xs) / len(xs)
     def lift_string(f, xs):
         try:
             return show_round(f([float(x) for x in xs]), 2)
@@ -16,5 +14,7 @@ def summarised(self):
     return Results(self.description, self.key_header, self.headers, union_dict(self.results, dict(summary_rows)))
 
 
-results = Results(readfile(list_get(sys.argv, 1, '-')))
-print summarised(results)
+if __name__ == '__main__':
+    import sys
+    results = Results(readfile(list_get(sys.argv, 1, '-')))
+    print summarised(results)
