@@ -229,22 +229,22 @@ bindFloats :: ([Fulfilment] -> ([Fulfilment], [Fulfilment]))
            -> ScpM a -> ScpM (Out [(Var, FVedTerm)], a)
 bindFloats partition_fulfilments mx
   = ScpM $ \e s k -> unScpM mx (e { promises = map fst (fulfilments s) ++ promises e }) (s { fulfilments = [] })
-                               (\x _e (s'@(ScpState { fulfilments = (partition_fulfilments -> (fs_now, fs_later)) })) -> -- traceRender ("bindFloats", [(fun p, fvedTermFreeVars e) | (p, e) <- fs_now], [(fun p, fvedTermFreeVars e) | (p, e) <- fs_later]) $
-                                                                                                                         k (sortBy (comparing ((read :: String -> Int) . drop 1 . name_string . fst)) [(fun p, e') | (p, e') <- fs_now], x)
-                                                                                                                           e (s' { fulfilments = fs_later ++ fulfilments s }))
+                               (\x (s'@(ScpState { fulfilments = (partition_fulfilments -> (fs_now, fs_later)) })) -> -- traceRender ("bindFloats", [(fun p, fvedTermFreeVars e) | (p, e) <- fs_now], [(fun p, fvedTermFreeVars e) | (p, e) <- fs_later]) $
+                                                                                                                      k (sortBy (comparing ((read :: String -> Int) . drop 1 . name_string . fst)) [(fun p, e') | (p, e') <- fs_now], x)
+                                                                                                                        (s' { fulfilments = fs_later ++ fulfilments s }))
 
 freshHName :: ScpM Var
-freshHName = ScpM $ \e s k -> k (expectHead "freshHName" (names s)) e (s { names = tail (names s) })
+freshHName = ScpM $ \_e s k -> k (expectHead "freshHName" (names s)) (s { names = tail (names s) })
 
 getPromises :: ScpM [Promise]
-getPromises = ScpM $ \e s k -> k (promises e ++ map fst (fulfilments s)) e s
+getPromises = ScpM $ \e s k -> k (promises e ++ map fst (fulfilments s)) s
 
 promise :: Promise -> ScpM (a, Out FVedTerm) -> ScpM (a, Out FVedTerm)
 promise p opt = ScpM $ \e s k -> {- traceRender ("promise", fun p, abstracted p) $ -} unScpM (mx p) (e { promises = p : promises e, depth = 1 + depth e }) s k
   where
     mx p = do
       (a, e') <- opt
-      ScpM $ \e s k -> k () e (s { fulfilments = (p, lambdas (abstracted p) e') : fulfilments s })
+      ScpM $ \_e s k -> k () (s { fulfilments = (p, lambdas (abstracted p) e') : fulfilments s })
       
       let fvs' = fvedTermFreeVars e' in fmap (((S.fromList (abstracted p) `S.union` stateStaticBinders (meaning p)) `S.union`) . S.fromList . map fun) getPromises >>= \fvs -> assertRender ("sc: FVs", fun p, fvs' S.\\ fvs, fvs, e') (fvs' `S.isSubsetOf` fvs) $ return ()
       
@@ -263,17 +263,17 @@ data ScpState = ScpState {
     fulfilments :: [Fulfilment]
   }
 
-newtype ScpM a = ScpM { unScpM :: ScpEnv -> ScpState -> (a -> ScpEnv -> ScpState -> Out FVedTerm) -> Out FVedTerm }
+newtype ScpM a = ScpM { unScpM :: ScpEnv -> ScpState -> (a -> ScpState -> Out FVedTerm) -> Out FVedTerm }
 
 instance Functor ScpM where
     fmap = liftM
 
 instance Monad ScpM where
-    return x = ScpM $ \e s k -> k x e s
-    (!mx) >>= fxmy = ScpM $ \e s k -> unScpM mx e s (\x _e s -> unScpM (fxmy x) e s k)
+    return x = ScpM $ \_e s k -> k x s
+    (!mx) >>= fxmy = ScpM $ \e s k -> unScpM mx e s (\x s -> unScpM (fxmy x) e s k)
 
 runScpM :: ScpM (Out FVedTerm) -> Out FVedTerm
-runScpM me = unScpM (bindFloats (\fs -> (fs, [])) me) init_e init_s (\(xes', e') _ _ -> letRecSmart xes' e')
+runScpM me = unScpM (bindFloats (\fs -> (fs, [])) me) init_e init_s (\(xes', e') _ -> letRecSmart xes' e')
   where
     init_e = ScpEnv { promises = [], depth = 0 }
     init_s = ScpState { names = map (\i -> name $ 'h' : show (i :: Int)) [0..], fulfilments = [] }
@@ -326,4 +326,4 @@ memo opt (deeds, state) = do
             return res
 
 traceRenderScpM :: Pretty a => a -> ScpM ()
-traceRenderScpM x = ScpM (\e s k -> k (depth e) e s) >>= \depth -> traceRenderM $ nest depth $ pPrint x
+traceRenderScpM x = ScpM (\e s k -> k (depth e) s) >>= \depth -> traceRenderM $ nest depth $ pPrint x
