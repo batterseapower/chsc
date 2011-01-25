@@ -293,8 +293,7 @@ sc' hist (deeds, state) = (\raise -> check raise) `catchScpM` \gen -> stop gen h
     check this_rb = case terminate hist (state, this_rb) of
                       Continue hist' -> continue hist'
                       Stop (gen, rb) -> maybe (stop gen hist) ($ gen) $ guard sC_ROLLBACK >> Just rb
-    stop gen hist = do trace "sc-stop" $ return ()
-                       split gen               (sc hist) (deeds,  state)
+    stop gen hist = trace "sc-stop" $ split gen (sc hist) (deeds,  state) -- Keep the trace exactly here or it gets floated out by GHC
     continue hist = do traceRenderScpM ("reduce end", pPrintFullState state')
                        split generaliseNothing (sc hist) (deeds', state')
       where (deeds', state') = gc (speculate reduce (deeds, state)) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
