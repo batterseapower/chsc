@@ -176,7 +176,8 @@ data Promise = P {
   }
 
 instance MonadStatics ScpM where
-    bindCapturedFloats extra_statics mx = bindFloats (\_ -> partitionFulfilments fulfilmentRefersTo S.fromList extra_statics) mx
+    bindCapturedFloats extra_statics mx | dISCARD_FULFILMENTS_ON_ROLLBACK = bindFloats (\_ -> partitionFulfilments fulfilmentRefersTo S.fromList extra_statics) mx
+                                        | otherwise                       = fmap ([],) mx -- NB: we can't use bindFloats or some fulfilments get lost when we roll back since they are hidden in the promises temporarily by bindFlotas
 
 -- We would have a subtle bug here if (as in some branches) we let the evaluator look into
 -- phantoms. Consider a term like:
@@ -295,7 +296,7 @@ runScpM me = unScpM (bindFloats (\e' -> partitionFulfilments fulfilmentReferredT
 catchScpM :: ((forall b. c -> ScpM b) -> ScpM a) -- ^ Action to try: supplies a function than can be called to "raise an exception". Raising an exception restores the original ScpEnv and ScpState
           -> (c -> ScpM a)                       -- ^ Handler deferred to if an exception is raised
           -> ScpM a                              -- ^ Result from either the main action or the handler
-catchScpM f_try f_abort = ScpM $ \e s k -> unScpM (f_try (\c -> ScpM $ \_e' s' _k' -> unScpM (f_abort c) e (if dISCARD_FULFILMENTS_ON_ROLLBACK || lOCAL_TIEBACKS then s else s') k)) e s k -- NB: harder to avoid discard with local tiebacks because I don't know the FVs bound between here and the handler
+catchScpM f_try f_abort = ScpM $ \e s k -> unScpM (f_try (\c -> ScpM $ \_e' s' _k' -> unScpM (f_abort c) e (if dISCARD_FULFILMENTS_ON_ROLLBACK then s else s') k)) e s k
 
 
 type RollbackScpM = Generaliser -> ScpM (Deeds, Out FVedTerm)
