@@ -71,9 +71,10 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ run
               Case e (unzip -> (alt_cons, alt_es)) -> (t : ts, \(t':ts') -> Case (rb t') (alt_cons `zip` zipWith ($) rbs ts'))
                 where (t, rb)   = term e
                       (ts, rbs) = unzip (map term alt_es)
-              LetRec (unzip -> (xs, es)) e         -> (t : ts, \(t':ts') -> LetRec (xs `zip` zipWith ($) rbs ts') (rb t'))
-                where (t, rb)   = term e
-                      (ts, rbs) = unzip (map term es)
+              LetRec (unzip -> (xs, es)) e
+                | uNTAGGED_LET_BODIES, (ts2, rb2) <- term' (annee e) -> (ts1 ++ ts2, \(splitBy ts1 -> (ts1', ts2')) -> LetRec (xs `zip` zipWith ($) rbs1 ts1') (Counted (-1) (rb2 ts2')))
+                | otherwise          , (t,   rb2) <- term  e         -> (t : ts1,    \(t':ts1')                     -> LetRec (xs `zip` zipWith ($) rbs1 ts1')               (rb2 t'))
+                where (ts1, rbs1) = unzip (map term es)
 
 
 --

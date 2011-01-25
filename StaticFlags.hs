@@ -144,6 +144,9 @@ eXPAND_CASE_UNCOVEREDS = "--expand-case-uncovereds" `elem` unsafePerformIO getAr
 cALL_BY_NAME :: Bool
 cALL_BY_NAME = "--call-by-name" `elem` unsafePerformIO getArgs
 
+-- This just doesn't work properly right now. Imagine we have a tagged letrec and move the tag down onto the body of the letrec
+-- during evaluation. If we now release that tag, how many deeds do we release? After moving it down, releasing the deeds for the
+-- let-bound things is wrong, but before moving it down releasing the deeds for the let-bound things is essential. What to do?
 {-# NOINLINE uNTAGGED_LET_BODIES #-}
 uNTAGGED_LET_BODIES :: Bool
-uNTAGGED_LET_BODIES = not $ "--tagged-let-bodies" `elem` unsafePerformIO getArgs
+uNTAGGED_LET_BODIES = "--untagged-let-bodies" `elem` unsafePerformIO getArgs
