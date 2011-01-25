@@ -38,13 +38,15 @@ normalise (deeds, state) =
         App e1 x2         -> normalise (deeds, (h, Tagged tg (Apply (rename rn x2))            : k, (rn, e1)))
         PrimOp pop (e:es) -> normalise (deeds, (h, Tagged tg (PrimApply pop [] (map (rn,) es)) : k, (rn, e)))
         Case e alts       -> normalise (deeds, (h, Tagged tg (Scrutinise (rn, alts))           : k, (rn, e)))
-        LetRec xes e      -> normalise (allocate deeds' h k (rn, (xes, e)))
-          where deeds' = releaseDeedDescend_ deeds tg
+        LetRec xes e      -> normalise (allocate tg deeds h k (rn, (xes, e)))
       where tg = annedTag e
 
-    allocate :: Deeds -> Heap -> Stack -> In ([(Var, AnnedTerm)], AnnedTerm) -> (Deeds, UnnormalisedState)
-    allocate deeds (Heap h ids) k (rn, (xes, e)) = (deeds, (Heap (h `M.union` M.map Concrete (M.fromList xes')) ids', k, (rn', e)))
-      where (ids', rn', xes') = renameBounds (\_ x' -> x') ids rn xes
+    allocate :: Tag -> Deeds -> Heap -> Stack -> In ([(Var, AnnedTerm)], AnnedTerm) -> (Deeds, UnnormalisedState)
+    allocate tg deeds (Heap h ids) k (rn, (xes, e)) = (deeds', (Heap (h `M.union` M.map Concrete (M.fromList xes')) ids', k, (rn', e')))
+      where
+        (deeds', e') | uNTAGGED_LET_BODIES = (deeds, Comp ((unComp e) { tag = tg })) -- Fake up untagged let bodies by just copying the tag down
+                     | otherwise           = (releaseDeedDescend_ deeds tg, e)
+        (ids', rn', xes') = renameBounds (\_ x' -> x') ids rn xes
 
 step :: (Deeds, State) -> Maybe (Deeds, State)
 step (deeds, _state@(h, k, (rn, qa))) =
