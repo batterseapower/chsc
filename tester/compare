@@ -5,7 +5,10 @@ from utilities import *
 def zip_values(header, left, right):
     if header == "SC time" and (left == "" or right == ""):
         # Supercompilation time is special because it will be missing for GHC runs
-        return "(" + str(round(float((left or right).rstrip("s")))) + "s)"
+        if left == "" and right == "":
+            return "" # Happens if we do a self-comparison for results-ghc (e.g. when called from metasummarise)
+        else:
+            return "(" + str(round(float((left or right).rstrip("s")))) + "s)"
     elif left == "" or right == "":
         # At least one result was unavailable
         return "N/A"

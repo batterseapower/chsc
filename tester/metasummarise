@@ -13,7 +13,10 @@ def summarised(file, self):
                 # Ignore missing values! NB: this *differs* from the behaviour of summarise. Is this OK?
                 pass
         
-        return show_round(f(ys), 2)
+        if len(ys) == 0:
+            return "" # Happens if we try to summarise a blank column (e.g. SC time for results-ghc.tex)
+        else:
+            return show_round(f(ys), 2)
 
     columns = self.columns()
     summary_cols = dict([(header, lift_string(mean, columns[header])) for header in self.headers])
