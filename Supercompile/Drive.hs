@@ -176,39 +176,53 @@ data Promise = P {
   }
 
 instance MonadStatics ScpM where
-    bindCapturedFloats extra_statics mx = bindFloats (partition_fulfilments extra_statics) mx
-      where
-        -- We do need a fixed point here to identify the full set of h-functions to residualise.
-        -- The reason is that even if a static variable is not free in an output h-function, we might
-        -- have created (and make reference to) some h-function that *does* actually refer to one
-        -- of the static variables.
-        -- See also Note [Phantom variables and bindings introduced by scrutinisation]
-        partition_fulfilments extra_statics fs
-          | extra_statics == extra_statics' = (fs_now, fs_later)
-          | otherwise                       = partition_fulfilments extra_statics' fs
-          where
-            -- We would have a subtle bug here if (as in some branches) we let the evaluator look into
-            -- phantoms. Consider a term like:
-            --
-            --  x |-> <10>
-            --  x + 5
-            --
-            -- After supercompilation, we will have:
-            --
-            --  15
-            --
-            -- Since we check the *post supercompilation* free variables here, that h function will be floated
-            -- upwards, so it is visible to later supercompilations. But what if our context had looked like:
-            --
-            --   (let x = 10 in x + 5, let x = 11 in x + 5)
-            --
-            -- Since we only match phantoms by name, we are now in danger of tying back to this h-function when we
-            -- supercompile the second component of the pair!
-            --
-            -- I think this is responsible for the subtle bugs in some of the imaginary suite benchmarks (in particular,
-            -- integrate) that I saw on my phantom-lookthrough branches.
-            (fs_now, fs_later)   = partition (Foldable.any (\x -> x `S.member` extra_statics) . fvedTermFreeVars . snd) fs
-            extra_statics' = extra_statics `S.union` S.fromList (map (fun . fst) fs_now)
+    bindCapturedFloats extra_statics mx = bindFloats (\_ -> partitionFulfilments fulfilmentRefersTo S.fromList extra_statics) mx
+
+-- We would have a subtle bug here if (as in some branches) we let the evaluator look into
+-- phantoms. Consider a term like:
+--
+--  x |-> <10>
+--  x + 5
+--
+-- After supercompilation, we will have:
+--
+--  15
+--
+-- Since we check the *post supercompilation* free variables here, that h function will be floated
+-- upwards, so it is visible to later supercompilations. But what if our context had looked like:
+--
+--   (let x = 10 in x + 5, let x = 11 in x + 5)
+--
+-- Since we only match phantoms by name, we are now in danger of tying back to this h-function when we
+-- supercompile the second component of the pair!
+--
+-- I think this is responsible for the subtle bugs in some of the imaginary suite benchmarks (in particular,
+-- integrate) that I saw on my phantom-lookthrough branches.
+fulfilmentRefersTo :: FreeVars -> Fulfilment -> Maybe (Out Var)
+fulfilmentRefersTo extra_statics (promise, e') = guard (Foldable.any (`S.member` extra_statics) (fvedTermFreeVars e')) >> return (fun promise)
+
+-- Used at the end of supercompilation to extract just those h functions that are actually referred to.
+-- More often than not, this will be *all* the h functions, but if we don't discard h functions on rollback
+-- then this is not necessarily the case!
+fulfilmentReferredTo :: FreeVars -> Fulfilment -> Maybe FreeVars
+fulfilmentReferredTo fvs (promise, e') = guard (fun promise `S.member` fvs) >> return (fvedTermFreeVars e')
+
+-- We do need a fixed point here to identify the full set of h-functions to residualise.
+-- The reason is that even if a static variable is not free in an output h-function, we might
+-- have created (and make reference to) some h-function that *does* actually refer to one
+-- of the static variables.
+-- See also Note [Phantom variables and bindings introduced by scrutinisation]
+partitionFulfilments :: Pretty a
+                     => (a -> Fulfilment -> Maybe b)  -- ^ Decide whether a fulfilment should be residualised given our current a, returning a new b if so
+                     -> ([b] -> a)                    -- ^ Combine bs of those fufilments being residualised into a new a
+                     -> a                             -- ^ Used to decide whether the fufilments right here are suitable for residualisation
+                     -> [Fulfilment]                  -- ^ Fulfilments to partition
+                     -> ([Fulfilment], [Fulfilment])  -- ^ Fulfilments that should be bound and those that should continue to float, respectively
+partitionFulfilments p combine = go
+  where go x fs | traceRender ("partitionFulfilments", x, map (fun . fst) fs) False = undefined
+                | null fs_now' = ([], fs) 
+                | otherwise    = first (fs_now' ++) $ go (combine xs') fs'
+                where (unzip -> (fs_now', xs'), fs') = extractJusts (\fulfilment -> fmap (fulfilment,) $ p x fulfilment) fs
 
 -- NB: be careful of this subtle problem:
 --
@@ -225,13 +239,13 @@ instance MonadStatics ScpM where
 -- The right thing to do is to make sure that fulfilments created in different "branches" of the process tree aren't eligible for early binding in
 -- that manner, but we still want to tie back to them if possible. The bindFloats function achieves this by carefully shuffling information between the
 -- fulfilments and promises parts of the monadic-carried state.
-bindFloats :: ([Fulfilment] -> ([Fulfilment], [Fulfilment]))
+bindFloats :: (a -> [Fulfilment] -> ([Fulfilment], [Fulfilment]))
            -> ScpM a -> ScpM (Out [(Var, FVedTerm)], a)
-bindFloats partition_fulfilments mx
+bindFloats partition_floats mx
   = ScpM $ \e s k -> unScpM mx (e { promises = map fst (fulfilments s) ++ promises e }) (s { fulfilments = [] })
-                               (\x (s'@(ScpState { fulfilments = (partition_fulfilments -> (fs_now, fs_later)) })) -> -- traceRender ("bindFloats", [(fun p, fvedTermFreeVars e) | (p, e) <- fs_now], [(fun p, fvedTermFreeVars e) | (p, e) <- fs_later]) $
-                                                                                                                      k (sortBy (comparing ((read :: String -> Int) . drop 1 . name_string . fst)) [(fun p, e') | (p, e') <- fs_now], x)
-                                                                                                                        (s' { fulfilments = fs_later ++ fulfilments s }))
+                               (\x (s'@(ScpState { fulfilments = (partition_floats x -> (fs_now, fs_later)) })) -> -- traceRender ("bindFloats", [(fun p, fvedTermFreeVars e) | (p, e) <- fs_now], [(fun p, fvedTermFreeVars e) | (p, e) <- fs_later]) $
+                                                                                                                   k (sortBy (comparing ((read :: String -> Int) . drop 1 . name_string . fst)) [(fun p, e') | (p, e') <- fs_now], x)
+                                                                                                                     (s' { fulfilments = fs_later ++ fulfilments s }))
 
 freshHName :: ScpM Var
 freshHName = ScpM $ \_e s k -> k (expectHead "freshHName" (names s)) (s { names = tail (names s) })
@@ -273,7 +287,7 @@ instance Monad ScpM where
     (!mx) >>= fxmy = ScpM $ \e s k -> unScpM mx e s (\x s -> unScpM (fxmy x) e s k)
 
 runScpM :: ScpM (Out FVedTerm) -> Out FVedTerm
-runScpM me = unScpM (bindFloats (\fs -> (fs, [])) me) init_e init_s (\(xes', e') _ -> letRecSmart xes' e')
+runScpM me = unScpM (bindFloats (\e' -> partitionFulfilments fulfilmentReferredTo S.unions (fvedTermFreeVars e')) me) init_e init_s (\(xes', e') _ -> letRecSmart xes' e')
   where
     init_e = ScpEnv { promises = [], depth = 0 }
     init_s = ScpState { names = map (\i -> name $ 'h' : show (i :: Int)) [0..], fulfilments = [] }
@@ -281,7 +295,7 @@ runScpM me = unScpM (bindFloats (\fs -> (fs, [])) me) init_e init_s (\(xes', e')
 catchScpM :: ((forall b. c -> ScpM b) -> ScpM a) -- ^ Action to try: supplies a function than can be called to "raise an exception". Raising an exception restores the original ScpEnv and ScpState
           -> (c -> ScpM a)                       -- ^ Handler deferred to if an exception is raised
           -> ScpM a                              -- ^ Result from either the main action or the handler
-catchScpM f_try f_abort = ScpM $ \e s k -> unScpM (f_try (\c -> ScpM $ \_ _ _ -> unScpM (f_abort c) e s k)) e s k
+catchScpM f_try f_abort = ScpM $ \e s k -> unScpM (f_try (\c -> ScpM $ \_e' s' _k' -> unScpM (f_abort c) e (if dISCARD_FULFILMENTS_ON_ROLLBACK || lOCAL_TIEBACKS then s else s') k)) e s k -- NB: harder to avoid discard with local tiebacks because I don't know the FVs bound between here and the handler
 
 
 type RollbackScpM = Generaliser -> ScpM (Deeds, Out FVedTerm)
