@@ -1,0 +1,7 @@
+enumFrom n = n : enumFrom (n + 1)
+
+root = (enumFrom 1, enumFrom 2)
+
+tests = [
+    (case root of (xs, ys) -> case xs of x:_ -> case ys of y:_ -> (x, y), (1, 2))
+  ]
