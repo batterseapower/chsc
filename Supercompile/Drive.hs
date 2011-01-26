@@ -295,7 +295,13 @@ runScpM me = unScpM (bindFloats (\e' -> partitionFulfilments fulfilmentReferredT
 catchScpM :: ((forall b. c -> ScpM b) -> ScpM a) -- ^ Action to try: supplies a function than can be called to "raise an exception". Raising an exception restores the original ScpEnv and ScpState
           -> (c -> ScpM a)                       -- ^ Handler deferred to if an exception is raised
           -> ScpM a                              -- ^ Result from either the main action or the handler
-catchScpM f_try f_abort = ScpM $ \e s k -> unScpM (f_try (\c -> ScpM $ \_e' s' _k' -> unScpM (f_abort c) e (if dISCARD_FULFILMENTS_ON_ROLLBACK then s else s') k)) e s k
+catchScpM f_try f_abort = ScpM $ \e s k -> unScpM (f_try (\c -> ScpM $ \e' s' _k' ->
+    unScpM (f_abort c) e (if dISCARD_FULFILMENTS_ON_ROLLBACK
+                          then s
+                          else let not_completed = S.fromList (map fun (promises e')) S.\\ S.fromList (map fun (promises e))
+                                   (_fs_discard, fs_ok) = partitionFulfilments fulfilmentRefersTo S.fromList not_completed (fulfilments s')
+                               in s' { fulfilments = fs_ok })
+                         k)) e s k
 
 
 type RollbackScpM = Generaliser -> ScpM (Deeds, Out FVedTerm)
