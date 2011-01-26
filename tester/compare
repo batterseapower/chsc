@@ -3,18 +3,26 @@
 from utilities import *
 
 def zip_values(header, left, right):
-    if header == "SC time" and (left == "" or right == ""):
+    if header in ["SC time", "Reduce-stops", "SC-stops"] and (left == "" or right == ""):
         # Supercompilation time is special because it will be missing for GHC runs
         if left == "" and right == "":
             return "" # Happens if we do a self-comparison for results-ghc (e.g. when called from metasummarise)
         else:
-            return "(" + str(round(float((left or right).rstrip("s")))) + "s)"
+            it = left or right
+            if it.endswith("s"):
+                return "(" + str(round(float(it.rstrip("s")))) + "s)"
+            else:
+                return "(" + it + ")"
     elif left == "" or right == "":
         # At least one result was unavailable
         return "N/A"
     else:
-        # Result a dimensionless number representing the "right" quantity as a fraction of the "left" quantity
-        return show_round(float(right) / float(left), 2)
+        if header in ["Reduce-stops", "SC-stops"]:
+            # Return the integer change from left to right
+            return str(int(right) - int(left))
+        else:
+            # Result a dimensionless number representing the "right" quantity as a fraction of the "left" quantity
+            return show_round(float(right) / float(left), 2)
 
 def compare(results_a, results_b):
     return Results.zipresults(lambda a, b: "'" + b + "' as a fraction of '" + a + "'", zip_values, results_a, results_b)

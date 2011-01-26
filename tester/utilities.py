@@ -52,8 +52,18 @@ def union_dict(left, right):
     new.update(right)
     return new
 
+def restrict_dict(what, to):
+    new = {}
+    for key in to:
+      new[key] = what[key]
+    
+    return new
+
 def map_dict(f, xs):
     return dict([f(k, v) for k, v in xs.items()])
+
+def map_dict_values(f, xs):
+    return dict([(k, f(k, v)) for k, v in xs.items()])
 
 def readfile(filename):
     if filename == "-":
@@ -107,9 +117,15 @@ class Results(object):
     @classmethod
     def combineresults(cls, combine_descriptions, combine_results, left, right):
         assert_eq(left.key_header, right.key_header)
-        assert_eq(left.headers, right.headers)
         
-        return Results(combine_descriptions(left.description, right.description), left.key_header, left.headers, combine_results(left.results, right.results))
+        common_headers = set(left.headers).intersection(set(right.headers))
+        if common_headers != set(left.headers):
+            discarded = set(left.headers).symmetric_difference(set(right.headers))
+            import sys
+            print >> sys.stderr, "Warning: discarding mismatched data for " + ", ".join(discarded)
+        
+        restrict = lambda results: map_dict_values(lambda filename_, columns: restrict_dict(columns, common_headers), results)
+        return Results(combine_descriptions(left.description, right.description), left.key_header, left.headers, combine_results(restrict(left.results), restrict(right.results)))
     
     def __str__(self):
         return self.latex()

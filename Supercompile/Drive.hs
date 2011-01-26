@@ -1,6 +1,6 @@
 {-# LANGUAGE ViewPatterns, TupleSections, PatternGuards, BangPatterns, RankNTypes #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
-module Supercompile.Drive (supercompile) where
+module Supercompile.Drive (SCStats(..), supercompile) where
 
 import Supercompile.Match
 import Supercompile.Split
@@ -31,6 +31,7 @@ import Utilities
 
 import qualified Data.Foldable as Foldable
 import qualified Data.Map as M
+import Data.Monoid
 import Data.Ord
 import qualified Data.Set as S
 import qualified Data.IntSet as IS
@@ -44,8 +45,25 @@ wQO | not tERMINATION_CHECK                        = postcomp (const generaliseN
                                          TagGraph     -> embedWithTagGraphs
                                          TagSet       -> embedWithTagSets
 
-supercompile :: Term -> Term
-supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ (if pRETTIFY then prettify else id) $ runScpM $ fmap snd $ sc (mkHistory (extra wQO)) (deeds, state)
+
+data SCStats = SCStats {
+    stat_reduce_stops :: Int,
+    stat_sc_stops :: Int
+  }
+
+instance Monoid SCStats where
+    mempty = SCStats {
+        stat_reduce_stops = 0,
+        stat_sc_stops = 0
+      }
+    stats1 `mappend` stats2 = SCStats {
+        stat_reduce_stops = stat_reduce_stops stats1 + stat_reduce_stops stats2,
+        stat_sc_stops = stat_sc_stops stats1 + stat_sc_stops stats2
+      }
+
+
+supercompile :: Term -> (SCStats, Term)
+supercompile e = traceRender ("all input FVs", input_fvs) $ second (fVedTermToTerm . if pRETTIFY then prettify else id) $ runScpM $ liftM snd $ sc (mkHistory (extra wQO)) (deeds, state)
   where input_fvs = annedTermFreeVars anned_e
         (deeds, state) = normalise (mkDeeds (bLOAT_FACTOR - 1) (t, pPrint . rb), (Heap (setToMap Environmental input_fvs) reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, anned_e)))
         anned_e = toAnnedTerm e
@@ -106,17 +124,17 @@ emptyLosers :: Losers
 emptyLosers = IS.empty
 
 
-speculate :: ((Deeds, State) -> (Deeds, State))
-          -> (Deeds, State) -> (Deeds, State)
+speculate :: ((Deeds, State) -> (SCStats, (Deeds, State)))
+          -> (Deeds, State) -> (SCStats, (Deeds, State))
 speculate reduce = snd . go (0 :: Int) (mkHistory wQO) emptyLosers
   where
     go depth hist losers (deeds, state) = case terminate hist state of
         Continue hist' | sPECULATION -> continue depth hist' losers (deeds, state)
         _                            -> (losers, reduce (deeds, state)) -- It is very important we reduce in this branch, or we never call reduce with --no-speculation turned on!
     
-    continue depth hist losers (deeds, state@(Heap h _, _, _)) = (losers', (deeds'', (Heap (h'_winners' `M.union` h'_losers) ids'', k, in_e)))
+    continue depth hist losers (deeds, state@(Heap h _, _, _)) = (losers', (stats', (deeds'', (Heap (h'_winners' `M.union` h'_losers) ids'', k, in_e))))
       where
-        (deeds', (Heap h' ids', k, in_e)) = reduce (deeds, state)
+        (stats, (deeds', (Heap h' ids', k, in_e))) = reduce (deeds, state)
         
         -- Note [Controlling speculation]
         -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -139,21 +157,21 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) emptyLosers
         -- TODO: I suspect we should accumulate Losers across the boundary of speculate as well
         -- TODO: there is a difference between losers due to termination-halting and losers because we didn't have enough
         -- information available to complete evaluation
-        (deeds'', Heap h'_winners' ids'', losers') = M.foldrWithKey speculate_one (deeds', Heap h'_winners ids', losers) (h'_winners M.\\ h)
-        speculate_one x' (Concrete in_e) (deeds, Heap h'_winners ids, losers)
+        (stats', deeds'', Heap h'_winners' ids'', losers') = M.foldrWithKey speculate_one (stats, deeds', Heap h'_winners ids', losers) (h'_winners M.\\ h)
+        speculate_one x' (Concrete in_e) (stats, deeds, Heap h'_winners ids, losers)
           -- | not (isValue (annee (snd in_e))), traceRender ("speculate", depth, residualiseState (Heap (h {- `exclude` M.keysSet base_h -}) ids, k, in_e)) False = undefined
           | otherwise = case (go (depth + 1) hist losers) (normalise (deeds, (Heap (M.delete x' h'_winners) ids, [], in_e))) of
-            (losers', (deeds', (Heap h' ids', [], in_qa'@(_, annee -> Answer _)))) -> (deeds', Heap (M.insert x' (Concrete (fmap (fmap qaToAnnedTerm') in_qa')) h')         ids', losers')
-            (losers', _)                                                           -> (deeds,  Heap (M.insert x' (Concrete in_e)                                h'_winners) ids,  IS.insert (annedTag (snd in_e)) losers')
-        speculate_one x' hb              (deeds, Heap h'_winners ids, losers) 
-          = (deeds, Heap (M.insert x' hb h'_winners) ids, losers)
+            (losers', (stats', (deeds', (Heap h' ids', [], in_qa'@(_, annee -> Answer _))))) -> (stats `mappend` stats', deeds', Heap (M.insert x' (Concrete (fmap (fmap qaToAnnedTerm') in_qa')) h')         ids', losers')
+            (losers', (stats', _))                                                           -> (stats `mappend` stats', deeds,  Heap (M.insert x' (Concrete in_e)                                h'_winners) ids,  IS.insert (annedTag (snd in_e)) losers')
+        speculate_one x' hb              (stats, deeds, Heap h'_winners ids, losers) 
+          = (stats, deeds, Heap (M.insert x' hb h'_winners) ids, losers)
 
-reduce :: (Deeds, State) -> (Deeds, State)
+reduce :: (Deeds, State) -> (SCStats, (Deeds, State))
 reduce (deeds, orig_state) = go (mkHistory (extra wQO)) (deeds, orig_state)
   where
     go hist (deeds, state)
       -- | traceRender ("reduce.go", pPrintFullState state) False = undefined
-      | otherwise = fromMaybe (deeds, state) $ either id id $ do
+      | otherwise = second (fromMaybe (deeds, state)) $ either (mempty { stat_reduce_stops = 1 },) (\mb_it -> maybe (mempty,Nothing) (second Just) mb_it) $ do
           hist' <- case terminate hist (state, (deeds, state)) of
                       _ | intermediate state  -> Right hist
                       -- _ | traceRender ("reduce.go (non-intermediate)", pPrintFullState state) False -> undefined
@@ -275,10 +293,11 @@ type Fulfilment = (Promise, Out FVedTerm)
 
 data ScpState = ScpState {
     names       :: [Var],
-    fulfilments :: [Fulfilment]
+    fulfilments :: [Fulfilment],
+    stats       :: SCStats
   }
 
-newtype ScpM a = ScpM { unScpM :: ScpEnv -> ScpState -> (a -> ScpState -> Out FVedTerm) -> Out FVedTerm }
+newtype ScpM a = ScpM { unScpM :: ScpEnv -> ScpState -> (a -> ScpState -> (SCStats, Out FVedTerm)) -> (SCStats, Out FVedTerm) }
 
 instance Functor ScpM where
     fmap = liftM
@@ -287,11 +306,11 @@ instance Monad ScpM where
     return x = ScpM $ \_e s k -> k x s
     (!mx) >>= fxmy = ScpM $ \e s k -> unScpM mx e s (\x s -> unScpM (fxmy x) e s k)
 
-runScpM :: ScpM (Out FVedTerm) -> Out FVedTerm
-runScpM me = unScpM (bindFloats (\e' -> partitionFulfilments fulfilmentReferredTo S.unions (fvedTermFreeVars e')) me) init_e init_s (\(xes', e') _ -> letRecSmart xes' e')
+runScpM :: ScpM (Out FVedTerm) -> (SCStats, Out FVedTerm)
+runScpM me = unScpM (bindFloats (\e' -> partitionFulfilments fulfilmentReferredTo S.unions (fvedTermFreeVars e')) me) init_e init_s (\(xes', e') s -> (stats s, letRecSmart xes' e'))
   where
     init_e = ScpEnv { promises = [], depth = 0 }
-    init_s = ScpState { names = map (\i -> name $ 'h' : show (i :: Int)) [0..], fulfilments = [] }
+    init_s = ScpState { names = map (\i -> name $ 'h' : show (i :: Int)) [0..], fulfilments = [], stats = mempty }
 
 catchScpM :: ((forall b. c -> ScpM b) -> ScpM a) -- ^ Action to try: supplies a function than can be called to "raise an exception". Raising an exception restores the original ScpEnv and ScpState
           -> (c -> ScpM a)                       -- ^ Handler deferred to if an exception is raised
@@ -304,6 +323,9 @@ catchScpM f_try f_abort = ScpM $ \e s k -> unScpM (f_try (\c -> ScpM $ \e' s' _k
                                in s' { fulfilments = fs_ok })
                          k)) e s k
 
+addStats :: SCStats -> ScpM ()
+addStats scstats = ScpM $ \e s k -> k () (s { stats = stats s `mappend` scstats })
+
 
 type RollbackScpM = Generaliser -> ScpM (Deeds, Out FVedTerm)
 
@@ -314,10 +336,12 @@ sc' hist (deeds, state) = (\raise -> check raise) `catchScpM` \gen -> stop gen h
     check this_rb = case terminate hist (state, this_rb) of
                       Continue hist' -> continue hist'
                       Stop (gen, rb) -> maybe (stop gen hist) ($ gen) $ guard sC_ROLLBACK >> Just rb
-    stop gen hist = trace "sc-stop" $ split gen (sc hist) (deeds,  state) -- Keep the trace exactly here or it gets floated out by GHC
+    stop gen hist = do addStats $ mempty { stat_sc_stops = 1 }
+                       trace "sc-stop" $ split gen (sc hist) (deeds,  state) -- Keep the trace exactly here or it gets floated out by GHC
     continue hist = do traceRenderScpM ("reduce end", pPrintFullState state')
+                       addStats stats
                        split generaliseNothing (sc hist) (deeds', state')
-      where (deeds', state') = gc (speculate reduce (deeds, state)) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
+      where (stats, (deeds', state')) = second gc (speculate reduce (deeds, state)) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
 
 memo :: ((Deeds, State) -> ScpM (Deeds, Out FVedTerm))
      ->  (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
