@@ -129,6 +129,7 @@ sC_ROLLBACK :: Bool
 sC_ROLLBACK = not $ "--no-sc-rollback" `elem` unsafePerformIO getArgs
 
 -- NB: harder to avoid discard with local tiebacks because I don't know the FVs bound between here and the handler
+-- FIXME: figure out how to make that work properly
 {-# NOINLINE dISCARD_FULFILMENTS_ON_ROLLBACK #-}
 dISCARD_FULFILMENTS_ON_ROLLBACK :: Bool
 dISCARD_FULFILMENTS_ON_ROLLBACK = lOCAL_TIEBACKS || not ("--no-discard-fulfilments-on-rollback" `elem` unsafePerformIO getArgs)
