@@ -25,6 +25,7 @@ VANILLA_OPTS="raw --no-primops --no-deeds --tag-collection=bags --no-generalisat
 # ./test-all raw --no-reduce-rollback --no-sc-rollback | tee nresults-rollback.tex
 
 ./test-all ${VANILLA_OPTS/=bags/=sets} | tee results-tagsets.tex
+./test-all ${VANILLA_OPTS/=bags/=bags-strong} | tee results-strongtagbags.tex
 ./test-all ${VANILLA_OPTS/=bags/=graphs} | tee results-taggraphs.tex
 
 # ./test-all raw --tag-collection=sets | tee nresults-tagsets.tex
