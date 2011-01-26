@@ -213,14 +213,13 @@ fulfilmentReferredTo fvs (promise, e') = guard (fun promise `S.member` fvs) >> r
 -- have created (and make reference to) some h-function that *does* actually refer to one
 -- of the static variables.
 -- See also Note [Phantom variables and bindings introduced by scrutinisation]
-partitionFulfilments :: Pretty a
-                     => (a -> Fulfilment -> Maybe b)  -- ^ Decide whether a fulfilment should be residualised given our current a, returning a new b if so
+partitionFulfilments :: (a -> Fulfilment -> Maybe b)  -- ^ Decide whether a fulfilment should be residualised given our current a, returning a new b if so
                      -> ([b] -> a)                    -- ^ Combine bs of those fufilments being residualised into a new a
                      -> a                             -- ^ Used to decide whether the fufilments right here are suitable for residualisation
                      -> [Fulfilment]                  -- ^ Fulfilments to partition
                      -> ([Fulfilment], [Fulfilment])  -- ^ Fulfilments that should be bound and those that should continue to float, respectively
 partitionFulfilments p combine = go
-  where go x fs | traceRender ("partitionFulfilments", x, map (fun . fst) fs) False = undefined
+  where go x fs -- | traceRender ("partitionFulfilments", x, map (fun . fst) fs) False = undefined
                 | null fs_now' = ([], fs) 
                 | otherwise    = first (fs_now' ++) $ go (combine xs') fs'
                 where (unzip -> (fs_now', xs'), fs') = extractJusts (\fulfilment -> fmap (fulfilment,) $ p x fulfilment) fs
