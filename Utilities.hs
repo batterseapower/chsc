@@ -266,6 +266,9 @@ exclude m s = M.filterWithKey (\k _ -> k `S.notMember` s) m
 mapMaybeSet :: (Ord a, Ord b) => (a -> Maybe b) -> S.Set a -> S.Set b
 mapMaybeSet f = S.fromList . mapMaybe f . S.toList
 
+listToMap :: Ord k => v -> [k] -> M.Map k v
+listToMap v = M.fromList . map (,v)
+
 setToMap :: Ord k => v -> S.Set k -> M.Map k v
 setToMap v = M.fromAscList . map (,v) . S.toAscList
 
@@ -314,6 +317,10 @@ tagIdSupply = unsafePerformIO $ initIdSupply 't'
 {-# NOINLINE prettyIdSupply #-}
 prettyIdSupply :: IdSupply
 prettyIdSupply = unsafePerformIO $ initIdSupply 'p'
+
+{-# NOINLINE prettifyIdSupply #-}
+prettifyIdSupply :: IdSupply
+prettifyIdSupply = unsafePerformIO $ initIdSupply 'r'
 
 {-# NOINLINE matchIdSupply #-}
 matchIdSupply :: IdSupply

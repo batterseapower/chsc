@@ -6,6 +6,7 @@ import Supercompile.Match
 import Supercompile.Split
 
 import Core.FreeVars
+import Core.Prettify
 import Core.Renaming
 import Core.Syntax
 import Core.Tag
@@ -44,7 +45,7 @@ wQO | not tERMINATION_CHECK                        = postcomp (const generaliseN
                                          TagSet       -> embedWithTagSets
 
 supercompile :: Term -> Term
-supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ runScpM $ fmap snd $ sc (mkHistory (extra wQO)) (deeds, state)
+supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ (if pRETTIFY then prettify else id) $ runScpM $ fmap snd $ sc (mkHistory (extra wQO)) (deeds, state)
   where input_fvs = annedTermFreeVars anned_e
         (deeds, state) = normalise (mkDeeds (bLOAT_FACTOR - 1) (t, pPrint . rb), (Heap (setToMap Environmental input_fvs) reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, anned_e)))
         anned_e = toAnnedTerm e

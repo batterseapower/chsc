@@ -169,12 +169,20 @@ pPrintPrecApps :: (Pretty a, Pretty b) => PrettyLevel -> Rational -> a -> [b] ->
 pPrintPrecApps level prec e1 es2 = prettyParen (not (null es2) && prec >= appPrec) $ pPrintPrec level opPrec e1 <+> hsep (map (pPrintPrec level appPrec) es2)
 
 
+altConBinders :: AltCon -> [Var]
+altConBinders (DataAlt _ xs)    = xs
+altConBinders (LiteralAlt _)    = []
+altConBinders (DefaultAlt mb_x) = maybeToList mb_x
+
 isValue :: TermF ann -> Bool
 isValue (Value _) = True
 isValue _         = False
 
 termIsValue :: Copointed ann => ann (TermF ann) -> Bool
-termIsValue = isValue . extract
+termIsValue = isJust . termToValue
+
+termToValue :: Copointed ann => ann (TermF ann) -> Maybe (ValueF ann)
+termToValue e = case extract e of Value v -> Just v; _ -> Nothing
 
 isCheap :: Copointed ann => TermF ann -> Bool
 isCheap _ | cALL_BY_NAME = True -- A cunning hack. I think this is all that should be required...

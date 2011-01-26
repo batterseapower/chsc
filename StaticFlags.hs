@@ -145,3 +145,7 @@ eXPAND_CASE_UNCOVEREDS = "--expand-case-uncovereds" `elem` unsafePerformIO getAr
 {-# NOINLINE cALL_BY_NAME #-}
 cALL_BY_NAME :: Bool
 cALL_BY_NAME = "--call-by-name" `elem` unsafePerformIO getArgs
+
+{-# NOINLINE pRETTIFY #-}
+pRETTIFY :: Bool
+pRETTIFY = "--prettify" `elem` unsafePerformIO getArgs
