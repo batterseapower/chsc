@@ -119,18 +119,20 @@ mkEnteredEnv = setToMap
 
 {-# INLINE split #-}
 split :: MonadStatics m
-      => Generaliser
+      => (State -> Bool)
+      -> Generaliser
       -> ((Deeds, State) -> m (Deeds, Out FVedTerm))
       -> (Deeds, State)
       -> m (Deeds, Out FVedTerm)
-split gen opt (deeds, s) = optimiseSplit opt deeds' bracketeds_heap bracketed_focus
-  where (deeds', bracketeds_heap, bracketed_focus) = simplify gen (deeds, s)
+split inlining_ok gen opt (deeds, s) = optimiseSplit opt deeds' bracketeds_heap bracketed_focus
+  where (deeds', bracketeds_heap, bracketed_focus) = simplify inlining_ok gen (deeds, s)
 
 {-# INLINE simplify #-}
-simplify :: Generaliser
+simplify :: (State -> Bool)
+         -> Generaliser
          -> (Deeds, State)
          -> (Deeds, M.Map (Out Var) (Bracketed State), Bracketed State)
-simplify gen (init_deeds, init_s)
+simplify inlining_ok gen (init_deeds, init_s)
   = (\res@(deeds', bracketed_heap, bracketed) -> assertRender (text "simplify: deeds lost or gained") (not dEEDS || noGain (init_deeds `releaseStateDeed` init_s) (M.fold (flip (releaseBracketedDeeds releaseStateDeed)) (releaseBracketedDeeds releaseStateDeed deeds' bracketed) bracketed_heap)) res) $
     go (init_deeds, init_s)
   where
@@ -139,10 +141,10 @@ simplify gen (init_deeds, init_s)
          -- If we can find some fraction of the stack or heap to drop that looks like it will be admissable, just residualise those parts and continue
         | Just split_from <- seekAdmissable h named_k
         , (ids', ctxt_id) <- stepIdSupply ids
-        = splitt split_from (deeds, (Heap h ids', named_k, ([],                                                           oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], (rn, fmap qaToAnnedTerm' qa))))))
+        = splitt inlining_ok split_from (deeds, (Heap h ids', named_k, ([],                                                           oneBracketed (Once ctxt_id, \ids -> (Heap M.empty ids, [], (rn, fmap qaToAnnedTerm' qa))))))
          -- We can't step past a variable or value, because if we do so I can't prove that simplify terminates and the sc recursion has finite depth
         | (ids1, ids2) <- splitIdSupply ids
-        = splitt bottom     (deeds, (Heap h ids1, named_k, (case annee qa of Question x -> [rename rn x]; Answer _ -> [], splitQA ids2 (rn, annee qa))))
+        = splitt inlining_ok bottom     (deeds, (Heap h ids1, named_k, (case annee qa of Question x -> [rename rn x]; Answer _ -> [], splitQA ids2 (rn, annee qa))))
       where named_k = [0..] `zip` k
     
     seekAdmissable :: PureHeap -> NamedStack -> Maybe (IS.IntSet, S.Set (Out Var))
@@ -436,12 +438,14 @@ optimiseLetBinds opt leftover_deeds bracketeds_heap fvs' = -- traceRender ("opti
 
 type NamedStack = [(Int, Tagged StackFrame)]
 
-splitt :: (IS.IntSet, S.Set (Out Var))
+{-# INLINE splitt #-}
+splitt :: (State -> Bool)
+       -> (IS.IntSet, S.Set (Out Var))
        -> (Deeds, (Heap, NamedStack, ([Out Var], Bracketed (Entered, IdSupply -> UnnormalisedState))))         -- ^ The thing to split, and the Deeds we have available to do it
        -> (Deeds,                             -- ^ The Deeds still available after splitting
            M.Map (Out Var) (Bracketed State), -- ^ The residual "let" bindings
            Bracketed State)                   -- ^ The residual "let" body
-splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply -> (ids_brack, ids))), named_k, (scruts, bracketed_qa)))
+splitt inlining_ok (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Heap h (splitIdSupply -> (ids_brack, ids))), named_k, (scruts, bracketed_qa)))
     = snd $ split_step split_fp
       -- Once we have the correct fixed point, go back and grab the associated information computed in the process
       -- of obtaining the fixed point. That is what we are interested in, not the fixed point itselF!
@@ -560,7 +564,7 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
                 --
                 -- We do the normalisation immediately afterwards - we can't do it before transitiveInline, precisely
                 -- because of the above hack (normalisation might add bindings to the heap).
-                (deeds', state') = normalise $ transitiveInline h_inlineable (deeds, state)
+                (deeds', state') = normalise $ transitiveInline (\state -> inlining_ok (snd (normalise (deeds, state))) {- FIXME: hack alert -}) h_inlineable (deeds, state)
         
         -- 3c) Actually do the inlining of as much of the heap as possible into the proposed floats
         -- We also take this opportunity to strip out the Entered information from each context.
@@ -658,10 +662,12 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
 -- Both of these oddities are a consequence of the fact that this heap is only non-empty in the splitter for states
 -- originating from the branch of some residual case expression. See Note [Phantom variables and bindings introduced by scrutinisation]
 -- for details about point 2 in particular.
-transitiveInline :: PureHeap                             -- ^ What to inline. We have not claimed deeds for any of this.
+{-# INLINE transitiveInline #-}
+transitiveInline :: ((Heap, Stack, In (Anned a)) -> Bool)
+                 -> PureHeap                             -- ^ What to inline. We have not claimed deeds for any of this.
                  -> (Deeds, (Heap, Stack, In (Anned a))) -- ^ What to inline into
                  -> (Deeds, (Heap, Stack, In (Anned a)))
-transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
+transitiveInline inlining_ok init_h_inlineable (deeds, (Heap h ids, k, in_e))
     = -- (if not (S.null not_inlined_vs') then traceRender ("transitiveInline: generalise", not_inlined_vs') else id) $
       -- traceRender ("transitiveInline", "had bindings for", pureHeapBoundVars init_h_inlineable, "FVs were", state_fvs, "so inlining", pureHeapBoundVars h') $
       (deeds', (Heap h' ids, k, in_e))
@@ -704,6 +710,7 @@ transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
           , nAIVE_LOCAL_TIEBACKS || (heapBindingNonConcrete inline_hb `implies` heapBindingProbablyValue inline_hb)  -- Heuristic: only inline phantom bindings if they are likely to refer to values
           , (x' `M.notMember` h && (lOCAL_TIEBACKS || heapBindingEnvironmental inline_hb)) -- Be careful: even if we don't want local tiebacks, we don't want to abstract over free variables of the input
             || not (heapBindingNonConcrete inline_hb)                                      -- The Hack: only inline stuff from h *concretely*
+          , heapBindingEnvironmental inline_hb || inlining_ok (Heap h_output ids, k, in_e) -- Used for Neil generalisation (the heapBindingEnvironmental check was motivated by AccumulatingParam-Peano)
           -- , traceRender ("Extra liveness from", pPrint inline_hb, "is", heapBindingLiveness inline_hb) True
           = (deeds, h_inlineable, M.insert x' inline_hb h_output, live `plusLiveness` heapBindingLiveness inline_hb)
           | otherwise

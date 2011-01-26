@@ -83,7 +83,7 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ fVedTermToTerm $ run
 -- TODO: have the garbage collector collapse indirections to indirections (but unlike GHC, not further!)
 -- TODO: have the garbage collector eliminate extra update frames
 gc :: (Deeds, State) -> (Deeds, State)
-gc (deeds, (Heap h ids, k, in_e)) = transitiveInline h (releasePureHeapDeeds deeds h, (Heap M.empty ids, k, in_e))
+gc (deeds, (Heap h ids, k, in_e)) = transitiveInline (const True) h (releasePureHeapDeeds deeds h, (Heap M.empty ids, k, in_e))
   where
     -- We used to garbage-collect in the evaluator, when we executed the rule for update frames. This had two benefits:
     --  1) We don't have to actually update the heap or even claim a new deed
@@ -313,9 +313,9 @@ sc' hist (deeds, state) = (\raise -> check raise) `catchScpM` \gen -> stop gen h
     check this_rb = case terminate hist (state, this_rb) of
                       Continue hist' -> continue hist'
                       Stop (gen, rb) -> maybe (stop gen hist) ($ gen) $ guard sC_ROLLBACK >> Just rb
-    stop gen hist = trace "sc-stop" $ split gen (sc hist) (deeds,  state) -- Keep the trace exactly here or it gets floated out by GHC
+    stop gen hist = trace "sc-stop" $ split (\state -> not nEIL_GENERALISATION || isContinue (terminate hist (state, undefined))) gen (sc hist) (deeds,  state) -- Keep the trace exactly here or it gets floated out by GHC
     continue hist = do traceRenderScpM ("reduce end", pPrintFullState state')
-                       split generaliseNothing (sc hist) (deeds', state')
+                       split (\state -> not nEIL_GENERALISATION || isContinue (terminate hist (state, undefined))) generaliseNothing (sc hist) (deeds', state')
       where (deeds', state') = gc (speculate reduce (deeds, state)) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
 
 memo :: ((Deeds, State) -> ScpM (Deeds, Out FVedTerm))

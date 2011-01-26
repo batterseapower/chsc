@@ -64,6 +64,10 @@ tAG_COLLECTION = parseEnum "--tag-collection" TagGraph [("bags", TagBag), ("bags
 gENERALISATION :: Bool
 gENERALISATION = not $ "--no-generalisation" `elem` unsafePerformIO getArgs
 
+{-# NOINLINE nEIL_GENERALISATION #-}
+nEIL_GENERALISATION :: Bool
+nEIL_GENERALISATION = "--neil-generalisation" `elem` unsafePerformIO getArgs
+
 {-# NOINLINE bLOAT_FACTOR #-}
 bLOAT_FACTOR :: Int
 bLOAT_FACTOR = fromMaybe 10 $ listToMaybe [read val | arg <- unsafePerformIO getArgs, Just val <- [stripPrefix "--bloat=" arg]]
