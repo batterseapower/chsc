@@ -37,8 +37,9 @@ prettifyTerm' ids inline (rn, e) = case e of
       where x' = rename rn x
     Value v -> (occurs, Value v')
       where (occurs, v') = prettifyValue' ids inline (rn, v)
-    App e x -> (M.insertWith join x Many occurs, App e' (rename rn x))
-      where (occurs, e') = prettifyTerm ids inline (rn, e)
+    App e x -> (M.insertWith join x' Many occurs, App e' x')
+      where x' = rename rn x
+            (occurs, e') = prettifyTerm ids inline (rn, e)
     PrimOp pop es -> (joins occurss, PrimOp pop es')
       where (occurss, es') = unzip $ map (\e -> prettifyTerm ids inline (rn, e)) es
     Case e alts -> (e_occurs `join` joins alt_occurss, Case e' alts')
