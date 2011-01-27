@@ -54,7 +54,7 @@ prettifyTerm' ids inline (rn, e) = case e of
             occurs' = e_occurs `join` joins es_occurs
             
             -- Inline those bindings that occurred syntactically exactly once (or were dead):
-            (xes'_inline, xes'_leave) = partition (\(x', e') -> maybe True (== Once) (x' `M.lookup` occurs')) (xs' `zip` es')
+            (xes'_inline, xes'_leave) = partition (\(x', _e') -> maybe True (== Once) (x' `M.lookup` occurs')) (xs' `zip` es')
 
 prettifyValue' :: IdSupply -> InlineEnv -> In (ValueF FVed) -> (OccursEnv, Out (ValueF FVed))
 prettifyValue' ids inline (rn, v) = case v of

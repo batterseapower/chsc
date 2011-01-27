@@ -324,7 +324,7 @@ catchScpM f_try f_abort = ScpM $ \e s k -> unScpM (f_try (\c -> ScpM $ \e' s' _k
                          k)) e s k
 
 addStats :: SCStats -> ScpM ()
-addStats scstats = ScpM $ \e s k -> k () (s { stats = stats s `mappend` scstats })
+addStats scstats = ScpM $ \_e s k -> k () (s { stats = stats s `mappend` scstats })
 
 
 type RollbackScpM = Generaliser -> ScpM (Deeds, Out FVedTerm)
