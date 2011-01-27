@@ -34,7 +34,7 @@ normalise (deeds, state) =
   where
     go (deeds, (h, k, (rn, e))) = case annee e of
         Var x             -> (deeds, (h, k, (rn, fmap (const (Question x)) e)))
-        Value v           -> (deeds, (h, k, (rn, fmap (const (Answer v)) e)))
+        Value v           -> maybe (deeds, (h, k, (rn, fmap (const (Answer v)) e))) normalise $ unwind False deeds h k tg (rn, v)
         App e1 x2         -> normalise (deeds, (h, Tagged tg (Apply (rename rn x2))            : k, (rn, e1)))
         PrimOp pop (e:es) -> normalise (deeds, (h, Tagged tg (PrimApply pop [] (map (rn,) es)) : k, (rn, e)))
         Case e alts       -> normalise (deeds, (h, Tagged tg (Scrutinise (rn, alts))           : k, (rn, e)))
@@ -54,20 +54,21 @@ step (deeds, _state@(h, k, (rn, qa))) =
               mb_res) $
   fmap normalise $ case annee qa of
     Question x -> force  deeds h k tg (rename rn x)
-    Answer   v -> unwind deeds h k tg (rn, v)
+    Answer   v -> unwind True deeds h k tg (rn, v)
   where
     tg = annedTag qa
       
     force :: Deeds -> Heap -> Stack -> Tag -> Out Var -> Maybe (Deeds, UnnormalisedState)
     force deeds (Heap h ids) k tg x' = do { Concrete in_e <- M.lookup x' h; return (deeds, (Heap (M.delete x' h) ids, Tagged tg (Update x') : k, in_e)) }
 
-    unwind :: Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> Maybe (Deeds, UnnormalisedState)
-    unwind deeds h k tg_v in_v = uncons k >>= \(kf, k) -> let deeds' = releaseDeedDescend_ deeds (tag kf) in case tagee kf of
-        Apply x2'                 -> apply      deeds'         h k tg_v in_v x2'
-        Scrutinise in_alts        -> scrutinise deeds'         h k tg_v in_v in_alts
-        PrimApply pop in_vs in_es -> primop     deeds (tag kf) h k tg_v pop in_vs in_v in_es
-        Update x'                 -> update     deeds'         h k tg_v x' in_v
-
+unwind :: Bool -> Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> Maybe (Deeds, UnnormalisedState)
+unwind do_updates deeds h k tg_v in_v = uncons k >>= \(kf, k) -> let deeds' = releaseDeedDescend_ deeds (tag kf) in case tagee kf of
+    Apply x2'                 -> apply      deeds'         h k tg_v in_v x2'
+    Scrutinise in_alts        -> scrutinise deeds'         h k tg_v in_v in_alts
+    PrimApply pop in_vs in_es -> primop     deeds (tag kf) h k tg_v pop in_vs in_v in_es
+    Update x' | do_updates    -> update     deeds'         h k tg_v x' in_v
+              | otherwise     -> Nothing
+  where
     apply :: Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> Out Var -> Maybe (Deeds, UnnormalisedState)
     apply deeds h k tg_v (rn, Lambda x e_body) x2' = Just (deeds', (h, k, (insertRenaming x x2' rn, e_body)))
       where deeds' = releaseDeedDescend_ deeds tg_v
