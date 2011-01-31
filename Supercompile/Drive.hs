@@ -154,13 +154,27 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) emptyLosers
         (h'_losers, h'_winners) | sPECULATE_ON_LOSERS = (M.empty, h')
                                 | otherwise           = M.partition (\hb -> maybe False (`IS.member` losers) (heapBindingTag_ hb)) h'
         
+        -- Note [Order of speculation]
+        -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        --
+        -- It is quite important that are insensitive to dependency order. For example:
+        --
+        --  let id x = x
+        --      idish = id id
+        --  in e
+        --
+        -- If we speculated idish first without any information about what id is, it will be irreducible. If we do it the other way
+        -- around (or include some information about id) then we will get a nice lambda. This is why we speculate each binding with
+        -- *the entire rest of the heap* also present.
+        
         -- TODO: I suspect we should accumulate Losers across the boundary of speculate as well
         -- TODO: there is a difference between losers due to termination-halting and losers because we didn't have enough
         -- information available to complete evaluation
+        -- FIXME: speculation is TOTALLY BROKEN right now because normalise unwraps all letrecs into the heap, so we almost never get any new heap bindings here:
         (stats', deeds'', Heap h'_winners' ids'', losers') = M.foldrWithKey speculate_one (stats, deeds', Heap h'_winners ids', losers) (h'_winners M.\\ h)
         speculate_one x' (Concrete in_e) (stats, deeds, Heap h'_winners ids, losers)
-          -- | not (isValue (annee (snd in_e))), traceRender ("speculate", depth, residualiseState (Heap (h {- `exclude` M.keysSet base_h -}) ids, k, in_e)) False = undefined
-          | otherwise = case (go (depth + 1) hist losers) (normalise (deeds, (Heap (M.delete x' h'_winners) ids, [], in_e))) of
+          | not (isValue (annee (snd in_e))), traceRender ("speculate", x', depth, pPrintFullUnnormalisedState (Heap (h {- `exclude` M.keysSet base_h -}) ids, k, in_e)) False = undefined
+          | otherwise = case go (depth + 1) hist losers (normalise (deeds, (Heap (M.delete x' h'_winners) ids, [], in_e))) of
             (losers', (stats', (deeds', (Heap h' ids', [], in_qa'@(_, annee -> Answer _))))) -> (stats `mappend` stats', deeds', Heap (M.insert x' (Concrete (fmap (fmap qaToAnnedTerm') in_qa')) h')         ids', losers')
             (losers', (stats', _))                                                           -> (stats `mappend` stats', deeds,  Heap (M.insert x' (Concrete in_e)                                h'_winners) ids,  IS.insert (annedTag (snd in_e)) losers')
         speculate_one x' hb              (stats, deeds, Heap h'_winners ids, losers) 
