@@ -126,13 +126,13 @@ emptyLosers = IS.empty
 
 speculate :: ((Deeds, State) -> (SCStats, (Deeds, State)))
           -> (Deeds, State) -> (SCStats, (Deeds, State))
-speculate reduce = snd . go (0 :: Int) (mkHistory wQO) emptyLosers
+speculate reduce = snd . go (0 :: Int) (mkHistory wQO) (emptyLosers, S.empty)
   where
-    go depth hist losers (deeds, state) = case terminate hist state of
-        Continue hist' | sPECULATION -> continue depth hist' losers (deeds, state)
-        _                            -> (losers, reduce (deeds, state)) -- It is very important we reduce in this branch, or we never call reduce with --no-speculation turned on!
+    go depth hist (losers, speculated) (deeds, state) = case terminate hist state of
+        Continue hist' | sPECULATION -> continue depth hist' (losers, speculated) (deeds, state)
+        _                            -> ((losers, speculated), reduce (deeds, state)) -- It is very important we reduce in this branch, or we never call reduce with --no-speculation turned on!
     
-    continue depth hist losers (deeds, state@(Heap h _, _, _)) = (losers', (stats', (deeds'', (Heap (h'_winners' `M.union` h'_losers) ids'', k, in_e))))
+    continue depth hist (losers, speculated) (deeds, state) = ((losers', speculated'), (stats', (deeds'', (Heap (h'_winners' `M.union` h'_losers) ids'', k, in_e))))
       where
         (stats, (deeds', (Heap h' ids', k, in_e))) = reduce (deeds, state)
         
@@ -170,15 +170,15 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) emptyLosers
         -- TODO: I suspect we should accumulate Losers across the boundary of speculate as well
         -- TODO: there is a difference between losers due to termination-halting and losers because we didn't have enough
         -- information available to complete evaluation
-        -- FIXME: speculation is TOTALLY BROKEN right now because normalise unwraps all letrecs into the heap, so we almost never get any new heap bindings here:
-        (stats', deeds'', Heap h'_winners' ids'', losers') = M.foldrWithKey speculate_one (stats, deeds', Heap h'_winners ids', losers) (h'_winners M.\\ h)
-        speculate_one x' (Concrete in_e) (stats, deeds, Heap h'_winners ids, losers)
-          | not (isValue (annee (snd in_e))), traceRender ("speculate", x', depth, pPrintFullUnnormalisedState (Heap (h {- `exclude` M.keysSet base_h -}) ids, k, in_e)) False = undefined
-          | otherwise = case go (depth + 1) hist losers (normalise (deeds, (Heap (M.delete x' h'_winners) ids, [], in_e))) of
-            (losers', (stats', (deeds', (Heap h' ids', [], in_qa'@(_, annee -> Answer _))))) -> (stats `mappend` stats', deeds', Heap (M.insert x' (Concrete (fmap (fmap qaToAnnedTerm') in_qa')) h')         ids', losers')
-            (losers', (stats', _))                                                           -> (stats `mappend` stats', deeds,  Heap (M.insert x' (Concrete in_e)                                h'_winners) ids,  IS.insert (annedTag (snd in_e)) losers')
-        speculate_one x' hb              (stats, deeds, Heap h'_winners ids, losers) 
-          = (stats, deeds, Heap (M.insert x' hb h'_winners) ids, losers)
+        -- TODO: speculation could be more efficient if I could see the bindings that I speculated on the last invocation of the speculate function
+        (stats', deeds'', Heap h'_winners' ids'', losers', speculated') = S.fold speculate_one (stats, deeds', Heap h'_winners ids', losers, speculated) (M.keysSet h'_winners S.\\ speculated)
+        speculate_one x' (stats, deeds, Heap h'_winners ids, losers, speculated) = case hb of
+          -- | not (isValue (annee (snd in_e))), traceRender ("speculate", x', depth, pPrintFullUnnormalisedState (Heap (h {- `exclude` M.keysSet base_h -}) ids, k, in_e)) False = undefined
+          Concrete in_e | x' `S.notMember` speculated -> case go (depth + 1) hist (losers, S.insert x' speculated) (normalise (deeds, (Heap h'_winners' ids, [], in_e))) of
+            ((losers', speculated'), (stats', (deeds', (Heap h' ids', [], in_qa'@(_, annee -> Answer _))))) -> (stats `mappend` stats', deeds', Heap (M.insert x' (Concrete (fmap (fmap qaToAnnedTerm') in_qa')) h') ids', losers',                                 speculated')
+            ((losers', speculated'), (stats', _))                                                           -> (stats `mappend` stats', deeds,  Heap h'_winners                                                      ids,  IS.insert (annedTag (snd in_e)) losers', speculated')
+          _ -> (stats, deeds, Heap h'_winners ids, losers, speculated)
+          where (Just hb, h'_winners') = M.updateLookupWithKey (\_ _ -> Nothing) x' h'_winners -- Extract current heap binding for speculation in case an earlier attempt forced it as a side effect
 
 reduce :: (Deeds, State) -> (SCStats, (Deeds, State))
 reduce (deeds, orig_state) = go (mkHistory (extra wQO)) (deeds, orig_state)
