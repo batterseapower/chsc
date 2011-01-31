@@ -356,10 +356,11 @@ optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
     let stateSize (h, k, in_qa) = heapSize h + stackSize k + qaSize (snd in_qa)
           where qaSize = termSize . fmap qaToAnnedTerm'
                 heapBindingSize hb = case hb of
-                    Environmental   -> 0
-                    Updated _ _     -> 0
-                    Phantom _       -> 0
-                    Concrete (_, e) -> termSize e
+                    Environmental    -> 0
+                    Updated _ _      -> 0
+                    Phantom _        -> 0
+                    Unfolding (_, v) -> valueSize v
+                    Concrete (_, e)  -> termSize e
                 heapSize (Heap h _) = sum (map heapBindingSize (M.elems h))
                 stackSize = sum . map (stackFrameSize . tagee)
                 stackFrameSize kf = 1 + case kf of
@@ -486,6 +487,7 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
           = True
         
         -- 2) Build a splitting for those elements of the heap we propose to residualise not in not_resid_xs
+        -- TODO: I should residualise those Unfoldings whose free variables have become interesting due to intervening scrutinisation
         (h_not_residualised, h_residualised) = M.partitionWithKey (\x' _ -> x' `S.member` not_resid_xs) h
         bracketeds_nonupdated = M.mapMaybeWithKey (\x' hb -> do { Concrete in_e <- return hb; return (Phantom in_e, fill_ids $ oneBracketed (Once (fromJust (name_id x')), \ids -> (Heap M.empty ids, [], in_e))) }) h_residualised
         -- For every heap binding we ever need to deal with, contains:
@@ -597,8 +599,9 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
     
     -- Heap full of cheap expressions and any phantom stuff from the input heap.
     -- Used within the main loop in the process of computing h_inlineable -- see comments there for the full meaning of this stuff.
-    extract_cheap_hb (Concrete (rn, e)) = guard (isCheap (annee e)) >> Just (Concrete (rn, e))
-    extract_cheap_hb hb                 = Just hb -- Inline phantom stuff verbatim: there is no work duplication issue
+    extract_cheap_hb (Concrete (rn, e))  = guard (isCheap (annee e)) >> Just (Concrete (rn, e))
+    extract_cheap_hb (Unfolding (rn, v)) = Just (Unfolding (rn, v))
+    extract_cheap_hb hb                  = Just hb -- Inline phantom stuff verbatim: there is no work duplication issue
     h_cheap_and_phantom = M.mapMaybe extract_cheap_hb h
 
 
@@ -701,6 +704,9 @@ transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
                                   Just deeds ->                                                     (deeds,                h_inlineable, hb)
                                   Nothing    -> trace (render $ text "inline-deeds:" <+> pPrint x') (deeds, M.insert x' hb h_inlineable, Phantom in_e)
                 PhantomLive  -> (deeds, M.insert x' hb h_inlineable, Phantom in_e) -- We want to inline only a *phantom* version if the binding is demanded by phantoms only, or madness ensues
+              Unfolding in_v -> case why_live of
+                ConcreteLive -> (deeds, h_inlineable,                hb)
+                PhantomLive  -> (deeds, M.insert x' hb h_inlineable, Phantom (second (fmap Value) in_v)) -- Ditto: only inline phantom unfoldings if we are only referred to by phantoms. Not as important as with concretes, though
               _              -> (deeds, h_inlineable, hb)
           , nAIVE_LOCAL_TIEBACKS || heapBindingProbablyValue inline_hb                     -- Heuristic: only inline phantom bindings if they are likely to refer to values
           , (x' `M.notMember` h && (lOCAL_TIEBACKS || heapBindingEnvironmental inline_hb)) -- Be careful: even if we don't want local tiebacks, we don't want to abstract over free variables of the input

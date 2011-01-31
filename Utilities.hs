@@ -344,9 +344,10 @@ normalLevel = PrettyLevel 0
 haskellLevel = PrettyLevel 1
 
 
-angles, coangles :: Doc -> Doc
+angles, coangles, bananas :: Doc -> Doc
 angles d = Pretty.char '<' <> d <> Pretty.char '>'
 coangles d = Pretty.char '>' <> d <> Pretty.char '<'
+bananas d = text "(|" <> d <> text "|)"
 
 
 pPrintPrec' :: Pretty a => a -> PrettyLevel -> Rational -> Doc

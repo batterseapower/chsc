@@ -58,7 +58,17 @@ step (deeds, _state@(h, k, (rn, qa))) =
     tg = annedTag qa
       
     force :: Deeds -> Heap -> Stack -> Tag -> Out Var -> Maybe (Deeds, UnnormalisedState)
-    force deeds (Heap h ids) k tg x' = do { Concrete in_e <- M.lookup x' h; return (deeds, (Heap (M.delete x' h) ids, Tagged tg (Update x') : k, in_e)) }
+    force deeds (Heap h ids) k tg x'
+            = do { in_v <- lookupValue (Heap h ids) x'; unwind True deeds (Heap h ids) k tg in_v }
+      `mplus` do { Concrete in_e <- M.lookup x' h; return (deeds, (Heap (M.delete x' h) ids, Tagged tg (Update x') : k, in_e)) }
+
+lookupValue :: Heap -> Out Var -> Maybe (In AnnedValue)
+lookupValue (Heap h _) x' = do
+    hb <- M.lookup x' h
+    case hb of
+      Concrete  (rn, anned_e) -> fmap ((,) rn) $ termToValue anned_e
+      Unfolding (rn, anned_v) -> Just (rn, annee anned_v)
+      _                       -> Nothing
 
 unwind :: Bool -> Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> Maybe (Deeds, UnnormalisedState)
 unwind do_updates deeds h k tg_v in_v = uncons k >>= \(kf, k) -> let deeds' = releaseDeedDescend_ deeds (tag kf) in case tagee kf of
@@ -81,13 +91,6 @@ unwind do_updates deeds h k tg_v in_v = uncons k >>= \(kf, k) -> let deeds' = re
     dereference :: Heap -> In AnnedValue -> In AnnedValue
     dereference h (rn, Indirect x) | Just (rn', anned_v') <- lookupValue h (safeRename "dereference" rn x) = dereference h (rn', anned_v')
     dereference _ in_v = in_v
-
-    lookupValue :: Heap -> Out Var -> Maybe (In AnnedValue)
-    lookupValue (Heap h _) x' = do
-        hb <- M.lookup x' h
-        case hb of
-          Concrete  (rn, anned_e) -> fmap ((,) rn) $ termToValue anned_e
-          _                       -> Nothing
     
     apply :: Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> Out Var -> Maybe (Deeds, UnnormalisedState)
     apply deeds h k tg_v (dereference h -> (rn, Lambda x e_body)) x2' = fmap (\deeds'' -> (deeds'', (h, k, (insertRenaming x x2' rn, e_body)))) $ claimDeed deeds' (annedTag e_body)

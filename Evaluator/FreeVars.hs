@@ -51,10 +51,11 @@ inFreeVars thing_fvs (rn, thing) = renameFreeVars rn (thing_fvs thing)
 
 -- | Finds the set of things "referenced" by a 'HeapBinding': this is only used to construct tag-graphs
 heapBindingReferences :: HeapBinding -> FreeVars
-heapBindingReferences Environmental   = S.empty
-heapBindingReferences (Updated _ fvs) = fvs
-heapBindingReferences (Phantom in_e)  = inFreeVars annedTermFreeVars in_e
-heapBindingReferences (Concrete in_e) = inFreeVars annedTermFreeVars in_e
+heapBindingReferences Environmental    = S.empty
+heapBindingReferences (Updated _ fvs)  = fvs
+heapBindingReferences (Phantom in_e)   = inFreeVars annedTermFreeVars in_e
+heapBindingReferences (Concrete in_e)  = inFreeVars annedTermFreeVars in_e
+heapBindingReferences (Unfolding in_v) = inFreeVars annedValueFreeVars in_v
 
 -- NB: reporting the FVs of an Updated thing as live is bad. In particular:
 --  1) It causes us to abstract over too many free variables, because transitiveInline will pull in
@@ -103,7 +104,10 @@ stateStaticBindersAndFreeVars (Heap h _, k, in_e) = (bvs_static', fvs' S.\\ bvs_
     ((bvs_static', bvs_nonstatic'), fvs') = pureHeapOpenFreeVars h (stackOpenFreeVars k (inFreeVars annedFreeVars in_e))
     
     pureHeapOpenFreeVars :: PureHeap -> (BoundVars, FreeVars) -> ((BoundVars, BoundVars), FreeVars)
-    pureHeapOpenFreeVars h (bvs, fvs) = M.foldrWithKey (\x' hb ((bvs_static, bvs_nonstatic), fvs) -> case hb of Concrete in_e -> ((bvs_static, S.insert x' bvs_nonstatic), fvs `S.union` inFreeVars annedTermFreeVars in_e); _ -> ((S.insert x' bvs_static, bvs_nonstatic), fvs)) ((S.empty, bvs), fvs) h
+    pureHeapOpenFreeVars h (bvs, fvs) = (\f -> M.foldrWithKey f ((S.empty, bvs), fvs) h) $ \x' hb ((bvs_static, bvs_nonstatic), fvs) -> case hb of
+        Concrete in_e  -> ((bvs_static,             S.insert x' bvs_nonstatic), fvs `S.union` inFreeVars annedTermFreeVars in_e)
+        Unfolding in_v -> ((bvs_static,             bvs_nonstatic),             S.insert x' (fvs `S.union` inFreeVars annedValueFreeVars in_v))
+        _              -> ((S.insert x' bvs_static, bvs_nonstatic),             fvs)
     
     stackOpenFreeVars :: Stack -> FreeVars -> (BoundVars, FreeVars)
     stackOpenFreeVars k fvs = (S.unions *** (S.union fvs . S.unions)) . unzip . map (stackFrameOpenFreeVars . tagee) $ k

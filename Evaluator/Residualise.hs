@@ -16,6 +16,9 @@ import qualified Data.Map as M
 residualiseTerm :: IdSupply -> In AnnedTerm -> Out FVedTerm
 residualiseTerm ids = detagAnnedTerm . renameIn (renameAnnedTerm ids)
 
+residualiseValue :: IdSupply -> In (Anned AnnedValue) -> Out (FVed FVedValue)
+residualiseValue ids = detagAnnedValue . renameIn (renameAnnedValue ids)
+
 residualiseUnnormalisedState :: UnnormalisedState -> (Out [(Var, Doc)], Out FVedTerm)
 residualiseUnnormalisedState (heap, k, in_e) = residualiseHeap heap (\ids -> residualiseStack ids k (residualiseTerm ids in_e))
 
@@ -27,9 +30,10 @@ residualisePureHeap :: IdSupply -> PureHeap -> (Out [(Var, Doc)], Out [(Var, FVe
 residualisePureHeap ids h = partitionEithers [fmapEither (x',) (x',) (residualiseHeapBinding ids hb) | (x', hb) <- M.toList h]
 
 residualiseHeapBinding :: IdSupply -> HeapBinding -> Either (Out Doc) (Out FVedTerm)
-residualiseHeapBinding ids (Concrete in_e) = Right (residualiseTerm ids in_e)
-residualiseHeapBinding ids (Phantom in_e)  = Left (angles (pPrint (residualiseTerm ids in_e)))
-residualiseHeapBinding _   hb              = Left (pPrint hb)
+residualiseHeapBinding ids (Concrete in_e)  = Right (residualiseTerm ids in_e)
+residualiseHeapBinding ids (Unfolding in_v) = Left (bananas (pPrint (residualiseValue ids in_v)))
+residualiseHeapBinding ids (Phantom in_e)   = Left (angles (pPrint (residualiseTerm ids in_e)))
+residualiseHeapBinding _   hb               = Left (pPrint hb)
 
 residualiseStack :: IdSupply -> Stack -> Out FVedTerm -> ((Out [(Var, Doc)], Out [(Var, FVedTerm)]), Out FVedTerm)
 residualiseStack _   []     e = (([], []), e)

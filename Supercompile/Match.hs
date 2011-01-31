@@ -195,6 +195,7 @@ matchPureHeap ids bound_eqs free_eqs init_h_l init_h_r = go bound_eqs free_eqs i
      -- to rename any components of those static heap bindings when we tie back...
     matchHeapBinding x_l (heapBindingPhantom -> True) x_r (heapBindingPhantom -> True) = guard (x_l == x_r) >> return (id, id, [])
      -- We can match other possibilities "semantically", by peeking into ther definitions
-    matchHeapBinding x_l (Concrete in_e_l)            x_r (Concrete in_e_r)           = fmap (\extra_free_eqs -> (deleteExpensive x_l in_e_l, deleteExpensive x_r in_e_r, extra_free_eqs)) $ matchInTerm ids in_e_l in_e_r
+    matchHeapBinding _   (Unfolding in_v_l)           _   (Unfolding in_v_r)          = fmap (\extra_free_eqs -> (id,                         id,                         extra_free_eqs)) $ matchInValue ids (second annee in_v_l) (second annee in_v_r)
+    matchHeapBinding x_l (Concrete in_e_l)            x_r (Concrete in_e_r)           = fmap (\extra_free_eqs -> (deleteExpensive x_l in_e_l, deleteExpensive x_r in_e_r, extra_free_eqs)) $ matchInTerm  ids in_e_l                in_e_r
      -- Environment variables match *only* against themselves, not against anything other heap binding at all
     matchHeapBinding _ _ _ _ = Nothing

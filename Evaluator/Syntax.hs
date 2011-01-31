@@ -103,7 +103,9 @@ data HeapBinding = Environmental                     -- ^ Corresponding variable
                  | Updated Tag FreeVars              -- ^ Variable is bound by a residualised update frame. TODO: this is smelly and should really be Phantom.
                  | Phantom (In AnnedTerm)            -- ^ Corresponding variable is static static and generated from residualising a term in the splitter. Can use the term information to generalise these.
                  | Concrete (In AnnedTerm)           -- ^ A genuine heap binding that we are actually allowed to look at.
+                 | Unfolding (In (Anned AnnedValue)) -- ^ Unfolding for some variable: both heap binding and internal variables will be lambda-abstracted over
                  deriving (Show)
+
 type PureHeap = M.Map (Out Var) HeapBinding
 data Heap = Heap PureHeap IdSupply
           deriving (Show)
@@ -113,15 +115,17 @@ instance NFData HeapBinding where
     rnf (Updated a b) = rnf a `seq` rnf b
     rnf (Phantom a)   = rnf a
     rnf (Concrete a)  = rnf a
+    rnf (Unfolding a) = rnf a
 
 instance NFData Heap where
     rnf (Heap a b) = rnf a `seq` rnf b
 
 instance Pretty HeapBinding where
-    pPrintPrec _     _    Environmental   = angles empty
-    pPrintPrec level _    (Updated x' _)  = angles (text "update" <+> pPrintPrec level noPrec x')
-    pPrintPrec level _    (Phantom in_e)  = angles (pPrintPrec level noPrec in_e)
-    pPrintPrec level prec (Concrete in_e) = pPrintPrec level prec in_e
+    pPrintPrec _     _    Environmental    = angles empty
+    pPrintPrec level _    (Updated x' _)   = angles (text "update" <+> pPrintPrec level noPrec x')
+    pPrintPrec level _    (Phantom in_e)   = angles (pPrintPrec level noPrec in_e)
+    pPrintPrec level prec (Concrete in_e)  = pPrintPrec level prec in_e
+    pPrintPrec level _    (Unfolding in_v) = bananas (pPrintPrec level noPrec in_v)
 
 instance Pretty Heap where
     pPrintPrec level prec (Heap h _) = pPrintPrec level prec h
@@ -150,6 +154,7 @@ instance Pretty StackFrame where
 
 heapBindingPhantom :: HeapBinding -> Bool
 heapBindingPhantom (Concrete _)  = False
+heapBindingPhantom (Unfolding _) = False
 heapBindingPhantom _             = True
 
 heapBindingEnvironmental :: HeapBinding -> Bool
@@ -161,29 +166,32 @@ heapBindingProbablyValue :: HeapBinding -> Bool
 heapBindingProbablyValue Environmental   = True                                         -- Top level bindings are often functions and hence values
 heapBindingProbablyValue (Updated _ _)   = False                                        -- Almost certainly not values since the supercompiler stopped in the process of evaluating them
 heapBindingProbablyValue (Phantom in_e)  = sPECULATION `implies` termIsValue (snd in_e) -- I used to do `termIsValue (snd in_e)` here. However, that means that (if we aren't speculating) we kill phantomness for things that are phantom and close to being values if we run out of deeds for them, which is sad
+heapBindingProbablyValue (Unfolding _)   = True                                         -- Well, duh
 heapBindingProbablyValue (Concrete _)    = True                                         -- We can't really say yet since we may not have supercompiled the RHS
 
 heapBindingTerm :: HeapBinding -> Maybe (In AnnedTerm, WhyLive)
-heapBindingTerm Environmental   = Nothing
-heapBindingTerm (Updated _ _)   = Nothing
-heapBindingTerm (Phantom in_e)  = Just (in_e, PhantomLive)
-heapBindingTerm (Concrete in_e) = Just (in_e, ConcreteLive)
+heapBindingTerm Environmental    = Nothing
+heapBindingTerm (Updated _ _)    = Nothing
+heapBindingTerm (Phantom in_e)   = Just (in_e, PhantomLive)
+heapBindingTerm (Unfolding in_v) = Just (second (fmap Value) in_v, ConcreteLive)
+heapBindingTerm (Concrete in_e)  = Just (in_e, ConcreteLive)
 
 heapBindingTag_ :: HeapBinding -> Maybe Tag
 heapBindingTag_ = fmap fst . heapBindingTag
 
-heapBindingTag :: HeapBinding -> Maybe (Tag, WhyLive)
-heapBindingTag Environmental     = Nothing
-heapBindingTag (Updated tg _)    = Just (tg,         PhantomLive)
-heapBindingTag (Phantom (_, e))  = Just (annedTag e, PhantomLive)
-heapBindingTag (Concrete (_, e)) = Just (annedTag e, ConcreteLive)
+heapBindingTag :: HeapBinding -> Maybe (Tag, Bool) -- The boolean tells us whether we have claimed deeds for the binding's tag
+heapBindingTag Environmental      = Nothing
+heapBindingTag (Updated tg _)     = Just (tg,         False)
+heapBindingTag (Phantom (_, e))   = Just (annedTag e, False)
+heapBindingTag (Unfolding (_, v)) = Just (annedTag v, False)
+heapBindingTag (Concrete (_, e))  = Just (annedTag e, True)
 
 releaseHeapBindingDeeds :: Deeds -> HeapBinding -> Deeds
 releaseHeapBindingDeeds deeds = maybe deeds (releaseTagDeeds deeds) . heapBindingTag
 
-releaseTagDeeds :: Deeds -> (Tag, WhyLive) -> Deeds
-releaseTagDeeds deeds (tg, ConcreteLive) = releaseDeedDeep deeds tg
-releaseTagDeeds deeds (_,  PhantomLive)  = deeds
+releaseTagDeeds :: Deeds -> (Tag, Bool) -> Deeds
+releaseTagDeeds deeds (tg, True)  = releaseDeedDeep deeds tg
+releaseTagDeeds deeds (_,  False) = deeds
 
 releasePureHeapDeeds :: Deeds -> PureHeap -> Deeds
 releasePureHeapDeeds = M.fold (flip releaseHeapBindingDeeds)
