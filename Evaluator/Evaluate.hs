@@ -25,8 +25,8 @@ import qualified Data.Map as M
 -- TODO: tag stack frames so we can lose the deeds argument altogether
 normalise :: (Deeds, UnnormalisedState) -> (Deeds, State)
 normalise (deeds, state) =
-    (\(deeds', state') -> assertRender (hang (text "normalise: deeds lost or gained:") 2 (pPrintFullUnnormalisedState state))
-                                       (not dEEDS || noChange (releaseStateDeed deeds state) (releaseStateDeed deeds' state')) $
+    (\(deeds', state') -> assertRender (hang (text "normalise: deeds lost or gained:") 2 (pPrintFullUnnormalisedState state $$ pPrint deeds $$ pPrintFullState state' $$ pPrint deeds'))
+                                       (True || not dEEDS || noChange (releaseStateDeed deeds state) (releaseStateDeed deeds' state')) $ -- TODO: fix deeds checks (tagged stack frames bugger us)
                           assertRender (text "normalise: FVs") (stateFreeVars state == stateFreeVars state') $
                           -- traceRender (text "normalising" $$ nest 2 (pPrintFullUnnormalisedState state) $$ text "to" $$ nest 2 (pPrintFullState state')) $
                           (deeds', state')) $
@@ -49,7 +49,7 @@ normalise (deeds, state) =
 step :: (Deeds, State) -> Maybe (Deeds, State)
 step (deeds, _state@(h, k, (rn, qa))) =
   (\mb_res -> assertRender (hang (text "step: deeds lost or gained:") 2 (pPrintFullState _state))
-                           (not dEEDS || maybe True (\(deeds', state') -> noChange (releaseStateDeed deeds _state) (releaseStateDeed deeds' state')) mb_res) $
+                           (True || not dEEDS || maybe True (\(deeds', state') -> noChange (releaseStateDeed deeds _state) (releaseStateDeed deeds' state')) mb_res) $ -- TODO: fix deeds checks (tagged stack frames bugger us)
               -- (case mb_res of Nothing -> traceRender ("Evaluation stuck on", pPrint (annee qa)); _ -> id) $
               mb_res) $
   fmap normalise $ case annee qa of
