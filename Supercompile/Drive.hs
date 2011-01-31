@@ -129,8 +129,8 @@ speculate :: ((Deeds, State) -> (SCStats, (Deeds, State)))
 speculate reduce = snd . go (0 :: Int) (mkHistory wQO) (emptyLosers, S.empty)
   where
     go depth hist (losers, speculated) (deeds, state) = case terminate hist state of
-        Continue hist' | sPECULATION -> continue depth hist' (losers, speculated) (deeds, state)
-        _                            -> ((losers, speculated), reduce (deeds, state)) -- It is very important we reduce in this branch, or we never call reduce with --no-speculation turned on!
+        Continue hist' -> continue depth hist' (losers, speculated) (deeds, state)
+        _              -> ((losers, speculated), (mempty, (deeds, state))) -- We MUST NOT EVER reduce in this branch or speculation will loop on e.g. infinite map
     
     continue depth hist (losers, speculated) (deeds, state) = ((losers', speculated'), (stats', (deeds'', (Heap (h'_winners' `M.union` h'_losers) ids'', k, in_e))))
       where
@@ -355,7 +355,7 @@ sc' hist (deeds, state) = (\raise -> check raise) `catchScpM` \gen -> stop gen h
     continue hist = do traceRenderScpM ("reduce end", pPrintFullState state')
                        addStats stats
                        split generaliseNothing (sc hist) (deeds', state')
-      where (stats, (deeds', state')) = second gc (speculate reduce (deeds, state)) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
+      where (stats, (deeds', state')) = second gc ((if sPECULATION then speculate else id) reduce (deeds, state)) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
 
 memo :: ((Deeds, State) -> ScpM (Deeds, Out FVedTerm))
      ->  (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
