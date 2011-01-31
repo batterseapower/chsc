@@ -702,9 +702,9 @@ transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
                                   Nothing    -> trace (render $ text "inline-deeds:" <+> pPrint x') (deeds, M.insert x' hb h_inlineable, Phantom in_e)
                 PhantomLive  -> (deeds, M.insert x' hb h_inlineable, Phantom in_e) -- We want to inline only a *phantom* version if the binding is demanded by phantoms only, or madness ensues
               _              -> (deeds, h_inlineable, hb)
-          , nAIVE_LOCAL_TIEBACKS || (heapBindingNonConcrete inline_hb `implies` heapBindingProbablyValue inline_hb)  -- Heuristic: only inline phantom bindings if they are likely to refer to values
+          , nAIVE_LOCAL_TIEBACKS || heapBindingProbablyValue inline_hb                     -- Heuristic: only inline phantom bindings if they are likely to refer to values
           , (x' `M.notMember` h && (lOCAL_TIEBACKS || heapBindingEnvironmental inline_hb)) -- Be careful: even if we don't want local tiebacks, we don't want to abstract over free variables of the input
-            || not (heapBindingNonConcrete inline_hb)                                      -- The Hack: only inline stuff from h *concretely*
+            || not (heapBindingPhantom inline_hb)                                          -- The Hack: only inline stuff from h *concretely*
           -- , traceRender ("Extra liveness from", pPrint inline_hb, "is", heapBindingLiveness inline_hb) True
           = (deeds, h_inlineable, M.insert x' inline_hb h_output, live `plusLiveness` heapBindingLiveness inline_hb)
           | otherwise

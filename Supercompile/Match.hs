@@ -193,8 +193,8 @@ matchPureHeap ids bound_eqs free_eqs init_h_l init_h_r = go bound_eqs free_eqs i
      -- Phantomish heap bindings (input FVs / things bound by update frames / phantoms) must match *exactly* since we know nothing about them.
      -- Even for cases where we do know something (i.e. Phantom bindings) we can't use that information since by definition we won't be able
      -- to rename any components of those static heap bindings when we tie back...
-    matchHeapBinding x_l (heapBindingNonConcrete -> True) x_r (heapBindingNonConcrete -> True) = guard (x_l == x_r) >> return (id, id, [])
+    matchHeapBinding x_l (heapBindingPhantom -> True) x_r (heapBindingPhantom -> True) = guard (x_l == x_r) >> return (id, id, [])
      -- We can match other possibilities "semantically", by peeking into ther definitions
-    matchHeapBinding x_l (Concrete in_e_l)                x_r (Concrete in_e_r)                = fmap (\extra_free_eqs -> (deleteExpensive x_l in_e_l, deleteExpensive x_r in_e_r, extra_free_eqs)) $ matchInTerm ids in_e_l in_e_r
+    matchHeapBinding x_l (Concrete in_e_l)            x_r (Concrete in_e_r)           = fmap (\extra_free_eqs -> (deleteExpensive x_l in_e_l, deleteExpensive x_r in_e_r, extra_free_eqs)) $ matchInTerm ids in_e_l in_e_r
      -- Environment variables match *only* against themselves, not against anything other heap binding at all
     matchHeapBinding _ _ _ _ = Nothing

@@ -148,9 +148,9 @@ instance Pretty StackFrame where
         Update x'                 -> pPrintPrecApp level prec (text "update") x'
 
 
-heapBindingNonConcrete :: HeapBinding -> Bool
-heapBindingNonConcrete (Concrete _) = False
-heapBindingNonConcrete _            = True
+heapBindingPhantom :: HeapBinding -> Bool
+heapBindingPhantom (Concrete _)  = False
+heapBindingPhantom _             = True
 
 heapBindingEnvironmental :: HeapBinding -> Bool
 heapBindingEnvironmental Environmental = True
