@@ -54,6 +54,7 @@ mkRename rec = (term, alternatives, value, value')
     
     value ids rn = rec (value' ids) rn
     value' ids rn v = case v of
+      Indirect x -> Indirect (rename rn x)
       Lambda x e -> Lambda x' (term ids' rn' e)
         where (ids', rn', x') = renameBinder ids rn x
       Data dc xs -> Data dc (map (rename rn) xs)

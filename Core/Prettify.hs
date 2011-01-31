@@ -33,10 +33,9 @@ prettifyTerm ids inline (rn, e) = second fvedTerm $ prettifyTerm' ids inline (rn
 
 prettifyTerm' :: IdSupply -> InlineEnv -> In (TermF FVed) -> (OccursEnv, Out (TermF FVed))
 prettifyTerm' ids inline (rn, e) = case e of
-    Var x -> (M.singleton x' Once, case M.lookup x' inline of Just e' -> fvee e'; Nothing -> Var x') -- I *think* the substitution is OK, because in the pre-pass my Id threading ensures there is no shadowing
-      where x' = rename rn x
-    Value v -> (occurs, Value v')
-      where (occurs, v') = prettifyValue' ids inline (rn, v)
+    Var x -> prettifyVar inline (rn, x)
+    Value v -> (occurs, e')
+      where (occurs, e') = prettifyValue' ids inline (rn, v)
     App e x -> (M.insertWith join x' Many occurs, App e' x')
       where x' = rename rn x
             (occurs, e') = prettifyTerm ids inline (rn, e)
@@ -56,14 +55,19 @@ prettifyTerm' ids inline (rn, e) = case e of
             -- Inline those bindings that occurred syntactically exactly once (or were dead):
             (xes'_inline, xes'_leave) = partition (\(x', _e') -> maybe True (== Once) (x' `M.lookup` occurs')) (xs' `zip` es')
 
-prettifyValue' :: IdSupply -> InlineEnv -> In (ValueF FVed) -> (OccursEnv, Out (ValueF FVed))
+prettifyVar :: InlineEnv -> In Var -> (OccursEnv, Out (TermF FVed))
+prettifyVar inline (rn, x) = (M.singleton x' Once, case M.lookup x' inline of Just e' -> fvee e'; Nothing -> Var x') -- I *think* the substitution is OK, because in the pre-pass my Id threading ensures there is no shadowing
+  where x' = rename rn x
+
+prettifyValue' :: IdSupply -> InlineEnv -> In (ValueF FVed) -> (OccursEnv, Out (TermF FVed))
 prettifyValue' ids inline (rn, v) = case v of
-    Lambda x e -> (M.delete x' occurs, Lambda x' e')
+    Indirect x -> prettifyVar inline (rn, x)
+    Lambda x e -> (M.delete x' occurs, Value (Lambda x' e'))
       where (ids', rn', x') = renameBinder ids rn x
             (occurs, e') = prettifyTerm ids' (M.delete x' inline) (rn', e)
-    Data dc xs -> (listToMap Many xs', Data dc xs')
+    Data dc xs -> (listToMap Many xs', Value (Data dc xs'))
       where xs' = map (rename rn) xs
-    Literal l  -> (M.empty, Literal l)
+    Literal l  -> (M.empty, Value (Literal l))
 
 prettifyAlt :: IdSupply -> InlineEnv -> In (AltF FVed) -> (OccursEnv, Out (AltF FVed))
 prettifyAlt ids inline (rn, (alt_con, e)) = (bndrs' `deleteListMap` occurs, (alt_con', e'))

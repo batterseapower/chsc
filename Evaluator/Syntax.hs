@@ -99,10 +99,10 @@ denormalise :: State -> UnnormalisedState
 denormalise (h, k, (rn, qa)) = (h, k, (rn, fmap qaToAnnedTerm' qa))
 
 -- | We do not abstract the h functions over static variables. This helps typechecking and gives GHC a chance to inline the definitions.
-data HeapBinding = Environmental           -- ^ Corresponding variable is static and free in the original input, or the name of a h-function. No need to generalise either of these (remember that h-functions don't appear in the input).
-                 | Updated Tag FreeVars    -- ^ Variable is bound by a residualised update frame. TODO: this is smelly and should really be Phantom.
-                 | Phantom (In AnnedTerm)  -- ^ Corresponding variable is static static and generated from residualising a term in the splitter. Can use the term information to generalise these.
-                 | Concrete (In AnnedTerm) -- ^ A genuine heap binding that we are actually allowed to look at.
+data HeapBinding = Environmental                     -- ^ Corresponding variable is static and free in the original input, or the name of a h-function. No need to generalise either of these (remember that h-functions don't appear in the input).
+                 | Updated Tag FreeVars              -- ^ Variable is bound by a residualised update frame. TODO: this is smelly and should really be Phantom.
+                 | Phantom (In AnnedTerm)            -- ^ Corresponding variable is static static and generated from residualising a term in the splitter. Can use the term information to generalise these.
+                 | Concrete (In AnnedTerm)           -- ^ A genuine heap binding that we are actually allowed to look at.
                  deriving (Show)
 type PureHeap = M.Map (Out Var) HeapBinding
 data Heap = Heap PureHeap IdSupply

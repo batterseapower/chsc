@@ -149,3 +149,7 @@ cALL_BY_NAME = "--call-by-name" `elem` unsafePerformIO getArgs
 {-# NOINLINE pRETTIFY #-}
 pRETTIFY :: Bool
 pRETTIFY = "--prettify" `elem` unsafePerformIO getArgs
+
+{-# NOINLINE dUPLICATE_VALUES #-}
+dUPLICATE_VALUES :: Bool
+dUPLICATE_VALUES = "--duplicate-values" `elem` unsafePerformIO getArgs

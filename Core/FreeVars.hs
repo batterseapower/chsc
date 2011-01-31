@@ -41,6 +41,7 @@ mkFreeVars rec = (var', term, term', alternatives, value, value')
       where (xs, es) = unzip xes
     
     value = rec value'
+    value' (Indirect x) = S.singleton x
     value' (Lambda x e) = S.delete x $ term e
     value' (Data _ xs)  = S.fromList xs
     value' (Literal _)  = S.empty
