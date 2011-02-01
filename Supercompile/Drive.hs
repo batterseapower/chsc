@@ -134,7 +134,7 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) (emptyLosers, S.empty)
     
     continue depth hist (losers, speculated) (deeds, state) = ((losers', speculated'), (stats', (deeds'', (Heap (h'_winners' `M.union` h'_losers) ids'', k, in_e))))
       where
-        (stats, (deeds', (Heap h' ids', k, in_e))) = reduce (deeds, state)
+        (stats, (deeds', _state'@(Heap h' ids', k, in_e))) = reduce (deeds, state)
         
         -- Note [Controlling speculation]
         -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -182,9 +182,41 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) (emptyLosers, S.empty)
                 -- Update frames present in the output indicate a failed speculation attempt. (Though if a var is the focus without an update frame yet that is also failure of a sort...)
                 -- We restore the original input bindings for such variables. We will also add them to the speculated set so we don't bother looking again. Note that this might make some heap
                 -- bindings dead (because they are referred to by the overwritten terms), but we'll just live with that and have the GC clean it up later (pessimising deeds a bit, but never mind).
+                --
+                -- More seriously, one of the update frames could be for a heap binding not present in the h'_winners. If anything in the new heap h' might refer to that, we have to be careful.
+                -- One case is that that heap binding is referred to only by bindings that are made dead by the restoration - consider:
+                --
+                --  x |-> let y = ... z ...; z = unk in case z of ...
+                --
+                -- Speculating x will fail (blocked on unk) with update frames for x and z on the stack. We can't restore the z binding here, because it wasn't in the input heap, but the output
+                -- heap will contain a y binding that refers to z. This is (just barely) OK because those new unbound FVs wont ACTUALLY be reachable. When we roll back to the original x RHS the
+                -- y binding will just become dead.
+                --
+                -- However, this isn't OK:
+                --
+                --  xs |-> let ys = e in 1 : ys
+                --  foo |-> last xs
+                --
+                -- Let's speculate foo:
+                --
+                --  xs |-> 1 : ys
+                --  ys |-> e
+                --  foo |-> last ys
+                --
+                -- Let's say we stop before evalutating e further, with update frames for foo and ys present. We can restore the original foo binding, but that will leave xs with a dangling
+                -- reference to the ys binding that we couldn't restore. Argh!
+                --
+                -- What I do in this situation (failed_restore non-null) is to "agressively" roll back, discarding work done by the nested reduce and any things it added to the speculated set.
+                -- Hopefully this case won't hit too often so it won't slow speculation down. (In fact, I think it only hits on the SimpleLaziness toy benchmark).
+                -- 
+                -- TODO: this is all very nasty
                 spec_failed_xs = S.fromList [x' | Update x' <- map tagee k]
                 h_restore = h'_winners `restrict` spec_failed_xs
-          = (stats `mappend` stats', deeds', Heap (h_restore `M.union` h') ids', IS.fromList [tg | hb <- M.elems h_restore, Just tg <- [heapBindingTag_ hb]] `IS.union` losers', spec_failed_xs `S.union` speculated')
+                failed_restore = spec_failed_xs S.\\ M.keysSet h_restore
+          -- , S.null failed_restore || trace (show (pPrint (x', failed_restore, spec_failed_xs, pPrintFullState _state', pPrintHeap (Heap h' ids'), pPrintHeap $ Heap h'_winners ids'))) True
+          = if S.null failed_restore
+            then (stats `mappend` stats', deeds', Heap (h_restore `M.union` h') ids', IS.fromList [tg | hb <- M.elems h_restore, Just tg <- [heapBindingTag_ hb]] `IS.union` losers', spec_failed_xs `S.union` speculated')
+            else (stats `mappend` stats', deeds,  Heap h'_winners ids, losers', S.insert x' speculated)
           | otherwise
           = (stats, deeds, Heap h'_winners ids, losers, speculated)
 

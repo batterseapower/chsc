@@ -1,5 +1,5 @@
 {-# LANGUAGE ViewPatterns, TupleSections #-}
-module Evaluator.Residualise (pPrintFullState, pPrintFullUnnormalisedState) where
+module Evaluator.Residualise (pPrintHeap, pPrintFullState, pPrintFullUnnormalisedState) where
 
 import Evaluator.Syntax
 
@@ -41,6 +41,10 @@ residualiseStackFrame ids (Scrutinise in_alts)      e  = (([], []), case_ e (det
 residualiseStackFrame ids (PrimApply pop in_vs es') e  = (([], []), primOp pop (map (value . fvee . detagAnnedValue . renameIn (renameAnnedValue ids)) in_vs ++ e : map (residualiseTerm ids) es'))
 residualiseStackFrame _   (Update x')               e  = (([], [(x', e)]), var x')
 
+
+pPrintHeap :: Heap -> Doc
+pPrintHeap (Heap h ids) = pPrint $ floats_static_h ++ [(x, pPrint e) | (x, e) <- floats_nonstatic_h]
+  where (floats_static_h, floats_nonstatic_h) = residualisePureHeap ids h
 
 pPrintFullState :: State -> Doc
 pPrintFullState = pPrintFullUnnormalisedState . denormalise
