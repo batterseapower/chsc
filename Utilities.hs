@@ -514,6 +514,10 @@ dropBy :: [b] -> [a] -> [a]
 dropBy bs = snd . splitBy bs
 
 
+dropLastWhile :: (a -> Bool) -> [a] -> [a]
+dropLastWhile p = reverse . dropWhile p . reverse
+
+
 orElse :: Maybe a -> a -> a
 orElse = flip fromMaybe
 

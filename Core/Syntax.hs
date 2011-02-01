@@ -282,6 +282,9 @@ letRecSmart :: Symantics ann => [(Var, ann (TermF ann))] -> ann (TermF ann) -> a
 letRecSmart []  = id
 letRecSmart xes = letRec xes
 
+strictLet :: Symantics ann => Var -> ann (TermF ann) -> ann (TermF ann) -> ann (TermF ann)
+strictLet x e1 e2 = case_ e1 [(DefaultAlt (Just x), e2)]
+
 collectLambdas :: Term -> ([Var], Term)
 collectLambdas (I (Value (Lambda x e))) = first (x:) $ collectLambdas e
 collectLambdas e                        = ([], e)

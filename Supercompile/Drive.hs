@@ -243,10 +243,10 @@ reduce (deeds, orig_state) = go (mkHistory (extra wQO)) (deeds, orig_state)
 -- == The drive loop ==
 --
 
-data Promise = P {
-    fun        :: Var,             -- Name assigned in output program
-    abstracted :: [Out Var],       -- Abstracted over these variables
-    meaning    :: State            -- Minimum adequate term
+data Promise f = P {
+    fun        :: Var,         -- Name assigned in output program
+    abstracted :: [Out Var],   -- Abstracted over these variables
+    meaning    :: f State      -- Minimum adequate term. Nothing if this promise has been superceded by one with less free variables (this will only occur in the fulfilments)
   }
 
 instance MonadStatics ScpM where
@@ -316,35 +316,76 @@ partitionFulfilments p combine = go
 bindFloats :: (a -> [Fulfilment] -> ([Fulfilment], [Fulfilment]))
            -> ScpM a -> ScpM (Out [(Var, FVedTerm)], a)
 bindFloats partition_floats mx
-  = ScpM $ \e s k -> unScpM mx (e { promises = map fst (fulfilments s) ++ promises e }) (s { fulfilments = [] })
+  = ScpM $ \e s k -> unScpM mx (e { promises = mapMaybe fulfilmentPromise (fulfilments s) ++ promises e }) (s { fulfilments = [] })
                                (\x (s'@(ScpState { fulfilments = (partition_floats x -> (fs_now, fs_later)) })) -> -- traceRender ("bindFloats", [(fun p, fvedTermFreeVars e) | (p, e) <- fs_now], [(fun p, fvedTermFreeVars e) | (p, e) <- fs_later]) $
-                                                                                                                   k (sortBy (comparing ((read :: String -> Int) . drop 1 . name_string . fst)) [(fun p, e') | (p, e') <- fs_now], x)
+                                                                                                                   k (sortBy (comparing ((read :: String -> Int) . dropLastWhile (== '\'') . drop 1 . name_string . fst)) [(fun p, e') | (p, e') <- fs_now], x)
                                                                                                                      (s' { fulfilments = fs_later ++ fulfilments s }))
 
 freshHName :: ScpM Var
 freshHName = ScpM $ \_e s k -> k (expectHead "freshHName" (names s)) (s { names = tail (names s) })
 
-getPromises :: ScpM [Promise]
-getPromises = ScpM $ \e s k -> k (promises e ++ map fst (fulfilments s)) s
+fulfilmentPromise :: Fulfilment -> Maybe (Promise Identity)
+fulfilmentPromise (P fun abstracted (Just meaning), _) = Just (P fun abstracted (I meaning))
+fulfilmentPromise _                                    = Nothing
 
-promise :: Promise -> ScpM (a, Out FVedTerm) -> ScpM (a, Out FVedTerm)
+getPromises :: ScpM [Promise Identity]
+getPromises = ScpM $ \e s k -> k (promises e ++ mapMaybe fulfilmentPromise (fulfilments s)) s
+
+getPromiseNames :: ScpM [Var]
+getPromiseNames = ScpM $ \e s k -> k (map fun (promises e) ++ [fun p | (p, _) <- fulfilments s]) s
+
+promise :: Promise Identity -> ScpM (a, Out FVedTerm) -> ScpM (a, Out FVedTerm)
 promise p opt = ScpM $ \e s k -> {- traceRender ("promise", fun p, abstracted p) $ -} unScpM (mx p) (e { promises = p : promises e, depth = 1 + depth e }) s k
   where
     mx p = do
       (a, e') <- opt
-      ScpM $ \_e s k -> k () (s { fulfilments = (p, lambdas (abstracted p) e') : fulfilments s })
+      -- We have a little trick here: we can reduce the number of free variables our "h" functions abstract over if we discover that after supercompilation some
+      -- variables become dead. This lets us get some of the good stuff from absence analysis: we can actually reduce the number of loop-carried vars like this.
+      -- It is particularly important to do this trick when we have unfoldings, because functions get a ton more free variables in that case.
+      --
+      -- If some of the fufilments we have already generated refer to us, we need to fix them up because their application sites will apply more arguments than we
+      -- actually need. We aren't able to do anything about the stuff they spuriously allocate as a result, but we can make generate a little wrapper that just discards
+      -- those arguments. With luck, GHC will inline it and good things will happen.
+      let fvs' = fvedTermFreeVars e'
+          abstracted_set = S.fromList (abstracted p)
+          abstracted'_set = fvs' `S.intersection` abstracted_set -- We still don't want to abstract over e.g. phantom bindings
+          abstracted'_list = S.toList abstracted'_set
+      ScpM $ \_e s k -> let refers_to_me e' = fun p `S.member` fvedTermFreeVars e'
+                            (fs_refer_to_me, fs_dont_refer_to_me) = partition (\(_, e') -> refers_to_me e') (fulfilments s)
+                            self_refers = refers_to_me e'
+                            fs' | abstracted_set == abstracted'_set || not rEFINE_FULFILMENT_FVS
+                                 -- If the free variables are totally unchanged, there is nothing to be gained from clever fiddling
+                                = (P { fun = fun p, abstracted = abstracted p, meaning = Just (unI (meaning p)) }, lambdas (abstracted p) e') : fulfilments s
+                                | otherwise
+                                 -- If the free variable set has got smaller, we can fulfill our old promise with a simple wrapper around a new one with fewer free variables
+                                , let fun' = (fun p) { name_string = name_string (fun p) ++ "'" }
+                                = (P { fun = fun p, abstracted = abstracted p, meaning = Nothing }, lambdas (abstracted p) (fvedTerm (Var fun') `apps` abstracted'_list)) :
+                                  (P { fun = fun', abstracted = abstracted'_list, meaning = Just (unI (meaning p)) }, lambdas abstracted'_list e') : fulfilments s
+                            
+                            
+                            -- fs' | abstracted_set == abstracted'_set
+                            --      -- If the free variables are totally unchanged, there is nothing to be gained from clever fiddling
+                            --     = (p, lambdas (abstracted p) e') : fulfilments s
+                            --     | [] <- fs_refer_to_me, not self_refers
+                            --      -- In the non-recursive case where noone else yet refers to this tieback, we can simply change the set we abstract over
+                            --     = (p { abstracted = abstracted'_list }, lambdas abstracted'_list e') : fs_dont_refer_to_me
+                            --     | otherwise
+                            --      -- In the recursive case where some other fulfilment (or me) refers to this tieback, we must wrap that tieback with an adapter: we use a case to bind it non-recursively
+                            --     , let wrap = strictLet (fun p) (lambdas (abstracted p) (fvedTerm (Var (fun p)) `apps` abstracted'_list))
+                            --     = (p { abstracted = abstracted'_list }, (if self_refers then wrap else id) $ lambdas abstracted'_list e') : map (second wrap) fs_refer_to_me ++ fs_dont_refer_to_me
+                        in k () (s { fulfilments = fs' })
       
-      let fvs' = fvedTermFreeVars e' in fmap (((S.fromList (abstracted p) `S.union` stateStaticBinders (meaning p)) `S.union`) . S.fromList . map fun) getPromises >>= \fvs -> assertRender ("sc: FVs", fun p, fvs' S.\\ fvs, fvs, e') (fvs' `S.isSubsetOf` fvs) $ return ()
+      fmap (((S.fromList (abstracted p) `S.union` stateStaticBinders (unI (meaning p))) `S.union`) . S.fromList) getPromiseNames >>= \fvs -> assertRender ("sc: FVs", fun p, fvs' S.\\ fvs, fvs, e') (fvs' `S.isSubsetOf` fvs) $ return ()
       
       return (a, fun p `varApps` abstracted p)
 
 
 data ScpEnv = ScpEnv {
-    promises :: [Promise],
+    promises :: [Promise Identity],
     depth :: Int
   }
 
-type Fulfilment = (Promise, Out FVedTerm)
+type Fulfilment = (Promise Maybe, Out FVedTerm)
 
 data ScpState = ScpState {
     names       :: [Var],
@@ -405,8 +446,9 @@ memo opt (deeds, state) = do
     case [ (p, (releaseStateDeed deeds state, fun p `varApps` tb_dynamic_vs))
          | p <- ps
          , Just rn_lr <- [-- (\res -> if isNothing res then traceRender ("no match:", fun p) res else res) $
-                           match (meaning p) state]
-         , let bad_renames = S.fromList (abstracted p) `symmetricDifference` M.keysSet (unRenaming rn_lr) in assertRender (text "Renaming was inexhaustive or too exhaustive:" <+> pPrint bad_renames $$ pPrint rn_lr $$ pPrintFullState state) (S.null bad_renames) True
+                           match (unI (meaning p)) state]
+          -- NB: because I can trim reduce the set of things abstracted over above, it's OK if the renaming derived from the meanings renames vars that aren't in the abstracted list, but NOT vice-versa
+         , let bad_renames = S.fromList (abstracted p) S.\\ M.keysSet (unRenaming rn_lr) in assertRender (text "Renaming was inexhaustive:" <+> pPrint bad_renames $$ pPrint rn_lr $$ pPrintFullState state) (S.null bad_renames) True
          , let rn_fvs = map (safeRename ("tieback: FVs for " ++ render (pPrint (fun p) $$ text "Us:" $$ pPrint state $$ text "Them:" $$ pPrint (meaning p)))
                                         rn_lr) -- NB: If tb contains a dead PureHeap binding (hopefully impossible) then it may have a free variable that I can't rename, so "rename" will cause an error. Not observed in practice yet.
                tb_dynamic_vs = rn_fvs (abstracted p)
@@ -419,7 +461,7 @@ memo opt (deeds, state) = do
         
         -- NB: promises are lexically scoped because they may refer to FVs
         x <- freshHName
-        promise P { fun = x, abstracted = S.toList (vs S.\\ static_vs), meaning = state } $ do
+        promise P { fun = x, abstracted = S.toList (vs S.\\ static_vs), meaning = I state } $ do
             traceRenderScpM (">sc", x, pPrintFullState state, deeds)
             res <- opt (deeds, case state of (Heap h ids, k, in_e) -> (Heap (M.insert x Environmental h) ids, k, in_e)) -- TODO: should I just put "h" functions into a different set of statics??
             traceRenderScpM ("<sc", x, pPrintFullState state, res)
