@@ -196,10 +196,6 @@ isCheap _           = False
 termIsCheap :: Term -> Bool
 termIsCheap = isCheap . unI
 
-isExplicitLambda :: ValueF ann -> Bool
-isExplicitLambda (Lambda _ _) = True
-isExplicitLambda _            = False
-
 
 -- NB: this group of bindings requires NoMonomorphismRestriction
 termSize :: Foldable.Foldable ann => ann (TermF ann) -> Int
