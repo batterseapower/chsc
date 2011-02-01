@@ -13,6 +13,10 @@ VANILLA_OPTS="raw --no-primops --no-deeds --tag-collection=bags --no-generalisat
 
 ./test-all ${VANILLA_OPTS/--no-generalisation/} | tee results-generalisation.tex
 
+./test-all ${VANILLA_OPTS/--duplicate-values-evaluator/} | tee results-no-duplicate-values-evaluator.tex
+./test-all ${VANILLA_OPTS/--duplicate-values-splitter/} | tee results-no-duplicate-values-splitter.tex
+./test-all ${VANILLA_OPTS/--duplicate-values-evaluator --duplicate-values-splitter/} | tee results-no-duplicate-values.tex
+
 #
 
 ./test-all ${VANILLA_OPTS/--no-reduce-rollback/} | tee results-reduce-rollback.tex
