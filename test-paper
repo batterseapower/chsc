@@ -13,9 +13,13 @@ VANILLA_OPTS="raw --no-primops --no-deeds --tag-collection=bags --no-generalisat
 
 ./test-all ${VANILLA_OPTS/--no-generalisation/} | tee results-generalisation.tex
 
+REFINE_OPTS=${VANILLA_OPTS/--no-refine-fulfilment-fvs/}
+./test-all $REFINE_OPTS | tee results-refine-fulfilment-fvs.tex
+
 ./test-all ${VANILLA_OPTS/--duplicate-values-evaluator/} | tee results-no-duplicate-values-evaluator.tex
 ./test-all ${VANILLA_OPTS/--duplicate-values-splitter/} | tee results-no-duplicate-values-splitter.tex
 ./test-all ${VANILLA_OPTS/--duplicate-values-evaluator --duplicate-values-splitter/} | tee results-no-duplicate-values.tex
+./test-all ${REFINE_OPTS/--duplicate-values-evaluator --duplicate-values-splitter/} | tee results-refine-fulfilment-fvs+no-duplicate-values.tex
 
 #
 
