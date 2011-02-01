@@ -59,7 +59,7 @@ step (deeds, _state@(h, k, (rn, qa))) =
       
     force :: Deeds -> Heap -> Stack -> Tag -> Out Var -> Maybe (Deeds, UnnormalisedState)
     force deeds (Heap h ids) k tg x'
-            = do { in_v <- lookupValue (Heap h ids) x'; unwind True deeds (Heap h ids) k tg in_v }
+            = do { _ <- lookupValue (Heap h ids) x'; unwind True deeds (Heap h ids) k tg (mkIdentityRenaming [x'], Indirect x') }
       `mplus` do { Concrete in_e <- M.lookup x' h; return (deeds, (Heap (M.delete x' h) ids, Tagged tg (Update x') : k, in_e)) }
 
 lookupValue :: Heap -> Out Var -> Maybe (In AnnedValue)
