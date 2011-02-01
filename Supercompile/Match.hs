@@ -5,12 +5,14 @@ module Supercompile.Match (match) where
 import Core.Renaming
 import Core.Syntax
 
+import Evaluator.FreeVars (pureHeapBinders)
 import Evaluator.Syntax
 
 import Renaming
 import Utilities
 
 import qualified Data.Map as M
+import qualified Data.Set as S
 
 
 match :: State -- ^ Tieback semantics
@@ -145,11 +147,13 @@ matchPureHeapExact ids bound_eqs free_eqs init_h_l init_h_r = do
     --    (I think this reason is now redundant, but actually we still need to make sure that we only output equalities
     --     on *free variables* of the two heaps, not any bound members).
     --    NB: Because some variables may be bound by update frames in the stack, we need to filter out those too...
+    let init_h_l_binders = pureHeapBinders init_h_l -- We do NOT want to exclude renamings for unfolding binders!
     eqs <- --traceRender ("matchPureHeapExact", eqs, bound_eqs, init_h_l, init_h_r) $
-           return $ filter (\(x_l, _x_r) -> x_l `M.notMember` init_h_l && all ((/= x_l) . fst) bound_eqs) eqs
+           return $ filter (\(x_l, _x_r) -> x_l `S.notMember` init_h_l_binders && all ((/= x_l) . fst) bound_eqs) eqs
     -- 3) Now the problem is that there might be some bindings in the Right heap that are referred
     --    to by eqs. We want an exact match, so we can't allow that.
-    guard $ all (\(_x_l, x_r) -> x_r `M.notMember` init_h_r && all ((/= x_r) . snd) bound_eqs) eqs
+    let init_h_r_binders = pureHeapBinders init_h_r -- Ditto: be careful of unfoldings
+    guard $ all (\(_x_l, x_r) -> x_r `S.notMember` init_h_r_binders && all ((/= x_r) . snd) bound_eqs) eqs
     -- 4) We now know that all of the variables bound by both init_h_l and init_h_r are not mentioned
     --    in the outgoing equalities, which is what we want for an exact match.
     --     NB: We use this function when matching letrecs, so don't necessarily want to build a renaming immediately

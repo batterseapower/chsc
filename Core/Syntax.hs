@@ -183,8 +183,8 @@ isValue _         = False
 termIsValue :: Copointed ann => ann (TermF ann) -> Bool
 termIsValue = isJust . termToValue
 
-termToValue :: Copointed ann => ann (TermF ann) -> Maybe (ValueF ann)
-termToValue e = case extract e of Value v -> Just v; _ -> Nothing
+termToValue :: Copointed ann => ann (TermF ann) -> Maybe (ann (ValueF ann))
+termToValue e = case extract e of Value v -> Just (fmap (const v) e); _ -> Nothing
 
 isCheap :: Copointed ann => TermF ann -> Bool
 isCheap _ | cALL_BY_NAME = True -- A cunning hack. I think this is all that should be required...
@@ -195,6 +195,10 @@ isCheap _           = False
 
 termIsCheap :: Term -> Bool
 termIsCheap = isCheap . unI
+
+isExplicitLambda :: ValueF ann -> Bool
+isExplicitLambda (Lambda _ _) = True
+isExplicitLambda _            = False
 
 
 -- NB: this group of bindings requires NoMonomorphismRestriction

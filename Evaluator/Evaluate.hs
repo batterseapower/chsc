@@ -66,7 +66,7 @@ lookupValue :: Heap -> Out Var -> Maybe (In AnnedValue)
 lookupValue (Heap h _) x' = do
     hb <- M.lookup x' h
     case hb of
-      Concrete  (rn, anned_e) -> fmap ((,) rn) $ termToValue anned_e
+      Concrete  (rn, anned_e) -> fmap ((rn,) . annee) $ termToValue anned_e
       Unfolding (rn, anned_v) -> Just (rn, annee anned_v)
       _                       -> Nothing
 

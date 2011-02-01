@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, PatternGuards #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, PatternGuards, NoMonoPatBinds #-}
 module Evaluator.FreeVars (
     WhyLive(..), Liveness,
     emptyLiveness, plusLiveness, plusLivenesses,
@@ -7,7 +7,7 @@ module Evaluator.FreeVars (
     inFreeVars,
     heapBindingReferences, heapBindingLiveness,
     pureHeapBoundVars, stackBoundVars, stackFrameBoundVars,
-    stateLiveness, stateFreeVars, stateStaticBinders, stateStaticBindersAndFreeVars
+    stateLiveness, stateFreeVars, stateStaticBinders, stateStaticBindersAndFreeVars, pureHeapBinders
   ) where
 
 import Core.Syntax
@@ -99,10 +99,10 @@ stateStaticBinders = fst . stateStaticBindersAndFreeVars
 -- | Returns the free variables that the state would have if it were residualised right now (i.e. excludes static binders),
 -- along with the static binders as a separate set.
 stateStaticBindersAndFreeVars :: (Heap, Stack, In (Anned a)) -> (BoundVars, FreeVars)
-stateStaticBindersAndFreeVars (Heap h _, k, in_e) = (bvs_static', fvs' S.\\ bvs_nonstatic')
+pureHeapBinders :: PureHeap -> BoundVars
+(stateStaticBindersAndFreeVars, pureHeapBinders) = (\(Heap h _, k, in_e) -> case pureHeapOpenFreeVars h (stackOpenFreeVars k (inFreeVars annedFreeVars in_e)) of ((bvs_static', bvs_nonstatic'), fvs') -> (bvs_static', fvs' S.\\ bvs_nonstatic'),
+                                                    \h -> case pureHeapOpenFreeVars h (S.empty, S.empty) of ((bvs_static', bvs_nonstatic'), _fvs') -> bvs_static' `S.union` bvs_nonstatic')
   where
-    ((bvs_static', bvs_nonstatic'), fvs') = pureHeapOpenFreeVars h (stackOpenFreeVars k (inFreeVars annedFreeVars in_e))
-    
     pureHeapOpenFreeVars :: PureHeap -> (BoundVars, FreeVars) -> ((BoundVars, BoundVars), FreeVars)
     pureHeapOpenFreeVars h (bvs, fvs) = (\f -> M.foldrWithKey f ((S.empty, bvs), fvs) h) $ \x' hb ((bvs_static, bvs_nonstatic), fvs) -> case hb of
         Concrete in_e  -> ((bvs_static,             S.insert x' bvs_nonstatic), fvs `S.union` inFreeVars annedTermFreeVars in_e)
