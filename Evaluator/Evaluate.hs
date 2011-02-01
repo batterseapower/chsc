@@ -141,5 +141,5 @@ unwind do_updates deeds h k tg_v in_v = uncons k >>= \(kf, k) -> let deeds' = re
     update deeds (Heap h ids) k tg_v x' (rn, v) = case claimDeed deeds tg_v of
         Nothing      -> trace (render (text "update-deeds:" <+> pPrint x')) Nothing
         Just deeds'' ->                                                     Just (deeds'', (Heap (M.insert x' (Concrete (rn, annedTerm tg_v (Value v))) h) ids, k, in_e))
-          where in_e | dUPLICATE_VALUES = (rn,                      annedTerm tg_v (Value v))
-                     | otherwise        = (mkIdentityRenaming [x'], annedTerm tg_v (Value (Indirect x'))) -- FIXME: this is claiming too many deeds in the case that v is a lambda. Ideally we would just reuse the deed gained from stack frame release
+          where in_e | dUPLICATE_VALUES_EVALUATOR = (rn,                      annedTerm tg_v (Value v))
+                     | otherwise                  = (mkIdentityRenaming [x'], annedTerm tg_v (Value (Indirect x'))) -- FIXME: this is claiming too many deeds in the case that v is a lambda. Ideally we would just reuse the deed gained from stack frame release

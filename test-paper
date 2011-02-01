@@ -2,7 +2,7 @@
 #
 
 # The options that we should use to make the supercompiler as close as possible to the SbE paper
-VANILLA_OPTS="raw --no-primops --no-deeds --tag-collection=bags --no-generalisation --cheapification --no-speculation --no-local-tiebacks --no-reduce-rollback --no-sc-rollback --duplicate-values"
+VANILLA_OPTS="raw --no-primops --no-deeds --tag-collection=bags --no-generalisation --cheapification --no-speculation --no-local-tiebacks --no-reduce-rollback --no-sc-rollback --duplicate-values-evaluator --duplicate-values-splitter"
 
 ./test-all ghc > results-ghc.tex
 

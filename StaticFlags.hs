@@ -150,6 +150,8 @@ cALL_BY_NAME = "--call-by-name" `elem` unsafePerformIO getArgs
 pRETTIFY :: Bool
 pRETTIFY = "--prettify" `elem` unsafePerformIO getArgs
 
-{-# NOINLINE dUPLICATE_VALUES #-}
-dUPLICATE_VALUES :: Bool
-dUPLICATE_VALUES = "--duplicate-values" `elem` unsafePerformIO getArgs
+{-# NOINLINE dUPLICATE_VALUES_EVALUATOR #-}
+{-# NOINLINE dUPLICATE_VALUES_SPLITTER #-}
+dUPLICATE_VALUES_EVALUATOR, dUPLICATE_VALUES_SPLITTER :: Bool
+dUPLICATE_VALUES_EVALUATOR = "--duplicate-values-evaluator" `elem` unsafePerformIO getArgs
+dUPLICATE_VALUES_SPLITTER = "--duplicate-values-splitter" `elem` unsafePerformIO getArgs
