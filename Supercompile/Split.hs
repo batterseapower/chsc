@@ -601,9 +601,10 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
     -- Used within the main loop in the process of computing h_inlineable -- see comments there for the full meaning of this stuff.
     extract_cheap_hb (Concrete (rn, e))  | not dUPLICATE_VALUES_SPLITTER, Just v <- termToValue e, representWithUnfolding (annee v) = Just (Unfolding (rn, v))
                                          | otherwise                                                                                = guard (isCheap (annee e)) >> Just (Concrete (rn, e)) -- TODO: this is a remaining source of duplicated allocation
-      where representWithUnfolding (Lambda _ _) = False -- Heuristic: only lambda-abstract over the bindings of let-bound *data*, not lambdas
-            representWithUnfolding (Data _ [])  = False -- Heuristic: GHC will actually statically allocate data with no arguments (this also has the side effect of preventing tons of type errors due to [] getting shared)
-            representWithUnfolding _            = True
+      where representWithUnfolding (Lambda _ _) = uNFOLD_LAMBDAS -- Heuristic: only lambda-abstract over the bindings of let-bound *data*, not lambdas
+            representWithUnfolding (Data _ xs)  = not (null xs)  -- Heuristic: GHC will actually statically allocate data with no arguments (this also has the side effect of preventing tons of type errors due to [] getting shared)
+            representWithUnfolding (Literal _)  = uNFOLD_LITERALS
+            representWithUnfolding (Indirect _) = False
     extract_cheap_hb (Unfolding (rn, v)) = Just (Unfolding (rn, v))
     extract_cheap_hb hb                  = Just hb -- Inline phantom stuff verbatim: there is no work duplication issue
     h_cheap_and_phantom = M.mapMaybe extract_cheap_hb h

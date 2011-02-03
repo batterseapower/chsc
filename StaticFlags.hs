@@ -159,3 +159,11 @@ dUPLICATE_VALUES_SPLITTER = "--duplicate-values-splitter" `elem` unsafePerformIO
 {-# NOINLINE rEFINE_FULFILMENT_FVS #-}
 rEFINE_FULFILMENT_FVS :: Bool
 rEFINE_FULFILMENT_FVS = not $ "--no-refine-fulfilment-fvs" `elem` unsafePerformIO getArgs
+
+{-# NOINLINE uNFOLD_LAMBDAS #-}
+uNFOLD_LAMBDAS :: Bool
+uNFOLD_LAMBDAS = "--unfold-lambdas" `elem` unsafePerformIO getArgs
+
+{-# NOINLINE uNFOLD_LITERALS #-}
+uNFOLD_LITERALS :: Bool
+uNFOLD_LITERALS = not $ "--no-unfold-literals" `elem` unsafePerformIO getArgs
