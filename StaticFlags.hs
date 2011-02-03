@@ -166,4 +166,4 @@ uNFOLD_LAMBDAS = "--unfold-lambdas" `elem` unsafePerformIO getArgs
 
 {-# NOINLINE uNFOLD_LITERALS #-}
 uNFOLD_LITERALS :: Bool
-uNFOLD_LITERALS = not $ "--no-unfold-literals" `elem` unsafePerformIO getArgs
+uNFOLD_LITERALS = "--unfold-literals" `elem` unsafePerformIO getArgs
