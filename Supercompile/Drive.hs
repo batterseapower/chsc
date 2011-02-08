@@ -274,7 +274,21 @@ instance MonadStatics ScpM where
 -- I think this is responsible for the subtle bugs in some of the imaginary suite benchmarks (in particular,
 -- integrate) that I saw on my phantom-lookthrough branches.
 fulfilmentRefersTo :: FreeVars -> Fulfilment -> Maybe (Out Var)
-fulfilmentRefersTo extra_statics (promise, e') = guard (Foldable.any (`S.member` extra_statics) (fvedTermFreeVars e')) >> return (fun promise)
+fulfilmentRefersTo extra_statics (promise, e') = guard (Foldable.any (`S.member` extra_statics) (fvedTermFreeVars e' `S.union` extra_fvs)) >> return (fun promise)
+  where
+    -- If we have phantom lookthrough on, free variables of phantoms might have become free during evaluation.
+    -- As a quick fix, we bind floats with phantoms bindings where those phantom bindings are bound.
+    --
+    -- For wrappers introduced by --refine-fvs, we still need to use (fvedTermFreeVars e') because that will include
+    -- the wrapped h-function (e.g. the h83' wrapper for h83). This also applies (though more rarely) for non-wrappers
+    -- because looking at the fvedTermFreeVars is the only way we can learn about what h-functions they require.
+    --
+    -- TODO: in the future, we might choose to:
+    -- * Lambda abstract over the FVs of phantom bindings if those phantom bindings are dead aftersupercompilation
+    -- * Use the abstraction to continue fulfilments floating up
+    -- * Match such floats phantom bindings structurally (because we will need to rename the FVs of phantom bindings)
+    extra_fvs | pHANTOM_LOOKTHROUGH, Just s <- meaning promise = stateStaticBinders s
+              | otherwise                                      = S.empty
 
 -- Used at the end of supercompilation to extract just those h functions that are actually referred to.
 -- More often than not, this will be *all* the h functions, but if we don't discard h functions on rollback

@@ -156,6 +156,10 @@ dUPLICATE_VALUES_EVALUATOR, dUPLICATE_VALUES_SPLITTER :: Bool
 dUPLICATE_VALUES_EVALUATOR = "--duplicate-values-evaluator" `elem` unsafePerformIO getArgs
 dUPLICATE_VALUES_SPLITTER = "--duplicate-values-splitter" `elem` unsafePerformIO getArgs
 
+{-# NOINLINE pHANTOM_LOOKTHROUGH #-}
+pHANTOM_LOOKTHROUGH :: Bool
+pHANTOM_LOOKTHROUGH = "--phantom-lookthrough" `elem` unsafePerformIO getArgs
+
 {-# NOINLINE rEFINE_FULFILMENT_FVS #-}
 rEFINE_FULFILMENT_FVS :: Bool
 rEFINE_FULFILMENT_FVS = not $ "--no-refine-fulfilment-fvs" `elem` unsafePerformIO getArgs

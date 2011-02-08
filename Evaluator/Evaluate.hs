@@ -26,7 +26,7 @@ normalise :: (Deeds, UnnormalisedState) -> (Deeds, State)
 normalise (deeds, state) =
     (\(deeds', state') -> assertRender (hang (text "normalise: deeds lost or gained:") 2 (pPrintFullUnnormalisedState state $$ pPrint deeds $$ pPrintFullState state' $$ pPrint deeds'))
                                        (True || not dEEDS || noChange (releaseStateDeed deeds state) (releaseStateDeed deeds' state')) $ -- TODO: fix deeds checks (tagged stack frames bugger us)
-                          assertRender (text "normalise: FVs") (stateFreeVars state == stateFreeVars state') $
+                          assertRender (text "normalise: FVs") (pHANTOM_LOOKTHROUGH || (stateFreeVars state == stateFreeVars state')) $
                           -- traceRender (text "normalising" $$ nest 2 (pPrintFullUnnormalisedState state) $$ text "to" $$ nest 2 (pPrintFullState state')) $
                           (deeds', state')) $
     go (deeds, state)
@@ -67,6 +67,8 @@ lookupValue (Heap h _) x' = do
     hb <- M.lookup x' h
     case hb of
       Concrete  (rn, anned_e) -> fmap ((rn,) . annee) $ termToValue anned_e
+      Phantom   (rn, anned_e)
+        | pHANTOM_LOOKTHROUGH -> fmap ((rn,) . annee) $ termToValue anned_e
       Unfolding (rn, anned_v) -> Just (rn, annee anned_v)
       _                       -> Nothing
 

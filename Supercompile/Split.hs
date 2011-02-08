@@ -449,13 +449,19 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
       -- of obtaining the fixed point. That is what we are interested in, not the fixed point itselF!
       -- TODO: eliminate redundant recomputation here?
   where
+    -- Heuristic: represent lambdas as phantoms (we can't do this in the extract_cheap because not_resid_xs needs to be correct so that
+    -- h_residualised contains bindings for all things that we turn into phantoms here. This bit me on e.g. SlowComputation.core. We also
+    -- can't just change gen_xs because that even prevents phantoms from being pushed down!)
+    init_deeds_resid_xs | pHANTOM_LOOKTHROUGH = M.keysSet (M.filter (\hb -> maybe False (\() -> True) $ do { Concrete (rn, e) <- return hb; Lambda _ _ <- fmap annee (termToValue e); return () }) h)
+                        | otherwise           = S.empty
+
     -- We compute the correct way to split as a least fixed point, slowly building up a set of variables
     -- (bound by heap bindings and update frames) that it is safe *not* to residualise.
     --
     -- Note that as an optimisation, optimiseSplit will only actually creates those residual bindings if the
     -- corresponding variables are free *after driving*. Of course, we have no way of knowing which bindings
     -- will get this treatment here, so just treat resid_xs as being exactly the set of residualised stuff.
-    split_fp = lfpFrom (S.empty, S.empty) (fst . split_step)
+    split_fp = lfpFrom (S.empty, init_deeds_resid_xs) (fst . split_step)
     
     -- Simultaneously computes the next fixed-point step and some artifacts computed along the way,
     -- which happen to correspond to exactly what I need to return from splitt.
