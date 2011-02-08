@@ -350,10 +350,7 @@ promise p opt = ScpM $ \e s k -> {- traceRender ("promise", fun p, abstracted p)
           abstracted_set = S.fromList (abstracted p)
           abstracted'_set = fvs' `S.intersection` abstracted_set -- We still don't want to abstract over e.g. phantom bindings
           abstracted'_list = S.toList abstracted'_set
-      ScpM $ \_e s k -> let refers_to_me e' = fun p `S.member` fvedTermFreeVars e'
-                            (fs_refer_to_me, fs_dont_refer_to_me) = partition (\(_, e') -> refers_to_me e') (fulfilments s)
-                            self_refers = refers_to_me e'
-                            fs' | abstracted_set == abstracted'_set || not rEFINE_FULFILMENT_FVS
+      ScpM $ \_e s k -> let fs' | abstracted_set == abstracted'_set || not rEFINE_FULFILMENT_FVS
                                  -- If the free variables are totally unchanged, there is nothing to be gained from clever fiddling
                                 = (P { fun = fun p, abstracted = abstracted p, meaning = Just (unI (meaning p)) }, lambdas (abstracted p) e') : fulfilments s
                                 | otherwise
@@ -361,18 +358,6 @@ promise p opt = ScpM $ \e s k -> {- traceRender ("promise", fun p, abstracted p)
                                 , let fun' = (fun p) { name_string = name_string (fun p) ++ "'" }
                                 = (P { fun = fun p, abstracted = abstracted p, meaning = Nothing }, lambdas (abstracted p) (fvedTerm (Var fun') `apps` abstracted'_list)) :
                                   (P { fun = fun', abstracted = abstracted'_list, meaning = Just (unI (meaning p)) }, lambdas abstracted'_list e') : fulfilments s
-                            
-                            
-                            -- fs' | abstracted_set == abstracted'_set
-                            --      -- If the free variables are totally unchanged, there is nothing to be gained from clever fiddling
-                            --     = (p, lambdas (abstracted p) e') : fulfilments s
-                            --     | [] <- fs_refer_to_me, not self_refers
-                            --      -- In the non-recursive case where noone else yet refers to this tieback, we can simply change the set we abstract over
-                            --     = (p { abstracted = abstracted'_list }, lambdas abstracted'_list e') : fs_dont_refer_to_me
-                            --     | otherwise
-                            --      -- In the recursive case where some other fulfilment (or me) refers to this tieback, we must wrap that tieback with an adapter: we use a case to bind it non-recursively
-                            --     , let wrap = strictLet (fun p) (lambdas (abstracted p) (fvedTerm (Var (fun p)) `apps` abstracted'_list))
-                            --     = (p { abstracted = abstracted'_list }, (if self_refers then wrap else id) $ lambdas abstracted'_list e') : map (second wrap) fs_refer_to_me ++ fs_dont_refer_to_me
                         in k () (s { fulfilments = fs' })
       
       fmap (((S.fromList (abstracted p) `S.union` stateStaticBinders (unI (meaning p))) `S.union`) . S.fromList) getPromiseNames >>= \fvs -> assertRender ("sc: FVs", fun p, fvs' S.\\ fvs, fvs, e') (fvs' `S.isSubsetOf` fvs) $ return ()
