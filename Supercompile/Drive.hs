@@ -11,12 +11,11 @@ import Core.Renaming
 import Core.Syntax
 import Core.Tag
 
+import Evaluator.Deeds
 import Evaluator.Evaluate
 import Evaluator.FreeVars
 import Evaluator.Residualise
 import Evaluator.Syntax
-
-import Size.Deeds
 
 import Termination.TagBag
 import Termination.TagGraph
@@ -153,7 +152,7 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) (emptyLosers, S.empty)
         -- In my tests, the losers set approach ensured that DigitsOfE2 terminated after ~13s. Changing to the threaded
         -- history approach, I did not observe termination :-(
         (h'_losers, h'_winners) | sPECULATE_ON_LOSERS = (M.empty, h')
-                                | otherwise           = M.partition (\hb -> maybe False (`IS.member` losers) (heapBindingTag_ hb)) h'
+                                | otherwise           = M.partition (\hb -> maybe False (`IS.member` losers) (heapBindingTag hb)) h'
         
         -- Note [Order of speculation]
         -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -175,7 +174,7 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) (emptyLosers, S.empty)
         (stats', deeds'', Heap h'_winners' ids'', losers', speculated') = M.foldrWithKey speculate_one (stats, deeds', Heap h'_winners ids', losers, speculated) h'_winners
         speculate_one x' hb (stats, deeds, Heap h'_winners ids, losers, speculated)
           -- | not (isValue (annee (snd in_e))), traceRender ("speculate", x', depth, pPrintFullUnnormalisedState (Heap (h {- `exclude` M.keysSet base_h -}) ids, k, in_e)) False = undefined
-          | Just tg <- heapBindingTag_ hb
+          | Just tg <- heapBindingTag hb
           , x' `S.notMember` speculated
           , let -- We're going to be a bit clever here: to speculate a heap binding, just put that variable into the focus and reduce the resulting term.
                 -- The only complication occurs when comes back with a non-empty stack, in which case we need to deal with any unreduced update frames.
@@ -216,7 +215,7 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) (emptyLosers, S.empty)
                 failed_restore = spec_failed_xs S.\\ M.keysSet h_restore
           -- , S.null failed_restore || trace (show (pPrint (x', failed_restore, spec_failed_xs, pPrintFullState _state', pPrintHeap (Heap h' ids'), pPrintHeap $ Heap h'_winners ids'))) True
           = if S.null failed_restore
-            then (stats `mappend` stats', deeds', Heap (h_restore `M.union` h') ids', IS.fromList [tg | hb <- M.elems h_restore, Just tg <- [heapBindingTag_ hb]] `IS.union` losers', spec_failed_xs `S.union` speculated')
+            then (stats `mappend` stats', deeds', Heap (h_restore `M.union` h') ids', IS.fromList [tg | hb <- M.elems h_restore, Just tg <- [heapBindingTag hb]] `IS.union` losers', spec_failed_xs `S.union` speculated')
             else (stats `mappend` stats', deeds,  Heap h'_winners ids, losers', S.insert x' speculated)
           | otherwise
           = (stats, deeds, Heap h'_winners ids, losers, speculated)

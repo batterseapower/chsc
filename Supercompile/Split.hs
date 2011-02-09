@@ -7,12 +7,11 @@ import Core.FreeVars
 import Core.Renaming
 import Core.Syntax
 
+import Evaluator.Deeds
 import Evaluator.Evaluate (normalise)
 import Evaluator.FreeVars
 --import Evaluator.Residualise
 import Evaluator.Syntax
-
-import Size.Deeds
 
 import Termination.Generaliser (Generaliser(..))
 

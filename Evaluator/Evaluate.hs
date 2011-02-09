@@ -1,6 +1,7 @@
 {-# LANGUAGE TupleSections, PatternGuards, ViewPatterns #-}
 module Evaluator.Evaluate (normalise, step) where
 
+import Evaluator.Deeds
 import Evaluator.FreeVars
 import Evaluator.Residualise
 import Evaluator.Syntax
@@ -8,8 +9,6 @@ import Evaluator.Syntax
 import Core.Renaming
 import Core.Syntax
 import Core.Prelude (trueDataCon, falseDataCon)
-
-import Size.Deeds
 
 import Renaming
 import StaticFlags

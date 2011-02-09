@@ -32,7 +32,7 @@ embedWithTagBags' nats = precomp stateTags $ postcomp generaliserFromGrowing $ r
                                        pureHeapTagBag h `plusTagBag` stackTagBag k `plusTagBag` tagTagBag (qaTag' qa)
       where
         heapBindingTagBag :: HeapBinding -> TagBag
-        heapBindingTagBag = maybe (mkTagBag []) (tagTagBag . pureHeapBindingTag') . heapBindingTag_
+        heapBindingTagBag = maybe (mkTagBag []) (tagTagBag . pureHeapBindingTag') . heapBindingTag
           
         pureHeapTagBag :: PureHeap -> TagBag
         pureHeapTagBag = plusTagBags . map heapBindingTagBag . M.elems
@@ -55,7 +55,7 @@ embedWithTagBags' nats = precomp stateTags $ postcomp generaliserFromGrowing $ r
     generaliserFromGrowing :: TagMap Bool -> Generaliser
     generaliserFromGrowing growing = Generaliser {
           generaliseStackFrame  = \kf   -> strictly_growing (stackFrameTag' kf),
-          generaliseHeapBinding = \_ hb -> maybe False (strictly_growing . pureHeapBindingTag') $ heapBindingTag_ hb
+          generaliseHeapBinding = \_ hb -> maybe False (strictly_growing . pureHeapBindingTag') $ heapBindingTag hb
         }
       where strictly_growing tg = IM.findWithDefault False tg growing
 

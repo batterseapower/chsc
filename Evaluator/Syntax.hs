@@ -1,7 +1,5 @@
-{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE TypeOperators, Rank2Types #-}
 module Evaluator.Syntax where
-
-import Size.Deeds
 
 import Core.FreeVars
 import Core.Renaming
@@ -187,28 +185,13 @@ heapBindingTerm (Phantom in_e)   = Just (in_e, PhantomLive)
 heapBindingTerm (Unfolding in_v) = Just (second (fmap Value) in_v, ConcreteLive)
 heapBindingTerm (Concrete in_e)  = Just (in_e, ConcreteLive)
 
-heapBindingTag_ :: HeapBinding -> Maybe Tag
-heapBindingTag_ = fmap fst . heapBindingTag
+heapBindingHasDeeds :: (forall a. Maybe (Anned a) -> r) -> HeapBinding -> r
+heapBindingHasDeeds f (Concrete (_, e)) = f (Just e)
+heapBindingHasDeeds f _                 = f Nothing
 
-heapBindingTag :: HeapBinding -> Maybe (Tag, Bool) -- The boolean tells us whether we have claimed deeds for the binding's tag
+heapBindingTag :: HeapBinding -> Maybe Tag -- The boolean tells us whether we have claimed deeds for the binding's tag
 heapBindingTag Environmental      = Nothing
-heapBindingTag (Updated tg _)     = Just (tg,         False)
-heapBindingTag (Phantom (_, e))   = Just (annedTag e, False)
-heapBindingTag (Unfolding (_, v)) = Just (annedTag v, False)
-heapBindingTag (Concrete (_, e))  = Just (annedTag e, True)
-
-releaseHeapBindingDeeds :: Deeds -> HeapBinding -> Deeds
-releaseHeapBindingDeeds deeds = maybe deeds (releaseTagDeeds deeds) . heapBindingTag
-
-releaseTagDeeds :: Deeds -> (Tag, Bool) -> Deeds
-releaseTagDeeds deeds (tg, True)  = releaseDeedDeep deeds tg
-releaseTagDeeds deeds (_,  False) = deeds
-
-releasePureHeapDeeds :: Deeds -> PureHeap -> Deeds
-releasePureHeapDeeds = M.fold (flip releaseHeapBindingDeeds)
-
-releaseStateDeed :: Deeds -> (Heap, Stack, In (Anned a)) -> Deeds
-releaseStateDeed deeds (Heap h _, k, (_, e))
-  = foldl' (\deeds kf -> releaseDeedDeep deeds (tag kf))
-           (releasePureHeapDeeds (releaseDeedDeep deeds (annedTag e)) h)
-           k
+heapBindingTag (Updated tg _)     = Just tg
+heapBindingTag (Phantom (_, e))   = Just (annedTag e)
+heapBindingTag (Unfolding (_, v)) = Just (annedTag v)
+heapBindingTag (Concrete (_, e))  = Just (annedTag e)
