@@ -38,7 +38,7 @@ mkSize rec = (var', term, term', alternatives, value, value')
     term = rec term'
     term' e = 1 + case e of
         Var x        -> var' x
-        Value v      -> value' v
+        Value v      -> value' v - 1 -- Slight hack here so that we don't get +2 size on values
         App e x      -> term e + var' x
         PrimOp _ es  -> sum (map term es)
         Case e alts  -> term e + alternatives alts

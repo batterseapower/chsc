@@ -22,7 +22,7 @@ import qualified Data.Map as M
 -- This function only ever returns deeds to the deed pool, but may add them.
 normalise :: (Deeds, UnnormalisedState) -> (Deeds, State)
 normalise (deeds, state) =
-    (\(deeds', state') -> assertRender (hang (text "normalise: deeds lost or gained:") 2 (pPrintFullUnnormalisedState state $$ pPrint deeds $$ pPrintFullState state' $$ pPrint deeds'))
+    (\(deeds', state') -> assertRender (hang (text "normalise: deeds lost or gained:") 2 (pPrint state $$ pPrint (deeds, releaseStateDeed 0 state) $$ pPrint state' $$ pPrint (deeds', releaseStateDeed 0 state')))
                                        (noChange (releaseStateDeed deeds state) (releaseStateDeed deeds' state')) $
                           assertRender (text "normalise: FVs") (stateFreeVars state == stateFreeVars state') $
                           -- traceRender (text "normalising" $$ nest 2 (pPrintFullUnnormalisedState state) $$ text "to" $$ nest 2 (pPrintFullState state')) $
@@ -64,17 +64,18 @@ step (deeds, _state@(h, k, (rn, qa))) =
 prepareValue :: Deeds
              -> Out Var       -- ^ Name to which the value is bound
              -> In AnnedValue -- ^ Bound value, which we have *exactly* 1 deed for already that is not recorded in the Deeds itself
-             -> Maybe (Deeds, In AnnedValue) -- Outgoing deeds have that 1 latent deed included in them
+             -> Maybe (Deeds, In AnnedValue) -- Outgoing deeds have that 1 latent deed included in them, and we have claimed deeds for the outgoing value
 prepareValue deeds x' in_v@(_, v)
   | dUPLICATE_VALUES_EVALUATOR = fmap (,in_v) $ claimDeeds (deeds + 1) (annedValueSize' v)
   | otherwise                  = return (deeds, (mkIdentityRenaming [x'], Indirect x'))
 
+-- We have not yet claimed deeds for the result of this function
 lookupValue :: Heap -> Out Var -> Maybe (In AnnedValue)
 lookupValue (Heap h _) x' = do
     hb <- M.lookup x' h
     case hb of
       Concrete  (rn, anned_e) -> fmap ((rn,) . annee) $ termToValue anned_e
-      Unfolding (rn, anned_v) -> Just (rn, annee anned_v) -- FIXME: I should not attempt to release deeds for this later since I won't have any...
+      Unfolding (rn, anned_v) -> Just (rn, annee anned_v)
       _                       -> Nothing
 
 unwind :: Bool -> Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> Maybe (Deeds, UnnormalisedState)

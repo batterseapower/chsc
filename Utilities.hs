@@ -240,7 +240,7 @@ instance NFData1 Sized where
     rnf1 (Sized a b) = rnf a `seq` rnf b
 
 instance Pretty1 Sized where
-    pPrintPrec1 level prec (Sized _ x) = pPrintPrec level prec x
+    pPrintPrec1 level prec (Sized sz x) = bananas (text (show sz)) <> pPrintPrec level prec x
 
 
 instance Show IdSupply where
