@@ -20,12 +20,11 @@ import qualified Data.Map as M
 -- | Non-expansive simplification we can do everywhere safely
 --
 -- This function only ever returns deeds to the deed pool, but may add them.
--- TODO: tag stack frames so we can lose the deeds argument altogether
 normalise :: (Deeds, UnnormalisedState) -> (Deeds, State)
 normalise (deeds, state) =
     (\(deeds', state') -> assertRender (hang (text "normalise: deeds lost or gained:") 2 (pPrintFullUnnormalisedState state $$ pPrint deeds $$ pPrintFullState state' $$ pPrint deeds'))
-                                       (True || not dEEDS || noChange (releaseStateDeed deeds state) (releaseStateDeed deeds' state')) $ -- TODO: fix deeds checks (tagged stack frames bugger us)
-                          assertRender (text "normalise: FVs") (pHANTOM_LOOKTHROUGH || (stateFreeVars state == stateFreeVars state')) $
+                                       (noChange (releaseStateDeed deeds state) (releaseStateDeed deeds' state')) $
+                          assertRender (text "normalise: FVs") (stateFreeVars state == stateFreeVars state') $
                           -- traceRender (text "normalising" $$ nest 2 (pPrintFullUnnormalisedState state) $$ text "to" $$ nest 2 (pPrintFullState state')) $
                           (deeds', state')) $
     go (deeds, state)
@@ -36,18 +35,17 @@ normalise (deeds, state) =
         App e1 x2         -> normalise (deeds, (h, Tagged tg (Apply (rename rn x2))            : k, (rn, e1)))
         PrimOp pop (e:es) -> normalise (deeds, (h, Tagged tg (PrimApply pop [] (map (rn,) es)) : k, (rn, e)))
         Case e alts       -> normalise (deeds, (h, Tagged tg (Scrutinise (rn, alts))           : k, (rn, e)))
-        LetRec xes e      -> normalise (allocate deeds' h k (rn, (xes, e)))
-          where deeds' = releaseDeedDescend_ deeds tg
+        LetRec xes e      -> normalise (deeds + 1, allocate h k (rn, (xes, e)))
       where tg = annedTag e
 
-    allocate :: Deeds -> Heap -> Stack -> In ([(Var, AnnedTerm)], AnnedTerm) -> (Deeds, UnnormalisedState)
-    allocate deeds (Heap h ids) k (rn, (xes, e)) = (deeds, (Heap (h `M.union` M.map Concrete (M.fromList xes')) ids', k, (rn', e)))
+    allocate :: Heap -> Stack -> In ([(Var, AnnedTerm)], AnnedTerm) -> UnnormalisedState
+    allocate (Heap h ids) k (rn, (xes, e)) = (Heap (h `M.union` M.map Concrete (M.fromList xes')) ids', k, (rn', e))
       where (ids', rn', xes') = renameBounds (\_ x' -> x') ids rn xes
 
 step :: (Deeds, State) -> Maybe (Deeds, State)
 step (deeds, _state@(h, k, (rn, qa))) =
   (\mb_res -> assertRender (hang (text "step: deeds lost or gained:") 2 (pPrintFullState _state))
-                           (True || not dEEDS || maybe True (\(deeds', state') -> noChange (releaseStateDeed deeds _state) (releaseStateDeed deeds' state')) mb_res) $ -- TODO: fix deeds checks (tagged stack frames bugger us)
+                           (maybe True (\(deeds', state') -> noChange (releaseStateDeed deeds _state) (releaseStateDeed deeds' state')) mb_res) $
               -- (case mb_res of Nothing -> traceRender ("Evaluation stuck on", pPrint (annee qa)); _ -> id) $
               mb_res) $
   fmap normalise $ case annee qa of
@@ -58,25 +56,33 @@ step (deeds, _state@(h, k, (rn, qa))) =
       
     force :: Deeds -> Heap -> Stack -> Tag -> Out Var -> Maybe (Deeds, UnnormalisedState)
     force deeds (Heap h ids) k tg x'
-            = do { _ <- lookupValue (Heap h ids) x'; unwind True deeds (Heap h ids) k tg (mkIdentityRenaming [x'], Indirect x') }
-      `mplus` do { Concrete in_e <- M.lookup x' h; return (deeds, (Heap (M.delete x' h) ids, Tagged tg (Update x') : k, in_e)) }
+      | Just in_v <- lookupValue (Heap h ids) x'
+      = do { (deeds, in_v) <- prepareValue deeds x' in_v; unwind True deeds (Heap h ids) k tg in_v }
+      | otherwise
+      = do { Concrete in_e <- M.lookup x' h; return (deeds, (Heap (M.delete x' h) ids, Tagged tg (Update x') : k, in_e)) }
+
+prepareValue :: Deeds
+             -> Out Var       -- ^ Name to which the value is bound
+             -> In AnnedValue -- ^ Bound value, which we have *exactly* 1 deed for already that is not recorded in the Deeds itself
+             -> Maybe (Deeds, In AnnedValue) -- Outgoing deeds have that 1 latent deed included in them
+prepareValue deeds x' in_v@(_, v)
+  | dUPLICATE_VALUES_EVALUATOR = fmap (,in_v) $ claimDeeds (deeds + 1) (annedValueSize' v)
+  | otherwise                  = return (deeds, (mkIdentityRenaming [x'], Indirect x'))
 
 lookupValue :: Heap -> Out Var -> Maybe (In AnnedValue)
 lookupValue (Heap h _) x' = do
     hb <- M.lookup x' h
     case hb of
       Concrete  (rn, anned_e) -> fmap ((rn,) . annee) $ termToValue anned_e
-      Phantom   (rn, anned_e)
-        | pHANTOM_LOOKTHROUGH -> fmap ((rn,) . annee) $ termToValue anned_e
-      Unfolding (rn, anned_v) -> Just (rn, annee anned_v)
+      Unfolding (rn, anned_v) -> Just (rn, annee anned_v) -- FIXME: I should not attempt to release deeds for this later since I won't have any...
       _                       -> Nothing
 
 unwind :: Bool -> Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> Maybe (Deeds, UnnormalisedState)
-unwind do_updates deeds h k tg_v in_v = uncons k >>= \(kf, k) -> let deeds' = releaseDeedDescend_ deeds (tag kf) in case tagee kf of
-    Apply x2'                 -> apply      deeds'         h k tg_v in_v x2'
-    Scrutinise in_alts        -> scrutinise deeds'         h k tg_v in_v in_alts
-    PrimApply pop in_vs in_es -> primop     deeds (tag kf) h k tg_v pop in_vs in_v in_es
-    Update x' | do_updates    -> update     deeds'         h k tg_v x' in_v
+unwind do_updates deeds h k tg_v in_v = uncons k >>= \(kf, k) -> case tagee kf of
+    Apply x2'                 -> apply      (deeds + 1)          h k      in_v x2'
+    Scrutinise in_alts        -> scrutinise (deeds + 1)          h k tg_v in_v in_alts
+    PrimApply pop in_vs in_es -> primop     deeds       (tag kf) h k tg_v pop in_vs in_v in_es
+    Update x' | do_updates    -> update     deeds                h k tg_v x' in_v
               | otherwise     -> Nothing
   where
     -- When derereferencing an indirection, it is important that the resulting value is not stored anywhere. The reasons are:
@@ -93,43 +99,38 @@ unwind do_updates deeds h k tg_v in_v = uncons k >>= \(kf, k) -> let deeds' = re
     dereference h (rn, Indirect x) | Just (rn', anned_v') <- lookupValue h (safeRename "dereference" rn x) = dereference h (rn', anned_v')
     dereference _ in_v = in_v
     
-    apply :: Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> Out Var -> Maybe (Deeds, UnnormalisedState)
-    apply deeds h k tg_v (dereference h -> (rn, Lambda x e_body)) x2' = fmap (\deeds'' -> (deeds'', (h, k, (insertRenaming x x2' rn, e_body)))) $ claimDeed deeds' (annedTag e_body)
-      where
-        -- You might wonder why I don't just releaseDeedDescend_ the tg_v here rather than releasing it all and
-        -- then claiming a little bit back. The answer is that the tg_v might be the tag of an indirection, so I have
-        -- no guarantee that releaseDeedDescend_ will leave me with any deeds for the lambda body!
-        deeds' = releaseDeedDeep deeds tg_v
-    apply _     _ _ _    _                                        _   = Nothing -- Might happen theoretically if we have an unresovable indirection
+    apply :: Deeds -> Heap -> Stack -> In AnnedValue -> Out Var -> Maybe (Deeds, UnnormalisedState)
+    apply deeds h k in_v@(_, v) x2'
+      | (rn, Lambda x e_body) <- dereference h in_v = fmap (,(h, k, (insertRenaming x x2' rn, e_body))) $ claimDeeds (deeds + annedValueSize' v) (annedSize e_body)
+      | otherwise                                   = Nothing -- Might happen theoretically if we have an unresovable indirection
 
     scrutinise :: Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> In [AnnedAlt] -> Maybe (Deeds, UnnormalisedState)
     scrutinise deeds (Heap h ids) k tg_v (rn_v, v)  (rn_alts, alts)
       | Literal l <- v_deref
-      , (alt_e, rest):_ <- [((rn_alts, alt_e), rest) | ((LiteralAlt alt_l, alt_e), rest) <- bagContexts alts, alt_l == l] ++ [((rn_alts, alt_e), rest) | ((DefaultAlt Nothing, alt_e), rest) <- bagContexts alts]
-      = Just (releaseAltDeeds rest (releaseDeedDeep deeds tg_v), (Heap h ids, k, alt_e))
+      , (alt_e, rest):_ <- [((rn_alts, alt_e), rest) | ((LiteralAlt alt_l, alt_e), rest) <- bagContexts alts, alt_l == l]
+      = Just (deeds + annedValueSize' v + annedAltsSize rest, (Heap h ids, k, alt_e))
       | Data dc xs <- v_deref
-      , (alt_e, rest):_ <- [((insertRenamings (alt_xs `zip` map (rename rn_v_deref) xs) rn_alts, alt_e), rest) | ((DataAlt alt_dc alt_xs, alt_e), rest) <- bagContexts alts, alt_dc == dc] ++ [((rn_alts, alt_e), rest) | ((DefaultAlt Nothing, alt_e), rest) <- bagContexts alts]
-      = Just (releaseAltDeeds rest (releaseDeedDeep deeds tg_v), (Heap h ids, k, alt_e))
+      , (alt_e, rest):_ <- [((insertRenamings (alt_xs `zip` map (rename rn_v_deref) xs) rn_alts, alt_e), rest) | ((DataAlt alt_dc alt_xs, alt_e), rest) <- bagContexts alts, alt_dc == dc]
+      = Just (deeds + annedValueSize' v + annedAltsSize rest, (Heap h ids, k, alt_e))
       | ((mb_alt_x, alt_e), rest):_ <- [((mb_alt_x, alt_e), rest) | ((DefaultAlt mb_alt_x, alt_e), rest) <- bagContexts alts]
       = Just $ case mb_alt_x of
-                 Nothing    -> (releaseAltDeeds rest (releaseDeedDeep deeds tg_v), (Heap h                                                               ids,  k, (rn_alts,  alt_e)))
-                 Just alt_x -> (releaseAltDeeds rest deeds,                        (Heap (M.insert alt_x' (Concrete (rn_v, annedTerm tg_v $ Value v)) h) ids', k, (rn_alts', alt_e)))
+                 Nothing    -> (deeds + annedValueSize' v + annedAltsSize rest, (Heap h                                                               ids,  k, (rn_alts,  alt_e)))
+                 Just alt_x -> (deeds +                     annedAltsSize rest, (Heap (M.insert alt_x' (Concrete (rn_v, annedTerm tg_v $ Value v)) h) ids', k, (rn_alts', alt_e)))
                    where (ids', rn_alts', alt_x') = renameBinder ids rn_alts alt_x
                          -- NB: we add the *non-dereferenced* value to the heap in a default branch with variable, because anything else may duplicate allocation
       | otherwise
       = Nothing -- This can legitimately occur, e.g. when supercompiling (if x then (case x of False -> 1) else 2)
       where (rn_v_deref, v_deref) = dereference (Heap h ids) (rn_v, v)
 
-    releaseAltDeeds :: [(a, AnnedTerm)] -> Deeds -> Deeds
-    releaseAltDeeds alts deeds = foldl' (\deeds (_, in_e) -> releaseDeedDeep deeds (annedTag in_e)) deeds alts
-
     primop :: Deeds -> Tag -> Heap -> Stack -> Tag -> PrimOp -> [In (Anned AnnedValue)] -> In AnnedValue -> [In AnnedTerm] -> Maybe (Deeds, UnnormalisedState)
-    primop deeds tg_kf h k tg_v2 pop [(rn_v1, anned_v1)] (rn_v2, v2) []
+    primop deeds tg_kf h k _tg_v2 pop [(rn_v1, anned_v1)] (rn_v2, v2) []
       | (_, Literal (Int l1)) <- dereference h (rn_v1, annee anned_v1)
       , (_, Literal (Int l2)) <- dereference h (rn_v2, v2)
-      = Just (releaseDeedDeep (releaseDeedDeep deeds tg_v2) (annedTag anned_v1), (h, k, (emptyRenaming, annedTerm tg_kf (Value (f pop l1 l2)))))
+      , let e' = annedTerm tg_kf (Value (f pop l1 l2))
+      , Just deeds <- claimDeeds (deeds + annedSize anned_v1 + annedValueSize' v2 + 1) (annedSize e') -- I don't think this can ever fail
+      = Just (deeds, (h, k, (emptyRenaming, e')))
       | otherwise
-      = Nothing -- Can occur legitimately if some of the arguments of the primop are just indirections
+      = Nothing -- Can occur legitimately if some of the arguments of the primop are just indirections to nothing
       where f pop = case pop of Add -> retInt (+); Subtract -> retInt (-);
                                 Multiply -> retInt (*); Divide -> retInt div; Modulo -> retInt mod;
                                 Equal -> retBool (==); LessThan -> retBool (<); LessThanEqual -> retBool (<=)
@@ -139,8 +140,6 @@ unwind do_updates deeds h k tg_v in_v = uncons k >>= \(kf, k) -> let deeds' = re
     primop _     _     _ _ _    _   _     _       _            = Nothing -- I don't think this can occur legitimately
 
     update :: Deeds -> Heap -> Stack -> Tag -> Out Var -> In AnnedValue -> Maybe (Deeds, UnnormalisedState)
-    update deeds (Heap h ids) k tg_v x' (rn, v) = case claimDeed deeds tg_v of
-        Nothing      -> trace (render (text "update-deeds:" <+> pPrint x')) Nothing
-        Just deeds'' ->                                                     Just (deeds'', (Heap (M.insert x' (Concrete (rn, annedTerm tg_v (Value v))) h) ids, k, in_e))
-          where in_e | dUPLICATE_VALUES_EVALUATOR = (rn,                      annedTerm tg_v (Value v))
-                     | otherwise                  = (mkIdentityRenaming [x'], annedTerm tg_v (Value (Indirect x'))) -- FIXME: this is claiming too many deeds in the case that v is a lambda. Ideally we would just reuse the deed gained from stack frame release
+    update deeds (Heap h ids) k tg_v x' (rn, v) = case prepareValue deeds x' in_v of
+        Nothing             -> trace (render (text "update-deeds:" <+> pPrint x')) Nothing
+        Just (deeds', in_v) ->                                                     Just (deeds', (Heap (M.insert x' (Concrete (rn, annedTerm tg_v (Value v))) h) ids, k, second (annedTerm tg_v . Value) in_v))

@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeOperators, Rank2Types #-}
+{-# LANGUAGE TypeOperators #-}
 module Evaluator.Syntax where
 
 import Core.FreeVars
@@ -185,13 +185,22 @@ heapBindingTerm (Phantom in_e)   = Just (in_e, PhantomLive)
 heapBindingTerm (Unfolding in_v) = Just (second (fmap Value) in_v, ConcreteLive)
 heapBindingTerm (Concrete in_e)  = Just (in_e, ConcreteLive)
 
-heapBindingHasDeeds :: (forall a. Maybe (Anned a) -> r) -> HeapBinding -> r
-heapBindingHasDeeds f (Concrete (_, e)) = f (Just e)
-heapBindingHasDeeds f _                 = f Nothing
-
 heapBindingTag :: HeapBinding -> Maybe Tag -- The boolean tells us whether we have claimed deeds for the binding's tag
 heapBindingTag Environmental      = Nothing
 heapBindingTag (Updated tg _)     = Just tg
 heapBindingTag (Phantom (_, e))   = Just (annedTag e)
 heapBindingTag (Unfolding (_, v)) = Just (annedTag v)
 heapBindingTag (Concrete (_, e))  = Just (annedTag e)
+
+-- | Size of HeapBinding for Deeds purposes
+heapBindingSize :: HeapBinding -> Size
+heapBindingSize (Concrete (_, e)) = annedSize e
+heapBindingSize _                 = 0
+
+-- | Size of StackFrame for Deeds purposes
+stackFrameSize :: StackFrame -> Size
+stackFrameSize kf = 1 + case kf of
+    Apply _                 -> 0
+    Scrutinise (_, alts)    -> annedAltsSize alts
+    PrimApply _ in_vs in_es -> sum (map (annedValueSize . snd) in_vs ++ map (annedTermSize . snd) in_es)
+    Update _                -> 0

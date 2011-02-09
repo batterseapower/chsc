@@ -34,7 +34,6 @@ import Data.Monoid
 import Data.Ord
 import qualified Data.Set as S
 import qualified Data.IntSet as IS
-import Data.Tree
 
 
 wQO :: WQO State Generaliser
@@ -64,36 +63,8 @@ instance Monoid SCStats where
 supercompile :: Term -> (SCStats, Term)
 supercompile e = traceRender ("all input FVs", input_fvs) $ second (fVedTermToTerm . if pRETTIFY then prettify else id) $ runScpM $ liftM snd $ sc (mkHistory (extra wQO)) (deeds, state)
   where input_fvs = annedTermFreeVars anned_e
-        (deeds, state) = normalise (mkDeeds (bLOAT_FACTOR - 1) (t, pPrint . rb), (Heap (setToMap Environmental input_fvs) reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, anned_e)))
+        (deeds, state) = normalise ((bLOAT_FACTOR - 1) * annedSize anned_e, (Heap (setToMap Environmental input_fvs) reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, anned_e)))
         anned_e = toAnnedTerm e
-        
-        (t, rb) = extractDeeds (\f e -> let (ts, rb) = f (annee e)
-                                        in (Node (annedTag e) ts, \(Node unc ts') -> Counted unc (rb ts'))) anned_e
-        
-        extractDeeds :: (forall a b.    (a        -> ([Tree Tag], [Tree Int] -> b))
-                                     -> Anned a   -> (Tree Tag,   Tree Int   -> Counted b))
-                     -> AnnedTerm -> (Tree Tag, Tree Int -> CountedTerm)
-        extractDeeds rec = term
-          where 
-            term = rec term'
-            term' e = case e of
-              Var x              -> ([], \[] -> Var x)
-              Value (Indirect x) -> ([], \[] -> Value (Indirect x))
-              Value (Lambda x e) -> ([t], \[t'] -> Value (Lambda x (rb t')))
-                where (t, rb) = term e
-              Value (Data dc xs) -> ([], \[] -> Value (Data dc xs))
-              Value (Literal l)  -> ([], \[] -> Value (Literal l))
-              App e x            -> ([t], \[t'] -> App (rb t') x)
-                where (t, rb) = term e
-              PrimOp pop es      -> (ts, \ts' -> PrimOp pop (zipWith ($) rbs ts'))
-                where (ts, rbs) = unzip (map term es)
-              Case e (unzip -> (alt_cons, alt_es)) -> (t : ts, \(t':ts') -> Case (rb t') (alt_cons `zip` zipWith ($) rbs ts'))
-                where (t, rb)   = term e
-                      (ts, rbs) = unzip (map term alt_es)
-              LetRec (unzip -> (xs, es)) e         -> (t : ts, \(t':ts') -> LetRec (xs `zip` zipWith ($) rbs ts') (rb t'))
-                where (t, rb)   = term e
-                      (ts, rbs) = unzip (map term es)
-
 
 --
 -- == Bounded multi-step reduction ==

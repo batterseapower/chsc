@@ -8,10 +8,7 @@ import Core.Renaming (In)
 import StaticFlags
 import Utilities
 
-import qualified Data.Foldable as Foldable
-import qualified Data.IntMap as IM
 import qualified Data.Map as M
-import Data.Tree
 import Data.Ord (comparing)
 
 
@@ -21,21 +18,9 @@ type Unclaimed = Int
 -- | A deed supply shared amongst all expressions
 type Deeds = Int
 
-claimDeed :: Deeds -> Anned a -> Maybe Deeds
-claimDeed deeds x = claimDeeds deeds x 1
-
 -- NB: it is OK if the number of deeds to claim is negative -- that just causes some deeds to be released
-claimDeeds :: Deeds -> Anned a -> Int -> Maybe Deeds
-claimDeeds deeds _ _ | not dEEDS = Just deeds
-claimDeeds deeds x duplicates = guard (deeds >= want) >> return (deeds - want)
-  where want = annedSize x * duplicates
-
-releaseDeedDeep :: Deeds -> Anned a -> Deeds
-releaseDeedDeep deeds x = deeds + annedSize x
-
--- NB: this function relies on the invariant that (annedSize x - thingSize' (annee x) == 1)
-releaseDeedDescend :: Deeds -> Anned a -> Deeds
-releaseDeedDescend deeds x = deeds - 1
+claimDeeds :: Deeds -> Int -> Maybe Deeds
+claimDeeds deeds want = guard (not dEEDS || deeds >= want) >> return (deeds - want)
 
 
 -- | Splits up a number evenly across several partitions in proportions to weights given to those partitions.
@@ -70,26 +55,14 @@ noChange = (==)
 noGain = (>=)
 
 
--- | Puts any unclaimed deeds in the first argument into the unclaimed deed store of the second argument
-releaseDeedsTo :: Deeds -> Deeds -> Deeds
-releaseDeedsTo deeds_release deeds_to = deeds_to + deeds_release
-
--- | Returned 'Deeds' are the identity element of 'releaseDeedsTo'
---
--- mkEmptyDeeds deeds `releaseDeedsTo` deeds == deeds
--- deeds `releaseDeedsTo` mkEmptyDeeds deeds == deeds
-emptyDeeds :: Deeds
-emptyDeeds = 0
-
-
 releaseHeapBindingDeeds :: Deeds -> HeapBinding -> Deeds
-releaseHeapBindingDeeds deeds = heapBindingHasDeeds (maybe deeds (releaseDeedDeep deeds))
+releaseHeapBindingDeeds deeds hb = deeds + heapBindingSize hb
 
 releasePureHeapDeeds :: Deeds -> PureHeap -> Deeds
 releasePureHeapDeeds = M.fold (flip releaseHeapBindingDeeds)
 
 releaseStateDeed :: Deeds -> (Heap, Stack, In (Anned a)) -> Deeds
 releaseStateDeed deeds (Heap h _, k, (_, e))
-  = foldl' (\deeds kf -> releaseDeedDeep deeds (stackFrameSize (tagee kf)))
-           (releasePureHeapDeeds (releaseDeedDeep deeds e) h)
+  = foldl' (\deeds kf -> deeds + stackFrameSize (tagee kf))
+           (releasePureHeapDeeds (deeds + annedSize e) h)
            k

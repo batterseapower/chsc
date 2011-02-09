@@ -130,7 +130,7 @@ simplify :: Generaliser
          -> (Deeds, State)
          -> (Deeds, M.Map (Out Var) (Bracketed State), Bracketed State)
 simplify gen (init_deeds, init_s)
-  = (\res@(deeds', bracketed_heap, bracketed) -> assertRender (text "simplify: deeds lost or gained") (True || not dEEDS || noGain (init_deeds `releaseStateDeed` init_s) (M.fold (flip (releaseBracketedDeeds releaseStateDeed)) (releaseBracketedDeeds releaseStateDeed deeds' bracketed) bracketed_heap)) res) $ -- TODO: fix deeds checks (tagged stack frames bugger us)
+  = (\res@(deeds', bracketed_heap, bracketed) -> assertRender (text "simplify: deeds lost or gained") (noGain (init_deeds `releaseStateDeed` init_s) (M.fold (flip (releaseBracketedDeeds releaseStateDeed)) (releaseBracketedDeeds releaseStateDeed deeds' bracketed) bracketed_heap)) res) $ -- TODO: fix deeds checks (tagged stack frames bugger us)
     go (init_deeds, init_s)
   where
     go :: (Deeds, State) -> (Deeds, M.Map (Out Var) (Bracketed State), Bracketed State)
@@ -329,7 +329,7 @@ optimiseBracketed :: MonadStatics m
                   -> (Deeds, Bracketed (Deeds, State))
                   -> m (Deeds, Out FVedTerm)
 optimiseBracketed opt (deeds, b) = liftM (second (rebuild b)) $ optimiseMany optimise_one (deeds, fillers b)
-  where optimise_one (deeds, (s_deeds, s)) = opt (deeds `releaseDeedsTo` s_deeds, s)
+  where optimise_one (deeds, (s_deeds, s)) = opt (deeds + s_deeds, s)
         -- No h-functions can refer to the lambda/case-alt bound variables around this hole.
         -- See the Note [Phantom variables and bindings introduced by scrutinisation]
 
@@ -362,11 +362,6 @@ optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
                     Concrete (_, e)  -> annedSize e
                 heapSize (Heap h _) = sum (map heapBindingSize (M.elems h))
                 stackSize = sum . map (stackFrameSize . tagee)
-                stackFrameSize kf = 1 + case kf of
-                    Apply _                 -> 0
-                    Scrutinise (_, alts)    -> annedAltsSize alts
-                    PrimApply _ in_vs in_es -> sum (map (annedValueSize . snd) in_vs ++ map (annedTermSize . snd) in_es)
-                    Update _                -> 0
         bracketSizes = map stateSize . fillers
         
         (heap_xs, bracketeds_heap_elts) = unzip (M.toList bracketeds_heap)
@@ -374,15 +369,13 @@ optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
         -- deeds will vanish in a puff of digital smoke. We deal with this in the proportional case by padding the input list with a 1
         (deeds_initial:deeds_focus, deedss_heap)
           | Proportional <- dEEDS_POLICY = transformWholeList (apportion deeds) (1 : bracketSizes bracketed_focus) (map bracketSizes bracketeds_heap_elts)
-          | otherwise                    = (deeds : [deeds_empty | _ <- bracketSizes bracketed_focus], [[deeds_empty | _ <- bracketSizes b] | b <- bracketeds_heap_elts])
-            where deeds_empty = mkEmptyDeeds deeds
+          | otherwise                    = (deeds : [0 | _ <- bracketSizes bracketed_focus], [[0 | _ <- bracketSizes b] | b <- bracketeds_heap_elts])
         
         bracketeds_deeded_heap = M.fromList (heap_xs `zip` zipWith (\deeds_heap -> modifyFillers (deeds_heap `zip`)) deedss_heap bracketeds_heap_elts)
         bracketed_deeded_focus = modifyFillers (deeds_focus `zip`) bracketed_focus
     
-    -- TODO: fix deeds checks (tagged stack frames bugger us)
-    assertRenderM (text "optimiseSplit: deeds lost or gained!") (True || not dEEDS || noChange (M.fold (flip (releaseBracketedDeeds releaseStateDeed)) (releaseBracketedDeeds releaseStateDeed deeds bracketed_focus) bracketeds_heap)
-                                                                                               (M.fold (flip (releaseBracketedDeeds (\deeds (extra_deeds, s) -> extra_deeds `releaseDeedsTo` releaseStateDeed deeds s))) (releaseBracketedDeeds (\deeds (extra_deeds, s) -> extra_deeds `releaseDeedsTo` releaseStateDeed deeds s) deeds_initial bracketed_deeded_focus) bracketeds_deeded_heap))
+    assertRenderM (text "optimiseSplit: deeds lost or gained!") (noChange (M.fold (flip (releaseBracketedDeeds releaseStateDeed)) (releaseBracketedDeeds releaseStateDeed deeds bracketed_focus) bracketeds_heap)
+                                                                          (M.fold (flip (releaseBracketedDeeds (\deeds (extra_deeds, s) -> extra_deeds + releaseStateDeed deeds s))) (releaseBracketedDeeds (\deeds (extra_deeds, s) -> extra_deeds + releaseStateDeed deeds s) deeds_initial bracketed_deeded_focus) bracketeds_deeded_heap))
     
     -- 1) Recursively drive the focus itself
     let extra_statics = M.keysSet bracketeds_heap
@@ -397,7 +390,7 @@ optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
     (leftover_deeds, bracketeds_deeded_heap, xes, _fvs) <- go hes extra_statics leftover_deeds bracketeds_deeded_heap [] (fvedTermFreeVars e_focus)
     
     -- 3) Combine the residualised let bindings with the let body
-    return (foldl' (releaseBracketedDeeds (\deeds (s_deeds, s) -> s_deeds `releaseDeedsTo` releaseStateDeed deeds s)) leftover_deeds (M.elems bracketeds_deeded_heap),
+    return (foldl' (releaseBracketedDeeds (\deeds (s_deeds, s) -> s_deeds + releaseStateDeed deeds s)) leftover_deeds (M.elems bracketeds_deeded_heap),
             letRecSmart xes e_focus)
   where
     -- TODO: clean up this incomprehensible loop
@@ -710,7 +703,7 @@ transitiveInline init_h_inlineable (deeds, (Heap h ids, k, in_e))
           | Just why_live <- x' `whyLive` live -- Is the binding actually live at all?
           , (deeds, h_inlineable, inline_hb) <- case hb of
               Concrete in_e@(_, e) -> case why_live of
-                ConcreteLive -> case claimDeed deeds (annedTag e) of -- Do we have enough deeds to inline a concrete version at all?
+                ConcreteLive -> case claimDeeds deeds (annedSize e) of -- Do we have enough deeds to inline a concrete version at all?
                                   Just deeds ->                                                     (deeds,                h_inlineable, hb)
                                   Nothing    -> trace (render $ text "inline-deeds:" <+> pPrint x') (deeds, M.insert x' hb h_inlineable, Phantom in_e)
                 PhantomLive  -> (deeds, M.insert x' hb h_inlineable, Phantom in_e) -- We want to inline only a *phantom* version if the binding is demanded by phantoms only, or madness ensues
@@ -737,8 +730,8 @@ cheapifyHeap (deeds, Heap h (splitIdSupply -> (ids, ids'))) = (deeds', Heap (M.m
     
     -- TODO: make cheapification more powerful (i.e. deal with case bindings)
     cheapify :: Deeds -> IdSupply -> In AnnedTerm -> (Deeds, IdSupply, [(Out Var, In AnnedTerm)], In AnnedTerm)
-    cheapify deeds0 ids0 (rn, annedTag &&& annee -> (tg, LetRec xes e)) = (deeds3, ids3, zip in_xs in_es' ++ floats0 ++ floats1, in_e')
-      where deeds1 = releaseDeedDescend_ deeds0 tg
+    cheapify deeds0 ids0 (rn, (annee -> LetRec xes e)) = (deeds3, ids3, zip in_xs in_es' ++ floats0 ++ floats1, in_e')
+      where deeds1 = deeds0 + 1
             (        ids1, rn', unzip -> (in_xs, in_es)) = renameBounds (\_ x' -> x') ids0 rn xes
             (deeds2, ids2, floats0, in_es') = cheapifyMany deeds1 ids1 in_es
             (deeds3, ids3, floats1, in_e')  = cheapify deeds2 ids2 (rn', e)
@@ -778,7 +771,7 @@ pushStackFrame kf deeds bracketed_hole = do
     return (deeds', bracketed_hole')
   where
     -- Inline parts of the evaluation context into each branch only if we can get that many deeds for duplication
-    push fillers = case claimDeeds deeds (tag kf) (branch_factor - 1) of -- NB: subtract one because one occurrence is already "paid for". It is OK if the result is negative (i.e. branch_factor 0)!
+    push fillers = case claimDeeds deeds (stackFrameSize (tagee kf) * (branch_factor - 1)) of -- NB: subtract one because one occurrence is already "paid for". It is OK if the result is negative (i.e. branch_factor 0)!
             Nothing    -> trace (render $ text "pushStack-deeds" <+> pPrint branch_factor) (Nothing, fillers)
             Just deeds ->                                                                  (Just deeds, map (\(ent, f) -> (ent, second3 (++ [kf]) . f)) fillers)
       where branch_factor = length fillers
