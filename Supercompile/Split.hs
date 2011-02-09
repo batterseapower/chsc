@@ -452,7 +452,7 @@ splitt (gen_kfs, gen_xs) (old_deeds, (cheapifyHeap . (old_deeds,) -> (deeds, Hea
     -- Heuristic: represent lambdas as phantoms (we can't do this in the extract_cheap because not_resid_xs needs to be correct so that
     -- h_residualised contains bindings for all things that we turn into phantoms here. This bit me on e.g. SlowComputation.core. We also
     -- can't just change gen_xs because that even prevents phantoms from being pushed down!)
-    init_deeds_resid_xs | pHANTOM_LOOKTHROUGH = M.keysSet (M.filter (\hb -> maybe False (\() -> True) $ do { Concrete (rn, e) <- return hb; Lambda _ _ <- fmap annee (termToValue e); return () }) h)
+    init_deeds_resid_xs | pHANTOM_LOOKTHROUGH = M.keysSet (M.filter (\hb -> maybe False (\() -> True) $ do { Concrete (_, e) <- return hb; Lambda _ _ <- fmap annee (termToValue e); return () }) h)
                         | otherwise           = S.empty
 
     -- We compute the correct way to split as a least fixed point, slowly building up a set of variables
