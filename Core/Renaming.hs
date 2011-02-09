@@ -29,10 +29,10 @@ renameBounds f ids rn (unzip -> (xs, es)) = (ids', rn', zipWith f xs xs' `zip` m
   where (ids', rn', xs') = renameBinders ids rn xs
 
 
-(renameTerm,           renameAlts,           renameValue,           renameValue')           = mkRename (\f rn (I e) -> I (f rn e))
-(renameFVedTerm,       renameFVedAlts,       renameFVedValue,       renameFVedValue')       = mkRename (\f rn (FVed fvs e) -> FVed (renameFreeVars rn fvs) (f rn e))
-(renameTaggedTerm,     renameTaggedAlts,     renameTaggedValue,     renameTaggedValue')     = mkRename (\f rn (Tagged tg e) -> Tagged tg (f rn e))
-(renameTaggedFVedTerm, renameTaggedFVedAlts, renameTaggedFVedValue, renameTaggedFVedValue') = mkRename (\f rn (Comp (Tagged tg (FVed fvs e))) -> Comp (Tagged tg (FVed (renameFreeVars rn fvs) (f rn e))))
+(renameTerm,                renameAlts,                renameValue,                renameValue')                = mkRename (\f rn (I e) -> I (f rn e))
+(renameFVedTerm,            renameFVedAlts,            renameFVedValue,            renameFVedValue')            = mkRename (\f rn (FVed fvs e) -> FVed (renameFreeVars rn fvs) (f rn e))
+(renameTaggedTerm,          renameTaggedAlts,          renameTaggedValue,          renameTaggedValue')          = mkRename (\f rn (Tagged tg e) -> Tagged tg (f rn e))
+(renameTaggedSizedFVedTerm, renameTaggedSizedFVedAlts, renameTaggedSizedFVedValue, renameTaggedSizedFVedValue') = mkRename (\f rn (Comp (Tagged tg (Comp (Sized sz (FVed fvs e))))) -> Comp (Tagged tg (Comp (Sized sz (FVed (renameFreeVars rn fvs) (f rn e))))))
 
 {-# INLINE mkRename #-}
 mkRename :: (forall a. (Renaming -> a -> a) -> Renaming -> ann a -> ann a)

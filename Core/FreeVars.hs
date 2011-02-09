@@ -14,10 +14,11 @@ type FreeVars = S.Set Var
 type BoundVars = S.Set Var
 
 
-(termVarFreeVars',       termFreeVars,           termFreeVars',           altsFreeVars,           valueFreeVars,           valueFreeVars')           = mkFreeVars (\f (I e) -> f e)
-(fvedTermVarFreeVars',   fvedTermFreeVars,       fvedTermFreeVars',       fvedAltsFreeVars,       fvedValueFreeVars,       fvedValueFreeVars')       = mkFreeVars (\_ (FVed fvs _) -> fvs)
-(taggedTermVarFreeVars', taggedTermFreeVars,     taggedTermFreeVars',     taggedAltsFreeVars,     taggedValueFreeVars,     taggedValueFreeVars')     = mkFreeVars (\f (Tagged _ e) -> f e)
-(taggedFVedVarFreeVars', taggedFVedTermFreeVars, taggedFVedTermFreeVars', taggedFVedAltsFreeVars, taggedFVedValueFreeVars, taggedFVedValueFreeVars') = mkFreeVars (\_ (Comp (Tagged _ (FVed fvs _))) -> fvs)
+(termVarFreeVars',            termFreeVars,                termFreeVars',                altsFreeVars,                valueFreeVars,                valueFreeVars')                = mkFreeVars (\f (I e) -> f e)
+(fvedTermVarFreeVars',        fvedTermFreeVars,            fvedTermFreeVars',            fvedAltsFreeVars,            fvedValueFreeVars,            fvedValueFreeVars')            = mkFreeVars (\_ (FVed fvs _) -> fvs)
+(sizedFVedVarFreeVars',       sizedFVedTermFreeVars,       sizedFVedTermFreeVars',       sizedFVedAltsFreeVars,       sizedFVedValueFreeVars,       sizedFVedValueFreeVars')       = mkFreeVars (\_ (Comp (Sized _ (FVed fvs _))) -> fvs)
+(taggedTermVarFreeVars',      taggedTermFreeVars,          taggedTermFreeVars',          taggedAltsFreeVars,          taggedValueFreeVars,          taggedValueFreeVars')          = mkFreeVars (\f (Tagged _ e) -> f e)
+(taggedSizedFVedVarFreeVars', taggedSizedFVedTermFreeVars, taggedSizedFVedTermFreeVars', taggedSizedFVedAltsFreeVars, taggedSizedFVedValueFreeVars, taggedSizedFVedValueFreeVars') = mkFreeVars (\_ (Comp (Tagged _ (Comp (Sized _ (FVed fvs _))))) -> fvs)
 
 {-# INLINE mkFreeVars #-}
 mkFreeVars :: (forall a. (a -> FreeVars) -> ann a -> FreeVars)
@@ -104,8 +105,3 @@ fvedValue v = FVed (fvedValueFreeVars' v) v
 
 fvedTerm :: TermF FVed -> FVedTerm
 fvedTerm e = FVed (fvedTermFreeVars' e) e
-
-
-type TaggedFVedTerm = (Tagged :.: FVed) (TermF (Tagged :.: FVed))
-type TaggedFVedAlt = AltF (Tagged :.: FVed)
-type TaggedFVedValue = ValueF (Tagged :.: FVed)

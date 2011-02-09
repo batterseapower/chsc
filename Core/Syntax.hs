@@ -1,4 +1,4 @@
-{-# LANGUAGE PatternGuards, ViewPatterns, TypeSynonymInstances, FlexibleInstances, Rank2Types, NoMonoPatBinds, NoMonomorphismRestriction #-}
+{-# LANGUAGE PatternGuards, ViewPatterns, TypeSynonymInstances, FlexibleInstances, Rank2Types #-}
 module Core.Syntax where
 
 import Core.Data (DataCon)
@@ -6,9 +6,6 @@ import Core.Data (DataCon)
 import Name
 import Utilities
 import StaticFlags
-
-import qualified Data.Foldable as Foldable
-import Data.Monoid (Sum(..))
 
 
 type Var = Name
@@ -195,36 +192,6 @@ isCheap _           = False
 
 termIsCheap :: Term -> Bool
 termIsCheap = isCheap . unI
-
-
--- NB: this group of bindings requires NoMonomorphismRestriction
-termSize :: Foldable.Foldable ann => ann (TermF ann) -> Int
-altSize' :: Foldable.Foldable ann => AltF ann -> Int
-valueSize :: Foldable.Foldable ann => ann (ValueF ann) -> Int
-valueSize' :: Foldable.Foldable ann => ValueF ann -> Int
-(termSize, altSize', valueSize, valueSize') = (term, alt', value, value')
-  where
-    rec f x = 1 + getSum (Foldable.foldMap (Sum . f) x)
-    
-    term = rec term'
-    
-    term' e = case e of
-        Var _ -> 0
-        Value v -> value' v
-        App e _ -> term e
-        PrimOp _ es -> sum (map term es)
-        Case e alts -> term e + sum (map alt' alts)
-        LetRec xes e -> sum (map (term . snd) xes) + term e
-    
-    alt' = term . snd
-    
-    value = rec value'
-    
-    value' v = case v of
-        Indirect _ -> 0
-        Lambda _ e -> term e
-        Data _ _ -> 0
-        Literal _ -> 0
 
 
 class Symantics ann where

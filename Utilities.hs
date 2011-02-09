@@ -128,7 +128,7 @@ instance NFData a => NFData1 ((,) a) where
     rnf1 (a, b) = rnf a `seq` rnf b
 
 
-data Counted a = Counted { count :: Int, countee :: a }
+data Counted a = Counted { count :: !Int, countee :: !a }
 
 instance Show1 Counted where
     showsPrec1 prec (Counted c x) = showParen (prec >= appPrec) (showString "Counted" . showsPrec appPrec c . showsPrec appPrec x)
@@ -150,6 +150,8 @@ instance Functor Counted where
 
 
 newtype (f :.: g) a = Comp { unComp :: f (g a) }
+
+infixr 9 :.:
 
 instance (Copointed f, Copointed g) => Copointed (f :.: g) where
     extract = extract . extract . unComp
@@ -215,6 +217,30 @@ instance NFData1 Tagged where
 
 instance Pretty1 Tagged where
     pPrintPrec1 level prec (Tagged tg x) = braces (pPrint tg) <+> pPrintPrec level prec x
+
+
+type Size = Int
+
+data Sized a = Sized { size :: !Size, sizee :: !a }
+             deriving (Functor, Foldable.Foldable, Traversable.Traversable)
+
+instance Copointed Sized where
+    extract = sizee
+
+instance Show1 Sized where
+    showsPrec1 prec (Sized sz x) = showParen (prec >= appPrec) (showString "Sized" . showsPrec appPrec sz . showsPrec appPrec x)
+
+instance Eq1 Sized where
+    eq1 (Sized sz1 x1) (Sized sz2 x2) = sz1 == sz2 && x1 == x2
+
+instance Ord1 Sized where
+    compare1 (Sized sz1 x1) (Sized sz2 x2) = (sz1, x1) `compare` (sz2, x2)
+
+instance NFData1 Sized where
+    rnf1 (Sized a b) = rnf a `seq` rnf b
+
+instance Pretty1 Sized where
+    pPrintPrec1 level prec (Sized _ x) = pPrintPrec level prec x
 
 
 instance Show IdSupply where

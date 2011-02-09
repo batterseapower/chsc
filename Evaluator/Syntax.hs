@@ -5,6 +5,7 @@ import Size.Deeds
 
 import Core.FreeVars
 import Core.Renaming
+import Core.Size
 import Core.Syntax
 import Core.Tag
 
@@ -17,47 +18,57 @@ import Algebra.Lattice
 import qualified Data.Map as M
 
 
-type Anned = Tagged :.: FVed
+type Anned = Tagged :.: Sized :.: FVed
 type AnnedTerm = Anned (TermF Anned)
 type AnnedValue = ValueF Anned
 type AnnedAlt = AltF Anned
 
 annee :: Anned a -> a
-annee = fvee . tagee . unComp
+annee = extract
+
+annedSize :: Anned a -> Size
+annedSize = size . unComp . tagee . unComp
 
 annedFreeVars :: Anned a -> FreeVars
-annedFreeVars = freeVars . tagee . unComp
+annedFreeVars = freeVars . sizee . unComp . tagee . unComp
 
 annedTag :: Anned a -> Tag
 annedTag = tag . unComp
 
 
-annedVarFreeVars' = taggedFVedVarFreeVars'
-annedTermFreeVars = taggedFVedTermFreeVars
-annedTermFreeVars' = taggedFVedTermFreeVars'
-annedValueFreeVars = taggedFVedValueFreeVars
-annedValueFreeVars' = taggedFVedValueFreeVars'
-annedAltsFreeVars = taggedFVedAltsFreeVars
+annedVarFreeVars' = taggedSizedFVedVarFreeVars'
+annedTermFreeVars = taggedSizedFVedTermFreeVars
+annedTermFreeVars' = taggedSizedFVedTermFreeVars'
+annedValueFreeVars = taggedSizedFVedValueFreeVars
+annedValueFreeVars' = taggedSizedFVedValueFreeVars'
+annedAltsFreeVars = taggedSizedFVedAltsFreeVars
 
-renameAnnedTerm = renameTaggedFVedTerm :: IdSupply -> Renaming -> AnnedTerm -> AnnedTerm
-renameAnnedValue = renameTaggedFVedValue
-renameAnnedValue' = renameTaggedFVedValue'
-renameAnnedAlts = renameTaggedFVedAlts
+annedVarSize' = taggedSizedFVedVarSize'
+annedTermSize' = taggedSizedFVedTermSize'
+annedTermSize = taggedSizedFVedTermSize
+annedValueSize' = taggedSizedFVedValueSize'
+annedValueSize = taggedSizedFVedValueSize
+annedAltsSize = taggedSizedFVedAltsSize
 
-detagAnnedTerm = taggedFVedTermToFVedTerm
-detagAnnedValue = taggedFVedValueToFVedValue
-detagAnnedValue' = taggedFVedValue'ToFVedValue'
-detagAnnedAlts = taggedFVedAltsToFVedAlts
+renameAnnedTerm = renameTaggedSizedFVedTerm :: IdSupply -> Renaming -> AnnedTerm -> AnnedTerm
+renameAnnedValue = renameTaggedSizedFVedValue
+renameAnnedValue' = renameTaggedSizedFVedValue'
+renameAnnedAlts = renameTaggedSizedFVedAlts
+
+detagAnnedTerm = taggedSizedFVedTermToFVedTerm
+detagAnnedValue = taggedSizedFVedValueToFVedValue
+detagAnnedValue' = taggedSizedFVedValue'ToFVedValue'
+detagAnnedAlts = taggedSizedFVedAltsToFVedAlts
 
 
 annedVar :: Tag -> Var -> Anned Var
-annedVar   tg x = Comp (Tagged tg (FVed (annedVarFreeVars' x)  x))
+annedVar   tg x = Comp (Tagged tg (Comp (Sized (annedVarSize' x)   (FVed (annedVarFreeVars' x)  x))))
 
 annedTerm :: Tag -> TermF Anned -> AnnedTerm
-annedTerm  tg e = Comp (Tagged tg (FVed (annedTermFreeVars' e)  e))
+annedTerm  tg e = Comp (Tagged tg (Comp (Sized (annedTermSize' e)  (FVed (annedTermFreeVars' e)  e))))
 
 annedValue :: Tag -> ValueF Anned -> Anned AnnedValue
-annedValue tg v = Comp (Tagged tg (FVed (annedValueFreeVars' v) v))
+annedValue tg v = Comp (Tagged tg (Comp (Sized (annedValueSize' v) (FVed (annedValueFreeVars' v) v))))
 
 
 toAnnedTerm :: Term -> AnnedTerm

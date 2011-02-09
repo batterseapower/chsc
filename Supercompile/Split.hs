@@ -354,19 +354,19 @@ optimiseSplit :: MonadStatics m
 optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
     -- 0) The "process tree" splits at this point. We can choose to distribute the deeds between the children in a number of ways
     let stateSize (h, k, in_qa) = heapSize h + stackSize k + qaSize (snd in_qa)
-          where qaSize = termSize . fmap qaToAnnedTerm'
+          where qaSize = annedSize . fmap qaToAnnedTerm'
                 heapBindingSize hb = case hb of
                     Environmental    -> 0
                     Updated _ _      -> 0
-                    Phantom _        -> 0
-                    Unfolding (_, v) -> valueSize v
-                    Concrete (_, e)  -> termSize e
+                    Phantom (_, e)   -> if pHANTOM_LOOKTHROUGH then annedSize e else 0
+                    Unfolding (_, v) -> annedSize v
+                    Concrete (_, e)  -> annedSize e
                 heapSize (Heap h _) = sum (map heapBindingSize (M.elems h))
                 stackSize = sum . map (stackFrameSize . tagee)
                 stackFrameSize kf = 1 + case kf of
                     Apply _                 -> 0
-                    Scrutinise in_alts      -> sum (map altSize' (snd in_alts))
-                    PrimApply _ in_vs in_es -> sum (map (valueSize . snd) in_vs) + sum (map (termSize . snd) in_es)
+                    Scrutinise (_, alts)    -> annedAltsSize alts
+                    PrimApply _ in_vs in_es -> sum (map (annedValueSize . snd) in_vs ++ map (annedTermSize . snd) in_es)
                     Update _                -> 0
         bracketSizes = map stateSize . fillers
         

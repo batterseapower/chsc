@@ -2,6 +2,7 @@
 module Main (main) where
 
 import Core.FreeVars
+import Core.Size
 import Core.Syntax
 import Core.Parser
 

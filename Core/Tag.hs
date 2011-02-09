@@ -4,14 +4,15 @@ module Core.Tag where
 import Utilities
 
 import Core.FreeVars
+import Core.Size
 import Core.Syntax
 
 
 tagTerm :: Term -> TaggedTerm
 tagTerm = mkTag (\i f (I e) -> Tagged (hashedId i) (f e))
 
-tagFVedTerm :: FVedTerm -> TaggedFVedTerm
-tagFVedTerm = mkTag (\i f (FVed fvs e) -> Comp (Tagged (hashedId i) (FVed fvs (f e))))
+tagFVedTerm :: SizedFVedTerm -> TaggedSizedFVedTerm
+tagFVedTerm = mkTag (\i f e -> Comp (Tagged (hashedId i) (fmap f e)))
 
 
 {-# INLINE mkTag #-}
@@ -44,10 +45,10 @@ mkTag rec = term tagIdSupply
     alternative ids (con, e) = (con, term ids e)
 
 
-(taggedTermToTerm,         taggedAltsToAlts,         taggedValueToValue,         taggedValue'ToValue')         = mkDetag (\f e -> I (f (tagee e)))
-(fVedTermToTerm,           fVedAltsToAlts,           fVedValueToValue,           fVedValue'ToValue')           = mkDetag (\f e -> I (f (fvee e)))
-(taggedFVedTermToTerm,     taggedFVedAltsToAlts,     taggedFVedValueToValue,     taggedFVedValue'ToValue')     = mkDetag (\f e -> I (f (fvee (tagee (unComp e)))))
-(taggedFVedTermToFVedTerm, taggedFVedAltsToFVedAlts, taggedFVedValueToFVedValue, taggedFVedValue'ToFVedValue') = mkDetag (\f e -> FVed (freeVars (tagee (unComp e))) (f (fvee (tagee (unComp e)))))
+(taggedTermToTerm,              taggedAltsToAlts,              taggedValueToValue,              taggedValue'ToValue')              = mkDetag (\f e -> I (f (tagee e)))
+(fVedTermToTerm,                fVedAltsToAlts,                fVedValueToValue,                fVedValue'ToValue')                = mkDetag (\f e -> I (f (fvee e)))
+(taggedSizedFVedTermToTerm,     taggedSizedFVedAltsToAlts,     taggedSizedFVedValueToValue,     taggedSizedFVedValue'ToValue')     = mkDetag (\f e -> I (f (fvee (sizee (unComp (tagee (unComp e)))))))
+(taggedSizedFVedTermToFVedTerm, taggedSizedFVedAltsToFVedAlts, taggedSizedFVedValueToFVedValue, taggedSizedFVedValue'ToFVedValue') = mkDetag (\f e -> FVed (freeVars (sizee (unComp (tagee (unComp e))))) (f (extract e)))
 
 
 {-# INLINE mkDetag #-}
