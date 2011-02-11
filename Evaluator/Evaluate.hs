@@ -18,10 +18,15 @@ import qualified Data.Map as M
 
 
 -- | Non-expansive simplification we can do everywhere safely
+--
+-- Normalisation only ever releases deeds: it is *never* a net consumer of deeds. So normalisation
+-- will never be impeded by a lack of deeds.
 normalise :: (Deeds, UnnormalisedState) -> (Deeds, State)
 normalise = snd . step' True
 
 -- | Possibly non-normalising simplification we can only do if we are allowed to by a termination test
+--
+-- Unlike normalisation, stepping may be a net consumer of deeds and thus be impeded by a lack of them.
 step :: (Deeds, State) -> Maybe (Deeds, State)
 step ((step' False . second denormalise) -> (reduced, result)) = guard reduced >> return result
 
