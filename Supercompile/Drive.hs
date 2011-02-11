@@ -145,14 +145,17 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) (emptyLosers, S.empty)
         (stats', deeds'', Heap h'_winners' ids'', losers', speculated') = M.foldrWithKey speculate_one (stats, deeds', Heap h'_winners ids', losers, speculated) h'_winners
         speculate_one x' hb (stats, deeds, Heap h'_winners ids, losers, speculated)
           -- | not (isValue (annee (snd in_e))), traceRender ("speculate", x', depth, pPrintFullUnnormalisedState (Heap (h {- `exclude` M.keysSet base_h -}) ids, k, in_e)) False = undefined
-          | Just tg <- heapBindingTag hb
+          | Concrete (_, annedTag -> tg) <- hb
           , x' `S.notMember` speculated
           , let -- We're going to be a bit clever here: to speculate a heap binding, just put that variable into the focus and reduce the resulting term.
                 -- The only complication occurs when comes back with a non-empty stack, in which case we need to deal with any unreduced update frames.
-                ((losers', speculated'), (stats', (deeds', Heap h' ids', k, _in_qa'))) = go (depth + 1) hist (losers, S.insert x' speculated) (normalise (deeds, Heap h'_winners ids, [], (mkIdentityRenaming [x'], annedTerm tg (Var x'))))
+                ((losers', speculated'), (stats', state'@(_, _, k, _))) = go (depth + 1) hist (losers, S.insert x' speculated) (normalise (deeds, Heap h'_winners ids, [], (mkIdentityRenaming [x'], annedTerm tg (Var x'))))
                 -- Update frames present in the output indicate a failed speculation attempt. (Though if a var is the focus without an update frame yet that is also failure of a sort...)
-                -- We restore the original input bindings for such variables. We will also add them to the speculated set so we don't bother looking again. Note that this might make some heap
-                -- bindings dead (because they are referred to by the overwritten terms), but we'll just live with that and have the GC clean it up later (pessimising deeds a bit, but never mind).
+                --
+                -- Old Plan
+                -- ~~~~~~~~
+                -- I used to restore the original input bindings for variables bound by remaining update frames. We also added them to the speculated set so we don't bother looking again. Note that this might make
+                -- some heap bindings dead (because they are referred to by the overwritten terms), but we'll just live with that and have the GC clean it up later (pessimising deeds a bit, but never mind).
                 --
                 -- More seriously, one of the update frames could be for a heap binding not present in the h'_winners. If anything in the new heap h' might refer to that, we have to be careful.
                 -- One case is that that heap binding is referred to only by bindings that are made dead by the restoration - consider:
@@ -177,19 +180,40 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) (emptyLosers, S.empty)
                 -- Let's say we stop before evalutating e further, with update frames for foo and ys present. We can restore the original foo binding, but that will leave xs with a dangling
                 -- reference to the ys binding that we couldn't restore. Argh!
                 --
-                -- What I do in this situation (failed_restore non-null) is to "agressively" roll back, discarding work done by the nested reduce and any things it added to the speculated set.
-                -- Hopefully this case won't hit too often so it won't slow speculation down. (In fact, I think it only hits on the SimpleLaziness toy benchmark).
-                -- 
-                -- TODO: this is all very nasty
+                -- What I did in this situation is to "agressively" roll back, discarding work done by the nested reduce and any things it added to the speculated set.
+                -- I hoped this case didn't hit too often so it won't slow speculation down. Unfortunately after some changes to the normaliser it hit *all* *the* *time* in e.g. SpeculationWorstCase
+                -- and made the supercompiler non-terminate.
+                --
+                -- New Plan
+                -- ~~~~~~~~
+                -- The new plan is to give up on this nonsense and just reconstruct a new heap from the output of recursive speculation. The disadvantages of this approach are:
+                --  * We might bloat output terms a bit because versions of terms that failed speculation will stick around
+                --  * We might end up spuriously reducing the same binding every time we recurse in sc because we get a chance to speculate it anew. This is deeply uncool because terms that would
+                --    normally be reduce-stopped may now get reduce-stopped once per level of sc recursion (potentially getting larger every time).
+                --    FIXME: this is serious :-(
+                (deeds', heap') = partiallyRebuildState state'
                 spec_failed_xs = S.fromList [x' | Update x' <- map tagee k]
-                h_restore = h'_winners `restrict` spec_failed_xs
-                failed_restore = spec_failed_xs S.\\ M.keysSet h_restore
-          -- , S.null failed_restore || trace (show (pPrint (x', failed_restore, spec_failed_xs, pPrintFullState _state', pPrintHeap (Heap h' ids'), pPrintHeap $ Heap h'_winners ids'))) True
-          = if S.null failed_restore
-            then (stats `mappend` stats', deeds', Heap (h_restore `M.union` h') ids', IS.fromList [tg | hb <- M.elems h_restore, Just tg <- [heapBindingTag hb]] `IS.union` losers', spec_failed_xs `S.union` speculated')
-            else (stats `mappend` stats', deeds,  Heap h'_winners ids, losers', S.insert x' speculated)
+                spec_failed_h = h'_winners `restrict` spec_failed_xs
+          = (stats `mappend` stats', deeds', heap', IS.fromList [tg | hb <- M.elems spec_failed_h, Just tg <- [heapBindingTag hb]] `IS.union` losers', spec_failed_xs `S.union` speculated')
           | otherwise
           = (stats, deeds, Heap h'_winners ids, losers, speculated)
+
+    partiallyRebuildState :: State -> (Deeds, Heap)
+    partiallyRebuildState (deeds, Heap h ids, k, (rn, qa)) = (deeds + annedSize e', Heap (h `M.union` h_updated) ids)
+      where
+        (h_updated, (_, e')) = rebuildStack k (renameIn (renameAnnedTerm ids) (rn, fmap qaToAnnedTerm' qa))
+          
+        rebuildStack []     e' = (M.empty, promote e')
+        rebuildStack (kf:k) e' = case tagee kf of
+            Apply x'                        -> rebuildStack k (annedTerm tg (e' `App` x'))
+            Scrutinise in_alts              -> rebuildStack k (annedTerm tg (Case e' (renameIn (renameAnnedAlts ids) in_alts)))
+            PrimApply pop in_anned_vs in_es -> rebuildStack k (annedTerm tg (PrimOp pop (map (fmap Value . renameIn (renameAnnedValue ids)) in_anned_vs ++ e' : map (renameIn (renameAnnedTerm ids)) in_es)))
+            Update x'                       -> (M.insert x' (Concrete (promote e')) h', in_e)
+              where (h', in_e) = rebuildStack k (annedTerm tg (Var x'))
+          where tg = tag kf
+    
+        promote :: AnnedTerm -> In AnnedTerm
+        promote e' = (mkIdentityRenaming (S.toList (annedFreeVars e')), e')
 
 reduce :: State -> (SCStats, State)
 reduce orig_state = go (mkHistory (extra wQO)) orig_state
