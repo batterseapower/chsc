@@ -20,7 +20,7 @@ residualiseValue :: IdSupply -> In (Anned AnnedValue) -> Out (FVed FVedValue)
 residualiseValue ids = detagAnnedValue . renameIn (renameAnnedValue ids)
 
 residualiseUnnormalisedState :: UnnormalisedState -> (Out [(Var, Doc)], Out FVedTerm)
-residualiseUnnormalisedState (heap, k, in_e) = residualiseHeap heap (\ids -> residualiseStack ids k (residualiseTerm ids in_e))
+residualiseUnnormalisedState (_deeds, heap, k, in_e) = residualiseHeap heap (\ids -> residualiseStack ids k (residualiseTerm ids in_e))
 
 residualiseHeap :: Heap -> (IdSupply -> ((Out [(Var, Doc)], Out [(Var, FVedTerm)]), Out FVedTerm)) -> (Out [(Var, Doc)], Out FVedTerm)
 residualiseHeap (Heap h ids) (($ ids) -> ((floats_static_k, floats_nonstatic_k), e)) = (floats_static_h ++ floats_static_k, letRecSmart (floats_nonstatic_h ++ floats_nonstatic_k) e)

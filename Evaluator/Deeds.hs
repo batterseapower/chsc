@@ -1,14 +1,9 @@
 {-# LANGUAGE BangPatterns, TupleSections, Rank2Types #-}
 module Evaluator.Deeds where
 
-import Evaluator.Syntax
-
-import Core.Renaming (In)
-
 import StaticFlags
 import Utilities
 
-import qualified Data.Map as M
 import Data.Ord (comparing)
 
 
@@ -53,16 +48,3 @@ apportion orig_n weighting = result
 noChange, noGain :: Deeds -> Deeds -> Bool
 noChange = (==)
 noGain = (>=)
-
-
-releaseHeapBindingDeeds :: Deeds -> HeapBinding -> Deeds
-releaseHeapBindingDeeds deeds hb = deeds + heapBindingSize hb
-
-releasePureHeapDeeds :: Deeds -> PureHeap -> Deeds
-releasePureHeapDeeds = M.fold (flip releaseHeapBindingDeeds)
-
-releaseStateDeed :: Deeds -> (Heap, Stack, In (Anned a)) -> Deeds
-releaseStateDeed deeds (Heap h _, k, (_, e))
-  = foldl' (\deeds kf -> deeds + stackFrameSize (tagee kf))
-           (releasePureHeapDeeds (deeds + annedSize e) h)
-           k

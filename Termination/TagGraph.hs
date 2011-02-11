@@ -30,7 +30,7 @@ embedWithTagGraphs = precomp stateTags $ postcomp generaliserFromGrowing $ refin
     -- consolidate :: (Functor f, Foldable.Foldable f) => f (TagSet, Nat) -> (TagSet, f Nat)
     --     consolidate (fmap fst &&& fmap snd -> (ims, counts)) = (Foldable.foldr (IM.unionWith (\() () -> ())) IM.empty ims, counts)
     
-    stateTags (Heap h _, k, in_qa@(_, qa)) = -- traceRender ("stateTags (TagGraph)", graph) $
+    stateTags (_, Heap h _, k, in_qa@(_, qa)) = -- traceRender ("stateTags (TagGraph)", graph) $
                                              graph
       where
         graph = pureHeapTagGraph h  

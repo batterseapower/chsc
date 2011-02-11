@@ -61,9 +61,9 @@ instance Monoid SCStats where
 
 
 supercompile :: Term -> (SCStats, Term)
-supercompile e = traceRender ("all input FVs", input_fvs) $ second (fVedTermToTerm . if pRETTIFY then prettify else id) $ runScpM $ liftM snd $ sc (mkHistory (extra wQO)) (deeds, state)
+supercompile e = traceRender ("all input FVs", input_fvs) $ second (fVedTermToTerm . if pRETTIFY then prettify else id) $ runScpM $ liftM snd $ sc (mkHistory (extra wQO)) state
   where input_fvs = annedTermFreeVars anned_e
-        (deeds, state) = normalise ((bLOAT_FACTOR - 1) * annedSize anned_e, (Heap (setToMap Environmental input_fvs) reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, anned_e)))
+        state = normalise ((bLOAT_FACTOR - 1) * annedSize anned_e, Heap (setToMap Environmental input_fvs) reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, anned_e))
         anned_e = toAnnedTerm e
 
 --
@@ -72,8 +72,8 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ second (fVedTermToTe
 
 -- TODO: have the garbage collector collapse indirections to indirections (but unlike GHC, not further!)
 -- TODO: have the garbage collector eliminate extra update frames
-gc :: (Deeds, State) -> (Deeds, State)
-gc (deeds, (Heap h ids, k, in_e)) = transitiveInline h (releasePureHeapDeeds deeds h, (Heap M.empty ids, k, in_e))
+gc :: State -> State
+gc (deeds, Heap h ids, k, in_e) = transitiveInline h (releasePureHeapDeeds deeds h, Heap M.empty ids, k, in_e)
   where
     -- We used to garbage-collect in the evaluator, when we executed the rule for update frames. This had two benefits:
     --  1) We don't have to actually update the heap or even claim a new deed
@@ -95,17 +95,17 @@ emptyLosers :: Losers
 emptyLosers = IS.empty
 
 
-speculate :: ((Deeds, State) -> (SCStats, (Deeds, State)))
-          -> (Deeds, State) -> (SCStats, (Deeds, State))
+speculate :: (State -> (SCStats, State))
+          -> State -> (SCStats, State)
 speculate reduce = snd . go (0 :: Int) (mkHistory wQO) (emptyLosers, S.empty)
   where
-    go depth hist (losers, speculated) (deeds, state) = case terminate hist state of
-        Continue hist' -> continue depth hist' (losers, speculated) (deeds, state)
-        _              -> ((losers, speculated), (mempty, (deeds, state))) -- We MUST NOT EVER reduce in this branch or speculation will loop on e.g. infinite map
+    go depth hist (losers, speculated) state = case terminate hist state of
+        Continue hist' -> continue depth hist' (losers, speculated) state
+        _              -> ((losers, speculated), (mempty, state)) -- We MUST NOT EVER reduce in this branch or speculation will loop on e.g. infinite map
     
-    continue depth hist (losers, speculated) (deeds, state) = ((losers', speculated'), (stats', (deeds'', (Heap (h'_winners' `M.union` h'_losers) ids'', k, in_e))))
+    continue depth hist (losers, speculated) state = ((losers', speculated'), (stats', (deeds'', Heap (h'_winners' `M.union` h'_losers) ids'', k, in_e)))
       where
-        (stats, (deeds', _state'@(Heap h' ids', k, in_e))) = reduce (deeds, state)
+        (stats, _state'@(deeds', Heap h' ids', k, in_e)) = reduce state
         
         -- Note [Controlling speculation]
         -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -149,7 +149,7 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) (emptyLosers, S.empty)
           , x' `S.notMember` speculated
           , let -- We're going to be a bit clever here: to speculate a heap binding, just put that variable into the focus and reduce the resulting term.
                 -- The only complication occurs when comes back with a non-empty stack, in which case we need to deal with any unreduced update frames.
-                ((losers', speculated'), (stats', (deeds', (Heap h' ids', k, _in_qa')))) = go (depth + 1) hist (losers, S.insert x' speculated) (normalise (deeds, (Heap h'_winners ids, [], (mkIdentityRenaming [x'], annedTerm tg (Var x')))))
+                ((losers', speculated'), (stats', (deeds', Heap h' ids', k, _in_qa'))) = go (depth + 1) hist (losers, S.insert x' speculated) (normalise (deeds, Heap h'_winners ids, [], (mkIdentityRenaming [x'], annedTerm tg (Var x'))))
                 -- Update frames present in the output indicate a failed speculation attempt. (Though if a var is the focus without an update frame yet that is also failure of a sort...)
                 -- We restore the original input bindings for such variables. We will also add them to the speculated set so we don't bother looking again. Note that this might make some heap
                 -- bindings dead (because they are referred to by the overwritten terms), but we'll just live with that and have the GC clean it up later (pessimising deeds a bit, but never mind).
@@ -191,16 +191,16 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) (emptyLosers, S.empty)
           | otherwise
           = (stats, deeds, Heap h'_winners ids, losers, speculated)
 
-reduce :: (Deeds, State) -> (SCStats, (Deeds, State))
-reduce (deeds, orig_state) = go (mkHistory (extra wQO)) (deeds, orig_state)
+reduce :: State -> (SCStats, State)
+reduce orig_state = go (mkHistory (extra wQO)) orig_state
   where
-    go hist (deeds, state)
+    go hist state
       -- | traceRender ("reduce.go", pPrintFullState state) False = undefined
-      | otherwise = second (fromMaybe (deeds, state)) $ either (mempty { stat_reduce_stops = 1 },) (\mb_it -> maybe (mempty,Nothing) (second Just) mb_it) $ do
-          hist' <- case terminate hist (state, (deeds, state)) of
-                      Continue hist               -> Right hist
-                      Stop (_gen, (deeds, state)) -> trace "reduce-stop" $ Left (guard rEDUCE_ROLLBACK >> return (deeds, state)) -- TODO: generalise?
-          Right $ fmap (go hist') $ step (deeds, state)
+      | otherwise = second (fromMaybe state) $ either (mempty { stat_reduce_stops = 1 },) (\mb_it -> maybe (mempty,Nothing) (second Just) mb_it) $ do
+          hist' <- case terminate hist (state, state) of
+                      Continue hist      -> Right hist
+                      Stop (_gen, state) -> trace "reduce-stop" $ Left (guard rEDUCE_ROLLBACK >> return state) -- TODO: generalise?
+          Right $ fmap (go hist') $ step state
 
 
 --
@@ -388,25 +388,25 @@ addStats scstats = ScpM $ \_e s k -> k () (s { stats = stats s `mappend` scstats
 
 type RollbackScpM = Generaliser -> ScpM (Deeds, Out FVedTerm)
 
-sc, sc' :: History (State, RollbackScpM) (Generaliser, RollbackScpM) -> (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
+sc, sc' :: History (State, RollbackScpM) (Generaliser, RollbackScpM) -> State -> ScpM (Deeds, Out FVedTerm)
 sc  hist = memo (sc' hist)
-sc' hist (deeds, state) = (\raise -> check raise) `catchScpM` \gen -> stop gen hist -- TODO: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
+sc' hist state = (\raise -> check raise) `catchScpM` \gen -> stop gen hist -- TODO: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
   where
     check this_rb = case terminate hist (state, this_rb) of
                       Continue hist' -> continue hist'
                       Stop (gen, rb) -> maybe (stop gen hist) ($ gen) $ guard sC_ROLLBACK >> Just rb
     stop gen hist = do addStats $ mempty { stat_sc_stops = 1 }
-                       trace "sc-stop" $ split gen (sc hist) (deeds,  state) -- Keep the trace exactly here or it gets floated out by GHC
+                       trace "sc-stop" $ split gen (sc hist) state -- Keep the trace exactly here or it gets floated out by GHC
     continue hist = do traceRenderScpM ("reduce end", pPrintFullState state')
                        addStats stats
-                       split generaliseNothing (sc hist) (deeds', state')
-      where (stats, (deeds', state')) = second gc ((if sPECULATION then speculate else id) reduce (deeds, state)) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
+                       split generaliseNothing (sc hist) state'
+      where (stats, state') = second gc ((if sPECULATION then speculate else id) reduce state) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
 
-memo :: ((Deeds, State) -> ScpM (Deeds, Out FVedTerm))
-     ->  (Deeds, State) -> ScpM (Deeds, Out FVedTerm)
-memo opt (deeds, state) = do
+memo :: (State -> ScpM (Deeds, Out FVedTerm))
+     ->  State -> ScpM (Deeds, Out FVedTerm)
+memo opt state = do
     ps <- getPromises
-    case [ (p, (releaseStateDeed deeds state, fun p `varApps` tb_dynamic_vs))
+    case [ (p, (releaseStateDeed state, fun p `varApps` tb_dynamic_vs))
          | p <- ps
          , Just rn_lr <- [-- (\res -> if isNothing res then traceRender ("no match:", fun p) res else res) $
                            match (unI (meaning p)) state]
@@ -417,7 +417,7 @@ memo opt (deeds, state) = do
                tb_dynamic_vs = rn_fvs (abstracted p)
          ] of
       (_p, res):_ -> {- traceRender ("tieback", pPrintFullState state, fst res) $ -} do
-        traceRenderScpM ("=sc", fun _p, pPrintFullState state, deeds, res)
+        traceRenderScpM ("=sc", fun _p, pPrintFullState state, res)
         return res
       [] -> {- traceRender ("new drive", pPrintFullState state) $ -} do
         let (static_vs, vs) = stateStaticBindersAndFreeVars state
@@ -425,8 +425,8 @@ memo opt (deeds, state) = do
         -- NB: promises are lexically scoped because they may refer to FVs
         x <- freshHName
         promise P { fun = x, abstracted = S.toList (vs S.\\ static_vs), meaning = I state } $ do
-            traceRenderScpM (">sc", x, pPrintFullState state, deeds)
-            res <- opt (deeds, case state of (Heap h ids, k, in_e) -> (Heap (M.insert x Environmental h) ids, k, in_e)) -- TODO: should I just put "h" functions into a different set of statics??
+            traceRenderScpM (">sc", x, pPrintFullState state)
+            res <- opt (case state of (deeds, Heap h ids, k, in_e) -> (deeds, Heap (M.insert x Environmental h) ids, k, in_e)) -- TODO: should I just put "h" functions into a different set of statics??
             traceRenderScpM ("<sc", x, pPrintFullState state, res)
             return res
 

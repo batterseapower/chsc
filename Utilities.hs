@@ -644,6 +644,10 @@ instance Monad Identity where
     mx >>= fxmy = fxmy (unI mx)
 
 
+sumMap :: (Foldable.Foldable f, Num b) => (a -> b) -> f a -> b
+sumMap f = Foldable.foldr (\x n -> f x + n) 0
+
+
 class (Functor t, Foldable.Foldable t) => Accumulatable t where
     mapAccumT  ::            (acc -> x ->   (acc, y)) -> acc -> t x ->   (acc, t y)
     mapAccumTM :: Monad m => (acc -> x -> m (acc, y)) -> acc -> t x -> m (acc, t y)

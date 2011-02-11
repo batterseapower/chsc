@@ -10,9 +10,10 @@ module Evaluator.FreeVars (
     stateLiveness, stateFreeVars, stateStaticBinders, stateStaticBindersAndFreeVars, pureHeapBinders
   ) where
 
-import Core.Syntax
+import Evaluator.Deeds
 import Evaluator.Syntax
 
+import Core.Syntax
 import Core.FreeVars
 import Core.Renaming
 
@@ -86,21 +87,21 @@ stackFrameOpenFreeVars kf = case kf of
     Update x'               -> (S.singleton x', S.empty)
 
 -- | Returns (an overapproximation of) the free variables of the state that it would be useful to inline, and why that is so
-stateLiveness :: (Heap, Stack, In (Anned a)) -> Liveness
+stateLiveness :: (Deeds, Heap, Stack, In (Anned a)) -> Liveness
 stateLiveness state = mkLiveness (stateFreeVars state) ConcreteLive
 
 -- | Returns (an overapproximation of) the free variables that the state would have if it were residualised right now (i.e. variables bound by phantom bindings *are* in the free vars set)
-stateFreeVars :: (Heap, Stack, In (Anned a)) -> FreeVars
+stateFreeVars :: (Deeds, Heap, Stack, In (Anned a)) -> FreeVars
 stateFreeVars = snd . stateStaticBindersAndFreeVars
 
-stateStaticBinders :: (Heap, Stack, In (Anned a)) -> BoundVars
+stateStaticBinders :: (Deeds, Heap, Stack, In (Anned a)) -> BoundVars
 stateStaticBinders = fst . stateStaticBindersAndFreeVars
 
 -- | Returns the free variables that the state would have if it were residualised right now (i.e. excludes static binders),
 -- along with the static binders as a separate set.
-stateStaticBindersAndFreeVars :: (Heap, Stack, In (Anned a)) -> (BoundVars, FreeVars)
+stateStaticBindersAndFreeVars :: (Deeds, Heap, Stack, In (Anned a)) -> (BoundVars, FreeVars)
 pureHeapBinders :: PureHeap -> BoundVars
-(stateStaticBindersAndFreeVars, pureHeapBinders) = (\(Heap h _, k, in_e) -> case pureHeapOpenFreeVars h (stackOpenFreeVars k (inFreeVars annedFreeVars in_e)) of ((bvs_static', bvs_nonstatic'), fvs') -> (bvs_static', fvs' S.\\ bvs_nonstatic'),
+(stateStaticBindersAndFreeVars, pureHeapBinders) = (\(_, Heap h _, k, in_e) -> case pureHeapOpenFreeVars h (stackOpenFreeVars k (inFreeVars annedFreeVars in_e)) of ((bvs_static', bvs_nonstatic'), fvs') -> (bvs_static', fvs' S.\\ bvs_nonstatic'),
                                                     \h -> case pureHeapOpenFreeVars h (S.empty, S.empty) of ((bvs_static', bvs_nonstatic'), _fvs') -> bvs_static' `S.union` bvs_nonstatic')
   where
     pureHeapOpenFreeVars :: PureHeap -> (BoundVars, FreeVars) -> ((BoundVars, BoundVars), FreeVars)

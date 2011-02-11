@@ -18,7 +18,7 @@ import qualified Data.Set as S
 match :: State -- ^ Tieback semantics
       -> State -- ^ This semantics
       -> Maybe Renaming -- ^ Renaming from left to right
-match (Heap h_l _, k_l, in_qa_l) (Heap h_r _, k_r, in_qa_r) = -- (\res -> traceRender ("match", M.keysSet h_l, residualiseDriveState (Heap h_l prettyIdSupply, k_l, in_e_l), M.keysSet h_r, residualiseDriveState (Heap h_r prettyIdSupply, k_r, in_e_r), res) res) $
+match (_deeds_l, Heap h_l _, k_l, in_qa_l) (_deeds_r, Heap h_r _, k_r, in_qa_r) = -- (\res -> traceRender ("match", M.keysSet h_l, residualiseDriveState (Heap h_l prettyIdSupply, k_l, in_e_l), M.keysSet h_r, residualiseDriveState (Heap h_r prettyIdSupply, k_r, in_e_r), res) res) $
   do
     free_eqs1 <- matchAnned (matchInQA matchIdSupply) in_qa_l in_qa_r
     (bound_eqs, free_eqs2) <- matchEC k_l k_r

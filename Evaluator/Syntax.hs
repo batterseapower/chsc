@@ -1,6 +1,8 @@
 {-# LANGUAGE TypeOperators #-}
 module Evaluator.Syntax where
 
+import Evaluator.Deeds
+
 import Core.FreeVars
 import Core.Renaming
 import Core.Size
@@ -101,11 +103,11 @@ qaToAnnedTerm' (Question x) = Var x
 qaToAnnedTerm' (Answer v)   = Value v
 
 
-type UnnormalisedState = (Heap, Stack, In AnnedTerm)
-type State = (Heap, Stack, In (Anned QA))
+type UnnormalisedState = (Deeds, Heap, Stack, In AnnedTerm)
+type State = (Deeds, Heap, Stack, In (Anned QA))
 
 denormalise :: State -> UnnormalisedState
-denormalise (h, k, (rn, qa)) = (h, k, (rn, fmap qaToAnnedTerm' qa))
+denormalise (deeds, h, k, (rn, qa)) = (deeds, h, k, (rn, fmap qaToAnnedTerm' qa))
 
 -- | We do not abstract the h functions over static variables. This helps typechecking and gives GHC a chance to inline the definitions.
 data HeapBinding = Environmental                     -- ^ Corresponding variable is static and free in the original input, or the name of a h-function. No need to generalise either of these (remember that h-functions don't appear in the input).
@@ -204,3 +206,19 @@ stackFrameSize kf = 1 + case kf of
     Scrutinise (_, alts)    -> annedAltsSize alts
     PrimApply _ in_vs in_es -> sum (map (annedValueSize . snd) in_vs ++ map (annedTermSize . snd) in_es)
     Update _                -> 0
+
+
+addStateDeeds :: Deeds -> (Deeds, Heap, Stack, In (Anned a)) -> (Deeds, Heap, Stack, In (Anned a))
+addStateDeeds extra_deeds (deeds, h, k, in_e) = (extra_deeds + deeds, h, k, in_e)
+
+releaseHeapBindingDeeds :: Deeds -> HeapBinding -> Deeds
+releaseHeapBindingDeeds deeds hb = deeds + heapBindingSize hb
+
+releasePureHeapDeeds :: Deeds -> PureHeap -> Deeds
+releasePureHeapDeeds = M.fold (flip releaseHeapBindingDeeds)
+
+releaseStateDeed :: (Deeds, Heap, Stack, In (Anned a)) -> Deeds
+releaseStateDeed (deeds, Heap h _, k, (_, e))
+  = foldl' (\deeds kf -> deeds + stackFrameSize (tagee kf))
+           (releasePureHeapDeeds (deeds + annedSize e) h)
+           k
