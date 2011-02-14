@@ -34,7 +34,7 @@ step' :: Bool -> UnnormalisedState -> (Bool, State) -- The flag indicates whethe
 step' normalising state =
     (\res@(_reduced, state') -> assertRender (hang (text "step': deeds lost or gained:") 2 (pPrint state $$ pPrint state'))
                                              (noChange (releaseStateDeed state) (releaseStateDeed state')) $
-                                assertRender (text "step': FVs") (stateFreeVars state == stateFreeVars state') $
+                                assertRender (text "step': FVs" $$ pPrint (stateFreeVars state) $$ pPrint state $$ pPrint (stateFreeVars state') $$ pPrint state') (stateFreeVars state == stateFreeVars state') $
                                 -- traceRender (text "normalising" $$ nest 2 (pPrintFullUnnormalisedState state) $$ text "to" $$ nest 2 (pPrintFullState state')) $
                                 res) $
     go state
@@ -50,7 +50,7 @@ step' normalising state =
       where tg = annedTag e
 
     allocate :: Deeds -> Heap -> Stack -> In ([(Var, AnnedTerm)], AnnedTerm) -> UnnormalisedState
-    allocate deeds (Heap h ids) k (rn, (xes, e)) = (deeds, Heap (h `M.union` M.map Concrete (M.fromList xes')) ids', k, (rn', e))
+    allocate deeds (Heap h ids) k (rn, (xes, e)) = (deeds, Heap (h `M.union` M.fromList [(x', internallyBound in_e) | (x', in_e) <- xes']) ids', k, (rn', e))
       where (ids', rn', xes') = renameBounds (\_ x' -> x') ids rn xes
 
     prepareValue :: Deeds
@@ -65,19 +65,13 @@ step' normalising state =
     lookupValue :: Heap -> Out Var -> Maybe (In AnnedValue)
     lookupValue (Heap h _) x' = do
         hb <- M.lookup x' h
-        case hb of
-          Concrete  (rn, anned_e) -> fmap ((rn,) . annee) $ termToValue anned_e
-          Unfolding (rn, anned_v) -> Just (rn, annee anned_v)
-          _                       -> Nothing
+        case heapBindingTerm hb of
+          Just  (rn, anned_e) -> fmap ((rn,) . annee) $ termToValue anned_e
+          Nothing             -> Nothing
     
     -- Deal with a variable at the top of the stack
     -- Might have to claim deeds if inlining a non-value non-internally-bound thing here
-    force :: Deeds -> Heap -> Stack -> Tag -> Out Var -> Maybe UnnormalisedState
-    force deeds (Heap h ids) k tg x'
-      | Just in_v <- lookupValue (Heap h ids) x'
-      = do { (deeds, in_v) <- prepareValue deeds x' in_v; unwind deeds (Heap h ids) k tg in_v }
-      | otherwise
-      = do { Concrete in_e <- M.lookup x' h; return (deeds, Heap (M.delete x' h) ids, Tagged tg (Update x') : k, in_e) }
+    force deeds (Heap h ids) k tg x' = do { hb <- M.lookup x' h; in_e@(_, e) <- heapBindingTerm hb; deeds <- claimDeeds deeds (annedSize e - heapBindingSize hb); return (deeds, Heap (M.delete x' h) ids, Tagged tg (Update x') : k, in_e) }
 
     -- Deal with a value at the top of the stack
     unwind :: Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> Maybe UnnormalisedState
@@ -119,8 +113,8 @@ step' normalising state =
           = Just (deeds + annedValueSize' v + annedAltsSize rest, Heap h ids, k, alt_e)
           | ((mb_alt_x, alt_e), rest):_ <- [((mb_alt_x, alt_e), rest) | ((DefaultAlt mb_alt_x, alt_e), rest) <- bagContexts alts]
           = Just $ case mb_alt_x of
-                     Nothing    -> (deeds + annedValueSize' v + annedAltsSize rest, Heap h                                                               ids,  k, (rn_alts,  alt_e))
-                     Just alt_x -> (deeds +                     annedAltsSize rest, Heap (M.insert alt_x' (Concrete (rn_v, annedTerm tg_v $ Value v)) h) ids', k, (rn_alts', alt_e))
+                     Nothing    -> (deeds + annedValueSize' v + annedAltsSize rest, Heap h                                                                            ids,  k, (rn_alts,  alt_e))
+                     Just alt_x -> (deeds +                     annedAltsSize rest, Heap (M.insert alt_x' (internallyBound (rn_v, annedTerm tg_v $ Value v)) h) ids', k, (rn_alts', alt_e))
                        where (ids', rn_alts', alt_x') = renameBinder ids rn_alts alt_x
                              -- NB: we add the *non-dereferenced* value to the heap in a default branch with variable, because anything else may duplicate allocation
           | otherwise
@@ -148,4 +142,4 @@ step' normalising state =
         update :: Deeds -> Heap -> Stack -> Tag -> Out Var -> In AnnedValue -> Maybe UnnormalisedState
         update deeds (Heap h ids) k tg_v x' (rn, v) = case prepareValue deeds x' in_v of
             Nothing             -> trace (render (text "update-deeds:" <+> pPrint x')) Nothing
-            Just (deeds', in_v) ->                                                     Just (deeds', Heap (M.insert x' (Concrete (rn, annedTerm tg_v (Value v))) h) ids, k, second (annedTerm tg_v . Value) in_v)
+            Just (deeds', in_v) ->                                                     Just (deeds', Heap (M.insert x' (internallyBound (rn, annedTerm tg_v (Value v))) h) ids, k, second (annedTerm tg_v . Value) in_v)

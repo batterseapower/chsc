@@ -5,7 +5,7 @@ module Supercompile.Match (match) where
 import Core.Renaming
 import Core.Syntax
 
-import Evaluator.FreeVars (pureHeapBinders)
+import Evaluator.FreeVars (pureHeapVars)
 import Evaluator.Syntax
 
 import Renaming
@@ -22,7 +22,7 @@ match (_deeds_l, Heap h_l _, k_l, in_qa_l) (_deeds_r, Heap h_r _, k_r, in_qa_r) 
   do
     free_eqs1 <- matchAnned (matchInQA matchIdSupply) in_qa_l in_qa_r
     (bound_eqs, free_eqs2) <- matchEC k_l k_r
-    matchHeapExact h_l h_r (bound_eqs, free_eqs1 ++ free_eqs2)
+    matchHeap h_l h_r (bound_eqs, free_eqs1 ++ free_eqs2)
 
 matchAnned :: (In a -> In a -> b)
            -> In (Anned a) -> In (Anned a) -> b
@@ -42,7 +42,7 @@ matchInTerm' ids (rn_l, Value v_l)         (rn_r, Value v_r)         = matchInVa
 matchInTerm' ids (rn_l, App e_l x_l)       (rn_r, App e_r x_r)       = matchInTerm ids (rn_l, e_l) (rn_r, e_r) >>= \eqs -> return (matchInVar (rn_l, x_l) (rn_r, x_r) : eqs)
 matchInTerm' ids (rn_l, PrimOp pop_l es_l) (rn_r, PrimOp pop_r es_r) = guard (pop_l == pop_r) >> matchInList (matchInTerm ids) (rn_l, es_l) (rn_r, es_r)
 matchInTerm' ids (rn_l, Case e_l alts_l)   (rn_r, Case e_r alts_r)   = liftM2 (++) (matchInTerm ids (rn_l, e_l) (rn_r, e_r)) (matchInAlts ids (rn_l, alts_l) (rn_r, alts_r))
-matchInTerm' ids (rn_l, LetRec xes_l e_l)  (rn_r, LetRec xes_r e_r)  = matchInTerm ids'' (rn_l', e_l) (rn_r', e_r) >>= \eqs -> matchPureHeapExact ids'' [] eqs (M.map Concrete $ M.fromList xes_l') (M.map Concrete $ M.fromList xes_r')
+matchInTerm' ids (rn_l, LetRec xes_l e_l)  (rn_r, LetRec xes_r e_r)  = matchInTerm ids'' (rn_l', e_l) (rn_r', e_r) >>= \eqs -> matchLetRecs ids'' eqs xes_l' xes_r'
   where (ids',  rn_l', xes_l') = renameBounds (\_ x' -> x') ids  rn_l xes_l
         (ids'', rn_r', xes_r') = renameBounds (\_ x' -> x') ids' rn_r xes_r
 matchInTerm' _ _ _ = Nothing
@@ -107,11 +107,6 @@ matchECFrame' (PrimApply pop_l in_vs_l in_es_l) (PrimApply pop_r in_vs_r in_es_r
 matchECFrame' (Update x_l')                     (Update x_r')                     = Just ([matchVar x_l' x_r'], [])
 matchECFrame' _ _ = Nothing
 
--- Returns a renaming from the list only if the list maps a "left" variable to a unique "right" variable
-safeMkRenaming :: [(Var, Var)] -> Maybe Renaming
-safeMkRenaming eqs = guard (all (\(x_l, x_r) -> safeRename "safeMkRenaming" rn x_l == x_r) eqs) >> return rn
-  where rn = mkRenaming eqs
-
 matchRigidBinders :: [(Var, Var)] -> [(Var, Var)] -> Maybe [(Var, Var)]
 matchRigidBinders bound_eqs eqs = do
     occursCheck bound_eqs eqs
@@ -124,47 +119,57 @@ occursCheck :: [(Var, Var)] -> [(Var, Var)] -> Maybe ()
 occursCheck bound_eqs eqs = guard $ not $ any (\(x_l, x_r) -> any (\(bound_x_l, bound_x_r) -> (x_l == bound_x_l) /= (x_r == bound_x_r)) bound_eqs) eqs
 
 -- NB: if there are dead bindings in the left PureHeap then the output Renaming will not contain a renaming for their binders.
-matchHeapExact :: PureHeap -> PureHeap -> ([(Var, Var)], [(Var, Var)]) -> Maybe Renaming
-matchHeapExact init_h_l init_h_r (bound_eqs, free_eqs) = do
+matchHeap :: PureHeap -> PureHeap -> ([(Var, Var)], [(Var, Var)]) -> Maybe Renaming
+matchHeap init_h_l init_h_r (bound_eqs, free_eqs) = do
     -- 1) Find the initial matching by simply recursively matching used bindings from the Left
     --    heap against those from the Right heap (if any)
-    eqs <- matchPureHeapExact matchIdSupply bound_eqs free_eqs init_h_l init_h_r
+    eqs <- matchEnvironmentExact matchIdSupply bound_eqs free_eqs init_h_l init_h_r
     -- 2) Perhaps we violate the occurs check?
     occursCheck bound_eqs eqs
     -- 3) If the left side var was free, we might have assumed two different corresponding rights for it. This is not necessarily a problem:
-    --      ()<(a, a)> `match` c |-> True; d |-> True; ()<(c, d)>
-    --      ()<(a, a)> `match` c |-> True; d |-> c; ()<(c, d)>
-    --    But for now I'm going to mandate that the mapping must be trivially injective.
+    --      a |-> True; ()<(a, a)> `match` c |-> True; d |-> True; ()<(c, d)>
+    --      a |-> True; ()<(a, a)> `match` c |-> True; d |-> c; ()<(c, d)>
+    -- However, I'm going to reject this for now (simpler).
     safeMkRenaming eqs
 
-matchPureHeapExact :: IdSupply -> [(Var, Var)] -> [(Var, Var)] -> PureHeap -> PureHeap -> Maybe [(Var, Var)]
-matchPureHeapExact ids bound_eqs free_eqs init_h_l init_h_r = do
+--- Returns a renaming from the list only if the list maps a "left" variable to a unique "right" variable
+safeMkRenaming :: [(Var, Var)] -> Maybe Renaming
+safeMkRenaming eqs = guard (all (\(x_l, x_r) -> safeRename "safeMkRenaming" rn x_l == x_r) eqs) >> return rn
+  where rn = mkRenaming eqs
+
+
+matchLetRecs :: IdSupply -> [(Var, Var)] -> [(Var, In AnnedTerm)] -> [(Var, In AnnedTerm)] -> Maybe [(Var, Var)]
+matchLetRecs ids'' eqs xes_l' xes_r' = matchEnvironmentExact ids'' [] eqs (M.fromList [(x', (HB InternallyBound Nothing (Just in_e))) | (x', in_e) <- xes_l']) (M.fromList [(x', (HB InternallyBound Nothing (Just in_e))) | (x', in_e) <- xes_r'])
+
+matchEnvironmentExact :: IdSupply -> [(Var, Var)] -> [(Var, Var)] -> PureHeap -> PureHeap -> Maybe [(Var, Var)]
+matchEnvironmentExact ids bound_eqs free_eqs init_h_l init_h_r = do
     -- 1) Find the initial matching by simply recursively matching used bindings from the Left
     --    heap against those from the Right heap (if any).
-    eqs <- matchPureHeap ids bound_eqs free_eqs init_h_l init_h_r
+    eqs <- matchEnvironment ids bound_eqs free_eqs (M.map (howBound &&& heapBindingTerm) init_h_l) (M.map (howBound &&& heapBindingTerm) init_h_r)
     -- 2) The outgoing equalities should only relate x_l's that are not bound by init_h_l
     --    because we don't want the local bound variables I've generated from matchingIdSupply "leaking" upwards.
     --    (I think this reason is now redundant, but actually we still need to make sure that we only output equalities
     --     on *free variables* of the two heaps, not any bound members).
     --    NB: Because some variables may be bound by update frames in the stack, we need to filter out those too...
-    let init_h_l_binders = pureHeapBinders init_h_l -- We do NOT want to exclude renamings for unfolding binders!
-    eqs <- --traceRender ("matchPureHeapExact", eqs, bound_eqs, init_h_l, init_h_r) $
-           return $ filter (\(x_l, _x_r) -> x_l `S.notMember` init_h_l_binders && all ((/= x_l) . fst) bound_eqs) eqs
+    let (bound_xs_l, bound_xs_r) = unzip bound_eqs
+        internally_bound_l = fst (pureHeapVars init_h_l) InternallyBound `S.union` S.fromList bound_xs_l
+    eqs <- --traceRender ("matchEnvironmentExact", eqs, bound_eqs, init_h_l, init_h_r) $
+           return $ filter (\(x_l, _x_r) -> x_l `S.notMember` internally_bound_l) eqs
     -- 3) Now the problem is that there might be some bindings in the Right heap that are referred
     --    to by eqs. We want an exact match, so we can't allow that.
-    let init_h_r_binders = pureHeapBinders init_h_r -- Ditto: be careful of unfoldings
-    guard $ all (\(_x_l, x_r) -> x_r `S.notMember` init_h_r_binders && all ((/= x_r) . snd) bound_eqs) eqs
+    --
+    -- We *could* do away with this check, but then we might might match e.g. a LambdaBound var on the left against a InternallyBound
+    -- one on the right. At the moment I'm not able to actually synthesize the required unfolding in the caller (TODO), so I must prevent this.
+    let internally_bound_r = fst (pureHeapVars init_h_r) InternallyBound `S.union` S.fromList bound_xs_r
+    guard $ all (\(_x_l, x_r) -> x_r `S.notMember` internally_bound_r) eqs
     -- 4) We now know that all of the variables bound by both init_h_l and init_h_r are not mentioned
     --    in the outgoing equalities, which is what we want for an exact match.
     --     NB: We use this function when matching letrecs, so don't necessarily want to build a renaming immediately
     return eqs
 
-matchPureHeap :: IdSupply -> [(Var, Var)] -> [(Var, Var)] -> PureHeap -> PureHeap -> Maybe [(Var, Var)]
-matchPureHeap ids bound_eqs free_eqs init_h_l init_h_r = go bound_eqs free_eqs init_h_l init_h_r
+matchEnvironment :: IdSupply -> [(Var, Var)] -> [(Var, Var)] -> M.Map Var (HowBound, Maybe (In AnnedTerm)) -> M.Map Var (HowBound, Maybe (In AnnedTerm)) -> Maybe [(Var, Var)]
+matchEnvironment ids bound_eqs free_eqs h_l h_r = matchLoop bound_eqs free_eqs S.empty S.empty
   where
-    -- Utility function used to deal with work-duplication issues when matching
-    deleteExpensive x (_, e) h = if isCheap (annee e) then h else M.delete x h
-    
     -- NB: must respect work-sharing for non-values
     --  x |-> e1, y |-> e1; (x, y) `match` x |-> e1; (x, x) == Nothing
     --  x |-> e1; (x, x) `match` x |-> e1; y |-> e1; (x, y) == Nothing (though this is more questionable, it seems a consistent choice)
@@ -182,24 +187,43 @@ matchPureHeap ids bound_eqs free_eqs init_h_l init_h_r = go bound_eqs free_eqs i
     -- We can account for staticness using the standard generalisation mechanism, and there is no need for the
     -- matcher to have hacks like that (though we still have to be careful about how we match phantoms).
     
-    --go known free_eqs h_l h_r | traceRender ("go", known, free_eqs, h_l, h_r) False = undefined
-    go known [] _ _ = Just known
-    go known ((x_l, x_r):free_eqs) h_l h_r
+    markUsed x' (_, e) used = if isCheap (annee e) then used else S.insert x' used
+    
+    matchLoop known [] _ _ = Just known
+    matchLoop known ((x_l, x_r):free_eqs) used_l used_r
        -- Perhaps we have already assumed this equality is true?
-      | (x_l, x_r) `elem` known = go known free_eqs h_l h_r
-       -- Perhaps the left side is bound, so we need to match it against a corresponding right?
-      | Just hb_l <- M.lookup x_l h_l = M.lookup x_r h_r >>= matchHeapBinding x_l hb_l x_r >>= \(alter_h_l, alter_h_r, extra_free_eqs) -> go ((x_l, x_r) : known) (extra_free_eqs ++ free_eqs) (alter_h_l h_l) (alter_h_r h_r)
-       -- Perhaps the left side was originally bound, but we already matched it against something else?
-      | M.member x_l init_h_l = Nothing
-       -- The left side is free, so assume that we can instantiate x_l to x_r (x_l may be bound above, x_r may be bound here or above):
-      | otherwise = go ((x_l, x_r) : known) free_eqs h_l h_r
-
-     -- Phantomish heap bindings (input FVs / things bound by update frames / phantoms) must match *exactly* since we know nothing about them.
-     -- Even for cases where we do know something (i.e. Phantom bindings) we can't use that information since by definition we won't be able
-     -- to rename any components of those static heap bindings when we tie back...
-    matchHeapBinding x_l (heapBindingPhantom -> True) x_r (heapBindingPhantom -> True) = guard (x_l == x_r) >> return (id, id, [])
-     -- We can match other possibilities "semantically", by peeking into ther definitions
-    matchHeapBinding _   (Unfolding in_v_l)           _   (Unfolding in_v_r)          = fmap (\extra_free_eqs -> (id,                         id,                         extra_free_eqs)) $ matchInValue ids (second annee in_v_l) (second annee in_v_r)
-    matchHeapBinding x_l (Concrete in_e_l)            x_r (Concrete in_e_r)           = fmap (\extra_free_eqs -> (deleteExpensive x_l in_e_l, deleteExpensive x_r in_e_r, extra_free_eqs)) $ matchInTerm  ids in_e_l                in_e_r
-     -- Environment variables match *only* against themselves, not against anything other heap binding at all
-    matchHeapBinding _ _ _ _ = Nothing
+      | (x_l, x_r) `elem` known = matchLoop known free_eqs used_l used_r
+       -- We assume no-shadowing, so if two names are the same they must refer to the same thing
+       -- NB: because I include this case, we may not include a renaming for some lambda-bound variables in the final knowns
+       -- FIXME: causing assertions in tieback at the moment
+      | x_l == x_r = go [] used_l used_r
+      | otherwise = case (M.lookup x_l h_l, M.lookup x_r h_r) of
+           -- If matching an internal let, it is possible that variables occur free. Insist that free-ness matches:
+          (Nothing, Nothing) -> go [] used_l used_r
+          (Just _, Nothing) -> Nothing
+          (Nothing, Just _) -> Nothing
+          (Just hb_l, Just hb_r) -> case (hb_l, hb_r) of
+               -- If the template provably doesn't use this heap binding, we can match it against anything at all
+              ((InternallyBound, Nothing), _) -> matchLoop known free_eqs used_l used_r
+               -- If the template internalises a binding of this form, check that the matchable semantics is the same.
+               -- If the matchable doesn't have a corresponding binding tieback is impossible because we have less info this time.
+              ((InternallyBound, Just in_e_l), (_how_r, mb_in_e_r)) -> case mb_in_e_r of
+                  Just in_e_r | x_l `S.notMember` used_l, x_r `S.notMember` used_r -> matchInTerm ids in_e_l in_e_r >>= \extra_free_eqs -> go extra_free_eqs (markUsed x_l in_e_l used_l) (markUsed x_r in_e_r used_r)
+                  _ -> Nothing
+               -- If the template has no information but exposes a lambda, we can rename to tie back.
+               -- If there is a corresponding binding in the matchable we can't tieback because we have more info this time.
+              ((LambdaBound, Nothing), (_how_r, mb_in_e_r)) -> case mb_in_e_r of
+                  Nothing -> go [] used_l used_r
+                  Just _ -> Nothing
+               -- If the template has an unfolding, we must do lookthrough
+              ((LambdaBound, Just in_e_l), (_how_r, mb_in_e_r)) -> case mb_in_e_r of
+                  Just in_e_r | x_l `S.notMember` used_l, x_r `S.notMember` used_r -> matchInTerm ids in_e_l in_e_r >>= \extra_free_eqs -> go extra_free_eqs (markUsed x_l in_e_l used_l) (markUsed x_r in_e_r used_r)
+                  _ -> Nothing
+               -- If the template doesn't lambda abstract, we can't rename. Only tieback if we have an exact *name* match.
+               --
+               -- You might think that we could do better than this if both the LHS and RHS had unfoldings, by matching them.
+               -- However, this is very dangerous because we don't want to match the template {x |-> let {Just y}, y |-> lam {}}
+               -- against the matchable {x' |-> let {Just y'}, y' |-> lam {}}, since the template may still be able to reach y via the binding
+               -- for x (we renamed the lambda-abstracted y to y' so there is nothing to fear from there).
+              ((LetBound, _), _) -> Nothing
+      where go extra_free_eqs = matchLoop ((x_l, x_r) : known) (extra_free_eqs ++ free_eqs)

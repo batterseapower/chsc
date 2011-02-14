@@ -63,7 +63,7 @@ instance Monoid SCStats where
 supercompile :: Term -> (SCStats, Term)
 supercompile e = traceRender ("all input FVs", input_fvs) $ second (fVedTermToTerm . if pRETTIFY then prettify else id) $ runScpM $ liftM snd $ sc (mkHistory (extra wQO)) state
   where input_fvs = annedTermFreeVars anned_e
-        state = normalise ((bLOAT_FACTOR - 1) * annedSize anned_e, Heap (setToMap Environmental input_fvs) reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, anned_e))
+        state = normalise ((bLOAT_FACTOR - 1) * annedSize anned_e, Heap (setToMap environmentallyBound input_fvs) reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, anned_e))
         anned_e = toAnnedTerm e
 
 --
@@ -146,7 +146,8 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) (emptyLosers, S.empty)
         (stats', deeds'', Heap h'_winners' ids'', losers', speculated') = M.foldrWithKey speculate_one (stats, deeds', Heap h'_winners ids', losers, speculated) h'_winners
         speculate_one x' hb (stats, deeds, Heap h'_winners ids, losers, speculated)
           -- | not (isValue (annee (snd in_e))), traceRender ("speculate", x', depth, pPrintFullUnnormalisedState (Heap (h {- `exclude` M.keysSet base_h -}) ids, k, in_e)) False = undefined
-          | Concrete (_, annedTag -> tg) <- hb
+          | InternallyBound <- howBound hb
+          , Just (_, annedTag -> tg) <- heapBindingTerm hb
           , x' `S.notMember` speculated
           , let -- We're going to be a bit clever here: to speculate a heap binding, just put that variable into the focus and reduce the resulting term.
                 -- The only complication occurs when comes back with a non-empty stack, in which case we need to deal with any unreduced update frames.
@@ -209,7 +210,7 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) (emptyLosers, S.empty)
             Apply x'                        -> rebuildStack k (annedTerm tg (e' `App` x'))
             Scrutinise in_alts              -> rebuildStack k (annedTerm tg (Case e' (renameIn (renameAnnedAlts ids) in_alts)))
             PrimApply pop in_anned_vs in_es -> rebuildStack k (annedTerm tg (PrimOp pop (map (fmap Value . renameIn (renameAnnedValue ids)) in_anned_vs ++ e' : map (renameIn (renameAnnedTerm ids)) in_es)))
-            Update x'                       -> (M.insert x' (Concrete (promote e')) h', in_e)
+            Update x'                       -> (M.insert x' (internallyBound (promote e')) h', in_e)
               where (h', in_e) = rebuildStack k (annedTerm tg (Var x'))
           where tg = tag kf
     
@@ -274,7 +275,7 @@ fulfilmentRefersTo extra_statics (promise, e') = guard (Foldable.any (`S.member`
     -- * Lambda abstract over the FVs of phantom bindings if those phantom bindings are dead aftersupercompilation
     -- * Use the abstraction to continue fulfilments floating up
     -- * Match such floats phantom bindings structurally (because we will need to rename the FVs of phantom bindings)
-    extra_fvs | pHANTOM_LOOKTHROUGH, Just s <- meaning promise = stateStaticBinders s
+    extra_fvs | pHANTOM_LOOKTHROUGH, Just s <- meaning promise = stateLetBounders s -- FIXME: now redundant?
               | otherwise                                      = S.empty
 
 -- Used at the end of supercompilation to extract just those h functions that are actually referred to.
@@ -361,7 +362,7 @@ promise p opt = ScpM $ \e s k -> {- traceRender ("promise", fun p, abstracted p)
                                   (P { fun = fun', abstracted = abstracted'_list, meaning = Just (unI (meaning p)) }, lambdas abstracted'_list e') : fulfilments s
                         in k () (s { fulfilments = fs' })
       
-      fmap (((S.fromList (abstracted p) `S.union` stateStaticBinders (unI (meaning p))) `S.union`) . S.fromList) getPromiseNames >>= \fvs -> assertRender ("sc: FVs", fun p, fvs' S.\\ fvs, fvs, e') (fvs' `S.isSubsetOf` fvs) $ return ()
+      fmap (((abstracted_set `S.union` stateLetBounders (unI (meaning p))) `S.union`) . S.fromList) getPromiseNames >>= \fvs -> assertRender ("sc: FVs", fun p, fvs' S.\\ fvs, fvs, e') (fvs' `S.isSubsetOf` fvs) $ return ()
       
       return (a, fun p `varApps` abstracted p)
 
@@ -443,13 +444,13 @@ memo opt state = do
         traceRenderScpM ("=sc", fun _p, pPrintFullState state, res)
         return res
       [] -> {- traceRender ("new drive", pPrintFullState state) $ -} do
-        let (static_vs, vs) = stateStaticBindersAndFreeVars state
+        let vs = stateLambdaBounders state
         
         -- NB: promises are lexically scoped because they may refer to FVs
         x <- freshHName
-        promise P { fun = x, abstracted = S.toList (vs S.\\ static_vs), meaning = I state } $ do
+        promise P { fun = x, abstracted = S.toList vs, meaning = I state } $ do
             traceRenderScpM (">sc", x, pPrintFullState state)
-            res <- opt (case state of (deeds, Heap h ids, k, in_e) -> (deeds, Heap (M.insert x Environmental h) ids, k, in_e)) -- TODO: should I just put "h" functions into a different set of statics??
+            res <- opt (case state of (deeds, Heap h ids, k, in_e) -> (deeds, Heap (M.insert x environmentallyBound h) ids, k, in_e)) -- TODO: should I just put "h" functions into a different set of statics??
             traceRenderScpM ("<sc", x, pPrintFullState state, res)
             return res
 

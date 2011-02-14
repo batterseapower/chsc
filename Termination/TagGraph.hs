@@ -38,7 +38,7 @@ embedWithTagGraphs = precomp stateTags $ postcomp generaliserFromGrowing $ refin
                  `plusTagGraph` mkQATagGraph (qaTag' qa) in_qa
         
         heapBindingTagGraph :: HeapBinding -> TagGraph
-        heapBindingTagGraph hb = maybe emptyTagGraph (\tg -> mkTagGraph (pureHeapBindingTag' tg) (heapBindingReferences hb)) $ heapBindingTag hb
+        heapBindingTagGraph hb = maybe emptyTagGraph (\tg -> mkTagGraph (pureHeapBindingTag' tg) (heapBindingFreeVars hb)) $ heapBindingTag hb
         
         pureHeapTagGraph :: PureHeap -> TagGraph
         pureHeapTagGraph h = plusTagGraphs $ map heapBindingTagGraph (M.elems h)

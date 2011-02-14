@@ -109,34 +109,39 @@ type State = (Deeds, Heap, Stack, In (Anned QA))
 denormalise :: State -> UnnormalisedState
 denormalise (deeds, h, k, (rn, qa)) = (deeds, h, k, (rn, fmap qaToAnnedTerm' qa))
 
--- | We do not abstract the h functions over static variables. This helps typechecking and gives GHC a chance to inline the definitions.
-data HeapBinding = Environmental                     -- ^ Corresponding variable is static and free in the original input, or the name of a h-function. No need to generalise either of these (remember that h-functions don't appear in the input).
-                 | Updated Tag FreeVars              -- ^ Variable is bound by a residualised update frame. TODO: this is smelly and should really be Phantom.
-                 | Phantom (In AnnedTerm)            -- ^ Corresponding variable is static static and generated from residualising a term in the splitter. Can use the term information to generalise these.
-                 | Concrete (In AnnedTerm)           -- ^ A genuine heap binding that we are actually allowed to look at.
-                 | Unfolding (In (Anned AnnedValue)) -- ^ Unfolding for some variable: both heap binding and internal variables will be lambda-abstracted over
+
+data HowBound = InternallyBound | LambdaBound | LetBound
+              deriving (Eq, Show)
+
+instance Pretty HowBound where
+    pPrint = text . show
+
+instance NFData HowBound
+
+data HeapBinding = HB { howBound :: HowBound, heapBindingTag :: Maybe Tag, heapBindingTerm :: Maybe (In AnnedTerm) }
                  deriving (Show)
 
-type PureHeap = M.Map (Out Var) HeapBinding
-data Heap = Heap PureHeap IdSupply
-          deriving (Show)
-
 instance NFData HeapBinding where
-    rnf Environmental = ()
-    rnf (Updated a b) = rnf a `seq` rnf b
-    rnf (Phantom a)   = rnf a
-    rnf (Concrete a)  = rnf a
-    rnf (Unfolding a) = rnf a
+    rnf (HB a b c) = rnf a `seq` rnf b `seq` rnf c
 
 instance NFData Heap where
     rnf (Heap a b) = rnf a `seq` rnf b
 
 instance Pretty HeapBinding where
-    pPrintPrec _     _    Environmental    = angles empty
-    pPrintPrec level _    (Updated x' _)   = angles (text "update" <+> pPrintPrec level noPrec x')
-    pPrintPrec level _    (Phantom in_e)   = angles (pPrintPrec level noPrec in_e)
-    pPrintPrec level prec (Concrete in_e)  = pPrintPrec level prec in_e
-    pPrintPrec level _    (Unfolding in_v) = bananas (pPrintPrec level noPrec in_v)
+    pPrintPrec level prec (HB how _ mb_in_e) = case how of
+        InternallyBound -> maybe empty (pPrintPrec level prec) mb_in_e
+        LambdaBound     -> text "λ" <> angles (maybe empty (pPrintPrec level noPrec) mb_in_e)
+        LetBound        -> text "l" <> angles (maybe empty (pPrintPrec level noPrec) mb_in_e)
+
+internallyBound :: In AnnedTerm -> HeapBinding
+internallyBound in_e@(_, e) = HB InternallyBound (Just (annedTag e)) (Just in_e)
+
+environmentallyBound :: HeapBinding
+environmentallyBound = HB LetBound Nothing Nothing
+
+type PureHeap = M.Map (Out Var) HeapBinding
+data Heap = Heap PureHeap IdSupply
+          deriving (Show)
 
 instance Pretty Heap where
     pPrintPrec level prec (Heap h _) = pPrintPrec level prec h
@@ -163,41 +168,20 @@ instance Pretty StackFrame where
         Update x'                 -> pPrintPrecApp level prec (text "update") x'
 
 
-heapBindingPhantom :: HeapBinding -> Bool
-heapBindingPhantom (Concrete _)  = False
-heapBindingPhantom (Unfolding _) = False
-heapBindingPhantom _             = True
-
 heapBindingEnvironmental :: HeapBinding -> Bool
-heapBindingEnvironmental Environmental = True
-heapBindingEnvironmental _             = False
+heapBindingEnvironmental (HB LetBound Nothing Nothing) = True
+heapBindingEnvironmental _                             = False
 
 -- A heap binding is a value if the binding above is likely to be discovered to be a value by GHC. Used for heuristics about local heap bindings.
 heapBindingProbablyValue :: HeapBinding -> Bool
-heapBindingProbablyValue Environmental   = True                                         -- Top level bindings are often functions and hence values
-heapBindingProbablyValue (Updated _ _)   = False                                        -- Almost certainly not values since the supercompiler stopped in the process of evaluating them
-heapBindingProbablyValue (Phantom in_e)  = sPECULATION `implies` termIsValue (snd in_e) -- I used to do `termIsValue (snd in_e)` here. However, that means that (if we aren't speculating) we kill phantomness for things that are phantom and close to being values if we run out of deeds for them, which is sad
-heapBindingProbablyValue (Unfolding _)   = True                                         -- Well, duh
-heapBindingProbablyValue (Concrete _)    = True                                         -- We can't really say yet since we may not have supercompiled the RHS
-
-heapBindingTerm :: HeapBinding -> Maybe (In AnnedTerm, WhyLive)
-heapBindingTerm Environmental    = Nothing
-heapBindingTerm (Updated _ _)    = Nothing
-heapBindingTerm (Phantom in_e)   = Just (in_e, PhantomLive)
-heapBindingTerm (Unfolding in_v) = Just (second (fmap Value) in_v, ConcreteLive)
-heapBindingTerm (Concrete in_e)  = Just (in_e, ConcreteLive)
-
-heapBindingTag :: HeapBinding -> Maybe Tag -- The boolean tells us whether we have claimed deeds for the binding's tag
-heapBindingTag Environmental      = Nothing
-heapBindingTag (Updated tg _)     = Just tg
-heapBindingTag (Phantom (_, e))   = Just (annedTag e)
-heapBindingTag (Unfolding (_, v)) = Just (annedTag v)
-heapBindingTag (Concrete (_, e))  = Just (annedTag e)
+heapBindingProbablyValue = case mb_in_e of
+    Nothing   -> mb_tag == Nothing                            -- Assume top level bindings are values -- it is harmless to assume to them freely (FIXME: hitting for LambdaBounds as well? Is this bad?)
+    Just in_e -> sPECULATION `implies` termIsValue (snd in_e) -- Tnings with expressions are judged by the actual content of their RHSs
 
 -- | Size of HeapBinding for Deeds purposes
 heapBindingSize :: HeapBinding -> Size
-heapBindingSize (Concrete (_, e)) = annedSize e
-heapBindingSize _                 = 0
+heapBindingSize (HB InternallyBound _ (Just (_, e))) = annedSize e
+heapBindingSize _                                    = 0
 
 -- | Size of StackFrame for Deeds purposes
 stackFrameSize :: StackFrame -> Size
