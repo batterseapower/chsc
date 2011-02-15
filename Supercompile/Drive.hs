@@ -36,7 +36,9 @@ import qualified Data.Set as S
 import qualified Data.IntSet as IS
 
 
--- FIXME: the WQO must take account of the HowBounds, I think
+-- The termination argument is a but subtler due to HowBounds but I think it still basically works.
+-- Key to the modified argument is that tieback cannot be prevented by any HeapBinding with HowBound /= LambdaBound:
+-- so we have to be careful to record tags on those guys.
 wQO :: WQO State Generaliser
 wQO | not tERMINATION_CHECK                        = postcomp (const generaliseNothing) unsafeNever
     | otherwise = case tAG_COLLECTION of TagBag       -> embedWithTagBags
