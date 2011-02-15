@@ -154,9 +154,11 @@ heapBindingEnvironmental (HB LetBound Nothing Nothing) = True
 heapBindingEnvironmental _                             = False
 
 -- A heap binding is a value if the binding above is likely to be discovered to be a value by GHC. Used for heuristics about local heap bindings.
+--
+-- Actually, this is only ever called with an InternallyBound HeapBinding, so don't worry too much about what it returns in other cases.
 heapBindingProbablyValue :: HeapBinding -> Bool
 heapBindingProbablyValue hb = case heapBindingTerm hb of
-    Nothing   -> heapBindingTag hb == Nothing                 -- Assume top level bindings are values -- it is harmless to assume to them freely (FIXME: hitting for LambdaBounds as well? Is this bad?)
+    Nothing   -> heapBindingTag hb == Nothing                 -- Assume top level bindings are values -- it is harmless to assume to them freely
     Just in_e -> sPECULATION `implies` termIsValue (snd in_e) -- Tnings with expressions are judged by the actual content of their RHSs
 
 -- | Size of HeapBinding for Deeds purposes
