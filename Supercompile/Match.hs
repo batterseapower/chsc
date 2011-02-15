@@ -199,6 +199,8 @@ matchEnvironment ids bound_eqs free_eqs h_l h_r = matchLoop bound_eqs free_eqs S
           (Just _, Nothing) -> Nothing
           (Nothing, Just _) -> Nothing
           (Just hb_l, Just hb_r) -> case ((howBound &&& heapBindingTerm) hb_l, (howBound &&& heapBindingTerm) hb_r) of
+               -- If the template provably doesn't use this heap binding, we can match it against anything at all
+              ((InternallyBound, Nothing), _) -> matchLoop known free_eqs used_l used_r
                -- We assume no-shadowing, so if two names are the same they must refer to the same thing
                -- NB: because I include this case, we may not include a renaming for some lambda-bound variables in the final knowns
                --
@@ -213,8 +215,6 @@ matchEnvironment ids bound_eqs free_eqs h_l h_r = matchLoop bound_eqs free_eqs S
                   (Nothing,     Nothing)     -> go [] used_l used_r
                   (Just in_e_l, Just in_e_r) -> go [(x, x) | x <- S.toList (inFreeVars annedTermFreeVars in_e_l)] (markUsed x_l in_e_l used_l) (markUsed x_r in_e_r used_r)
                   _                          -> Nothing
-               -- If the template provably doesn't use this heap binding, we can match it against anything at all
-              ((InternallyBound, Nothing), _) -> matchLoop known free_eqs used_l used_r
                -- If the template internalises a binding of this form, check that the matchable semantics is the same.
                -- If the matchable doesn't have a corresponding binding tieback is impossible because we have less info this time.
               ((InternallyBound, Just in_e_l), (_how_r, mb_in_e_r)) -> case mb_in_e_r of
