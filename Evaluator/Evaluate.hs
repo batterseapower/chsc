@@ -130,16 +130,17 @@ step' normalising state =
         primop deeds tg_kf h k _tg_v2 pop [(rn_v1, anned_v1)] (rn_v2, v2) []
           | (_, Literal (Int l1)) <- dereference h (rn_v1, annee anned_v1)
           , (_, Literal (Int l2)) <- dereference h (rn_v2, v2)
-          , let e' = annedTerm tg_kf (Value (f pop l1 l2))
+          , Just v <- f pop l1 l2
+          , let e' = annedTerm tg_kf (Value v)
           , Just deeds <- claimDeeds (deeds + annedSize anned_v1 + annedValueSize' v2 + 1) (annedSize e') -- I don't think this can ever fail
           = Just (deeds, h, k, (emptyRenaming, e'))
           | otherwise
-          = Nothing -- Can occur legitimately if some of the arguments of the primop are just indirections to nothing
+          = Nothing -- Can occur legitimately if some of the arguments of the primop are just indirections to nothing or irreducible (division by zero?)
           where f pop = case pop of Add -> retInt (+); Subtract -> retInt (-);
-                                    Multiply -> retInt (*); Divide -> retInt div; Modulo -> retInt mod;
+                                    Multiply -> retInt (*); Divide -> \l1 l2 -> guard (l2 /= 0) >> retInt div l1 l2; Modulo -> retInt mod;
                                     Equal -> retBool (==); LessThan -> retBool (<); LessThanEqual -> retBool (<=)
-                retInt  pop l1 l2 = Literal (Int (pop l1 l2))
-                retBool pop l1 l2 = if pop l1 l2 then Data trueDataCon [] else Data falseDataCon []
+                retInt  pop l1 l2 = Just $ Literal (Int (pop l1 l2))
+                retBool pop l1 l2 = Just $ if pop l1 l2 then Data trueDataCon [] else Data falseDataCon []
         primop deeds tg_kf h k tg_v pop in_vs (rn, v) (in_e:in_es) = Just (deeds, h, Tagged tg_kf (PrimApply pop (in_vs ++ [(rn, annedValue tg_v v)]) in_es) : k, in_e)
         primop _     _     _ _ _    _   _     _       _            = Nothing -- I don't think this can occur legitimately
 
