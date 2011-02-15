@@ -36,6 +36,7 @@ import qualified Data.Set as S
 import qualified Data.IntSet as IS
 
 
+-- FIXME: the WQO must take account of the HowBounds, I think
 wQO :: WQO State Generaliser
 wQO | not tERMINATION_CHECK                        = postcomp (const generaliseNothing) unsafeNever
     | otherwise = case tAG_COLLECTION of TagBag       -> embedWithTagBags
