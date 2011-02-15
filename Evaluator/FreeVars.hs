@@ -1,50 +1,21 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, PatternGuards, NoMonoPatBinds #-}
 module Evaluator.FreeVars (
-    WhyLive(..), Liveness,
-    emptyLiveness, plusLiveness, plusLivenesses,
-    whyLive,
-
     inFreeVars,
     heapBindingFreeVars,
     pureHeapBoundVars, stackBoundVars, stackFrameBoundVars,
-    stateLiveness, pureHeapVars, stateFreeVars, stateLetBounders, stateLambdaBounders, stateInternalBounders
+    pureHeapVars, stateFreeVars, stateLetBounders, stateLambdaBounders, stateInternalBounders
   ) where
 
 import Evaluator.Deeds
 import Evaluator.Syntax
 
-import Core.Syntax
 import Core.FreeVars
 import Core.Renaming
 
 import Utilities
 
-import Algebra.Lattice
-
 import qualified Data.Map as M
 import qualified Data.Set as S
-
-
-newtype Liveness = Liveness { unLiveness :: M.Map (Out Var) WhyLive }
-                 deriving (Eq, JoinSemiLattice, BoundedJoinSemiLattice)
-
-instance Pretty Liveness where
-    pPrintPrec level prec = pPrintPrec level prec . unLiveness
-
-mkLiveness :: FreeVars -> WhyLive -> Liveness
-mkLiveness fvs why_live = Liveness $ setToMap why_live fvs
-
-emptyLiveness :: Liveness
-emptyLiveness = bottom
-
-plusLiveness :: Liveness -> Liveness -> Liveness
-plusLiveness = join
-
-plusLivenesses :: [Liveness] -> Liveness
-plusLivenesses = joins
-
-whyLive :: Out Var -> Liveness -> Maybe WhyLive
-whyLive x' live = x' `M.lookup` unLiveness live
 
 
 inFreeVars :: (a -> FreeVars) -> In a -> FreeVars
@@ -72,10 +43,6 @@ stackFrameOpenFreeVars kf = case kf of
     PrimApply _ in_vs in_es -> (S.empty, S.unions (map (inFreeVars annedValueFreeVars) in_vs) `S.union` S.unions (map (inFreeVars annedTermFreeVars) in_es))
     Update x'               -> (S.singleton x', S.empty)
 
--- | Returns (an overapproximation of) the free variables of the state that it would be useful to inline, and why that is so
-stateLiveness :: (Deeds, Heap, Stack, In (Anned a)) -> Liveness
-stateLiveness state = mkLiveness (stateFreeVars state) ConcreteLive
-
 
 -- | Computes the variables bound and free in a state
 stateVars :: (Deeds, Heap, Stack, In (Anned a)) -> (HowBound -> BoundVars, FreeVars)
@@ -98,7 +65,7 @@ pureHeapVars :: PureHeap -> (HowBound -> BoundVars, FreeVars)
 
 -- | Returns (an overapproximation of) the free variables that the state would have if it were residualised right now (i.e. variables bound by phantom bindings *are* in the free vars set)
 stateFreeVars :: (Deeds, Heap, Stack, In (Anned a)) -> FreeVars
-stateFreeVars s = fvs S.\\ bvs LetBound S.\\ bvs LambdaBound S.\\ bvs InternallyBound
+stateFreeVars s = fvs S.\\ bvs InternallyBound
   where (bvs, fvs) = stateVars s
 
 stateLetBounders :: (Deeds, Heap, Stack, In (Anned a)) -> BoundVars

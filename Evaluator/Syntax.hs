@@ -13,8 +13,6 @@ import Renaming
 import StaticFlags
 import Utilities
 
-import Algebra.Lattice
-
 import qualified Data.Map as M
 
 
@@ -73,23 +71,6 @@ annedValue tg v = Comp (Tagged tg (Comp (Sized (annedValueSize' v) (FVed (annedV
 
 toAnnedTerm :: Term -> AnnedTerm
 toAnnedTerm = tagFVedTerm . reflect
-
-
-data WhyLive = PhantomLive | ConcreteLive
-             deriving (Eq, Show)
-
-instance Pretty WhyLive where
-    pPrint = text . show
-
-instance NFData WhyLive
-
-instance JoinSemiLattice WhyLive where
-    ConcreteLive `join` _            = ConcreteLive
-    _            `join` ConcreteLive = ConcreteLive
-    _            `join` _            = PhantomLive
-
-instance BoundedJoinSemiLattice WhyLive where
-    bottom = PhantomLive
 
 
 data QA = Question Var
@@ -174,8 +155,8 @@ heapBindingEnvironmental _                             = False
 
 -- A heap binding is a value if the binding above is likely to be discovered to be a value by GHC. Used for heuristics about local heap bindings.
 heapBindingProbablyValue :: HeapBinding -> Bool
-heapBindingProbablyValue = case mb_in_e of
-    Nothing   -> mb_tag == Nothing                            -- Assume top level bindings are values -- it is harmless to assume to them freely (FIXME: hitting for LambdaBounds as well? Is this bad?)
+heapBindingProbablyValue hb = case heapBindingTerm hb of
+    Nothing   -> heapBindingTag hb == Nothing                 -- Assume top level bindings are values -- it is harmless to assume to them freely (FIXME: hitting for LambdaBounds as well? Is this bad?)
     Just in_e -> sPECULATION `implies` termIsValue (snd in_e) -- Tnings with expressions are judged by the actual content of their RHSs
 
 -- | Size of HeapBinding for Deeds purposes

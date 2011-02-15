@@ -715,7 +715,7 @@ transitiveInline init_h_inlineable (deeds, Heap h ids, k, in_e)
                                 && x' `M.notMember` h)                                 -- The Hack: only inline stuff from h *concretely*
                          then inline_hb
                          else inline_hb { howBound = LambdaBound, heapBindingTerm = Nothing }
-          , inline_hb <- if pHANTOM_LOOKTHROUGH || howBound inline_hb != LetBound then inline_hb else inline_hb { heapBindingTerm = Nothing } -- Only let us look into "classic" let-bound phantoms in specific situations
+          , inline_hb <- if pHANTOM_LOOKTHROUGH || howBound inline_hb /= LetBound then inline_hb else inline_hb { heapBindingTerm = Nothing } -- Only let us look into "classic" let-bound phantoms in specific situations
           -- , traceRender ("Extra liveness from", pPrint inline_hb, "is", heapBindingLiveness inline_hb) True
           = (deeds, h_inlineable, M.insert x' inline_hb h_output, live `S.union` heapBindingFreeVars inline_hb)
           | otherwise
