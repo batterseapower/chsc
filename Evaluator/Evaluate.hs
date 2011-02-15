@@ -37,16 +37,16 @@ step' normalising state =
                                 assertRender (text "step': FVs") (stateFreeVars state == stateFreeVars state') $
                                 -- traceRender (text "normalising" $$ nest 2 (pPrintFullUnnormalisedState state) $$ text "to" $$ nest 2 (pPrintFullState state')) $
                                 res) $
-    go False state
+    go state
   where
-    go reduced (deeds, h, k, (rn, e)) = case annee e of
-        Var x             -> maybe (reduced, (deeds, h, k, (rn, fmap (const (Question x)) e))) (go True) $ force  deeds h k tg (rename rn x);
-        Value v           -> maybe (reduced, (deeds, h, k, (rn, fmap (const (Answer v)) e)))   (go True) $ unwind deeds h k tg (rn, v)
-        App e1 x2         -> go True (deeds, h, Tagged tg (Apply (rename rn x2))            : k, (rn, e1))
+    go (deeds, h, k, (rn, e)) = case annee e of
+        Var x             -> maybe (False, (deeds, h, k, (rn, fmap (const (Question x)) e))) (\s -> (True, normalise s)) $ force  deeds h k tg (rename rn x);
+        Value v           -> maybe (False, (deeds, h, k, (rn, fmap (const (Answer v)) e)))   (\s -> (True, normalise s)) $ unwind deeds h k tg (rn, v)
+        App e1 x2         -> go (deeds, h, Tagged tg (Apply (rename rn x2))            : k, (rn, e1))
         PrimOp pop []     -> panic "reduced" (text "Nullary primop" <+> pPrint pop <+> text "in input")
-        PrimOp pop (e:es) -> go True (deeds, h, Tagged tg (PrimApply pop [] (map (rn,) es)) : k, (rn, e))
-        Case e alts       -> go True (deeds, h, Tagged tg (Scrutinise (rn, alts))           : k, (rn, e))
-        LetRec xes e      -> go True (allocate (deeds + 1) h k (rn, (xes, e)))
+        PrimOp pop (e:es) -> go (deeds, h, Tagged tg (PrimApply pop [] (map (rn,) es)) : k, (rn, e))
+        Case e alts       -> go (deeds, h, Tagged tg (Scrutinise (rn, alts))           : k, (rn, e))
+        LetRec xes e      -> go (allocate (deeds + 1) h k (rn, (xes, e)))
       where tg = annedTag e
 
     allocate :: Deeds -> Heap -> Stack -> In ([(Var, AnnedTerm)], AnnedTerm) -> UnnormalisedState
@@ -71,6 +71,7 @@ step' normalising state =
           _                       -> Nothing
     
     -- Deal with a variable at the top of the stack
+    -- Might have to claim deeds if inlining a non-value non-internally-bound thing here
     force :: Deeds -> Heap -> Stack -> Tag -> Out Var -> Maybe UnnormalisedState
     force deeds (Heap h ids) k tg x'
       | Just in_v <- lookupValue (Heap h ids) x'

@@ -103,7 +103,8 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) (emptyLosers, S.empty)
         Continue hist' -> continue depth hist' (losers, speculated) state
         _              -> ((losers, speculated), (mempty, state)) -- We MUST NOT EVER reduce in this branch or speculation will loop on e.g. infinite map
     
-    continue depth hist (losers, speculated) state = ((losers', speculated'), (stats', (deeds'', Heap (h'_winners' `M.union` h'_losers) ids'', k, in_e)))
+    continue depth hist (losers, speculated) state = -- traceRender ("speculate:continue", pPrintFullState state, pPrintFullState _state')
+                                                     ((losers', speculated'), (stats', (deeds'', Heap (h'_winners' `M.union` h'_losers) ids'', k, in_e)))
       where
         (stats, _state'@(deeds', Heap h' ids', k, in_e)) = reduce state
         
@@ -218,13 +219,11 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) (emptyLosers, S.empty)
 reduce :: State -> (SCStats, State)
 reduce orig_state = go (mkHistory (extra wQO)) orig_state
   where
-    go hist state
-      -- | traceRender ("reduce.go", pPrintFullState state) False = undefined
-      | otherwise = second (fromMaybe state) $ either (mempty { stat_reduce_stops = 1 },) (\mb_it -> maybe (mempty,Nothing) (second Just) mb_it) $ do
-          hist' <- case terminate hist (state, state) of
-                      Continue hist      -> Right hist
-                      Stop (_gen, state) -> trace "reduce-stop" $ Left (guard rEDUCE_ROLLBACK >> return state) -- TODO: generalise?
-          Right $ fmap (go hist') $ step state
+    go hist state = case step state of
+        Nothing -> (mempty, state)
+        Just state' -> case terminate hist (state', state') of
+          Continue hist'         -> go hist' state'
+          Stop (_gen, old_state) -> trace "reduce-stop" $ (mempty { stat_reduce_stops = 1 }, if rEDUCE_ROLLBACK then old_state else state) -- TODO: generalise?
 
 
 --
