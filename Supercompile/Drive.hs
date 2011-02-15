@@ -453,7 +453,7 @@ memo opt state = do
         x <- freshHName
         promise P { fun = x, abstracted = S.toList vs, meaning = I state } $ do
             traceRenderScpM (">sc", x, pPrintFullState state)
-            res <- opt (case state of (deeds, Heap h ids, k, in_e) -> (deeds, Heap (M.insert x environmentallyBound h) ids, k, in_e)) -- TODO: should I just put "h" functions into a different set of statics??
+            res <- opt state
             traceRenderScpM ("<sc", x, pPrintFullState state, res)
             return res
 
