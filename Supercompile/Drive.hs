@@ -244,8 +244,14 @@ instance MonadStatics ScpM where
     bindCapturedFloats extra_statics mx | dISCARD_FULFILMENTS_ON_ROLLBACK = bindFloats (\_ -> partitionFulfilments fulfilmentRefersTo S.fromList extra_statics) mx
                                         | otherwise                       = fmap ([],) mx -- NB: we can't use bindFloats or some fulfilments get lost when we roll back since they are hidden in the promises temporarily by bindFlotas
 
--- We would have a subtle bug here if (as in some branches) we let the evaluator look into
--- phantoms. Consider a term like:
+-- Note [Floating h-functions past the let-bound variables to which they refer]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+--
+-- This seems like a reasonable thing to do because some variables will become free after supercompilation.
+-- However, there really isn't much point doing the float because I won't be able to tie back to the floated thing
+-- in any other branch.
+--
+-- Indeed, allowing such tiebacks may be a source of bugs! Consider a term like:
 --
 --  x |-> <10>
 --  x + 5
@@ -254,7 +260,7 @@ instance MonadStatics ScpM where
 --
 --  15
 --
--- Since we check the *post supercompilation* free variables here, that h function will be floated
+-- Since we check the *post supercompilation* free variables here, that h function could be floated
 -- upwards, so it is visible to later supercompilations. But what if our context had looked like:
 --
 --   (let x = 10 in x + 5, let x = 11 in x + 5)
@@ -262,24 +268,30 @@ instance MonadStatics ScpM where
 -- Since we only match phantoms by name, we are now in danger of tying back to this h-function when we
 -- supercompile the second component of the pair!
 --
--- I think this is responsible for the subtle bugs in some of the imaginary suite benchmarks (in particular,
--- integrate) that I saw on my phantom-lookthrough branches.
+-- Conclusion: don't bother with this rubbish.
+--
+-- Note [Variables reachable from let-bindings]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+--
+-- TODO: we shouldn't lambda-abstract over any variables reachable via the let-bound thing. Doing so needlessly
+-- passes them around via lambdas when they will always be available in the closure.
+--
+-- Consider this example:
+--
+--   \y -> let x = \z -> .. too big to inline ... y ...
+---        in (... x ..., ... x ...)
+--
+-- When supercompliing each component of the pair we might feel tempted to generate h-functions lambda abstracted over
+-- y, but doing so is pointless (just hides information from GHC) since the result will be trapped under the x binding anyway.
 fulfilmentRefersTo :: FreeVars -> Fulfilment -> Maybe (Out Var)
 fulfilmentRefersTo extra_statics (promise, e') = guard (Foldable.any (`S.member` extra_statics) (fvedTermFreeVars e' `S.union` extra_fvs)) >> return (fun promise)
   where
-    -- If we have phantom lookthrough on, free variables of phantoms might have become free during evaluation.
-    -- As a quick fix, we bind floats with phantoms bindings where those phantom bindings are bound.
+    -- We bind floats with phantoms bindings where those phantom bindings are bound.
     --
     -- For wrappers introduced by --refine-fvs, we still need to use (fvedTermFreeVars e') because that will include
     -- the wrapped h-function (e.g. the h83' wrapper for h83). This also applies (though more rarely) for non-wrappers
     -- because looking at the fvedTermFreeVars is the only way we can learn about what h-functions they require.
-    --
-    -- TODO: in the future, we might choose to:
-    -- * Lambda abstract over the FVs of phantom bindings if those phantom bindings are dead aftersupercompilation
-    -- * Use the abstraction to continue fulfilments floating up
-    -- * Match such floats phantom bindings structurally (because we will need to rename the FVs of phantom bindings)
-    extra_fvs | pHANTOM_LOOKTHROUGH, Just s <- meaning promise = stateLetBounders s -- FIXME: now redundant?
-              | otherwise                                      = S.empty
+    extra_fvs = maybe S.empty stateLetBounders (meaning promise)
 
 -- Used at the end of supercompilation to extract just those h functions that are actually referred to.
 -- More often than not, this will be *all* the h functions, but if we don't discard h functions on rollback

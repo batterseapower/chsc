@@ -709,7 +709,7 @@ transitiveInline init_h_inlineable (deeds, Heap h ids, k, in_e)
           | x' `S.member` live -- Is the binding actually live at all?
           , (deeds, h_inlineable, inline_hb) <- case claimDeeds deeds (heapBindingSize hb) of -- Do we have enough deeds to inline an unmodified version?
                 Just deeds ->                                                     (deeds,                h_inlineable, hb)
-                Nothing    -> trace (render $ text "inline-deeds:" <+> pPrint x') (deeds, M.insert x' hb h_inlineable, hb { howBound = if nAIVE_LOCAL_TIEBACKS || heapBindingProbablyValue hb then LetBound else LambdaBound } {- FIXME: should probably blast associated term if is non-value (the evalutor won't inline it anyway) -}) -- Heuristic: only inline phantom bindings if they are likely to refer to values
+                Nothing    -> trace (render $ text "inline-deeds:" <+> pPrint x') (deeds, M.insert x' hb h_inlineable, hb { howBound = if nAIVE_LOCAL_TIEBACKS || heapBindingProbablyValue hb then LetBound else LambdaBound } {- TODO: should probably blast associated term if is non-value (the evalutor won't inline it anyway, but it might improve matcher) -}) -- Heuristic: only inline phantom bindings if they are likely to refer to values
           , inline_hb <- if howBound inline_hb == InternallyBound
                             || ((lOCAL_TIEBACKS || heapBindingEnvironmental inline_hb) -- Be careful: even if we don't want local tiebacks, we don't want to abstract over free variables of the original input
                                 && x' `M.notMember` h)                                 -- The Hack: only inline stuff from h *concretely*
