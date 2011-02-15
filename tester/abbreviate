@@ -6,8 +6,15 @@ abbreviations = { "Filename" : "Test", "SC time" : "SC", "Compile time" : "Cmp."
 def abbreviate(header):
     return "\\textbf{" + abbreviations.get(header, header) + "}"
 
+def percentify(x):
+    # Simon wants percentages in output instead
+    try:
+        return str(round(float(x), 2) * 100) + "%"
+    except ValueError, e:
+        return x
+
 def abbreviated(self):
-    return Results(self.description, abbreviate(self.key_header), [abbreviate(header) for header in self.headers], map_dict(lambda filename, values: (filename, map_dict(lambda header, value: (abbreviate(header), value), values)), self.results))
+    return Results(self.description, abbreviate(self.key_header), [abbreviate(header) for header in self.headers], map_dict(lambda filename, values: (filename, map_dict(lambda header, value: (abbreviate(header), percentify(value)), values)), self.results))
 
 
 if __name__ == '__main__':
