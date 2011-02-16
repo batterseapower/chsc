@@ -16,9 +16,6 @@ import qualified Data.Map as M
 residualiseTerm :: IdSupply -> In AnnedTerm -> Out FVedTerm
 residualiseTerm ids = detagAnnedTerm . renameIn (renameAnnedTerm ids)
 
-residualiseUnnormalisedState :: UnnormalisedState -> (Out [(Var, Doc)], Out FVedTerm)
-residualiseUnnormalisedState (_deeds, heap, k, in_e) = residualiseHeap heap (\ids -> residualiseStack ids k (residualiseTerm ids in_e))
-
 residualiseHeap :: Heap -> (IdSupply -> ((Out [(Var, Doc)], Out [(Var, FVedTerm)]), Out FVedTerm)) -> (Out [(Var, Doc)], Out FVedTerm)
 residualiseHeap (Heap h ids) (($ ids) -> ((floats_static_k, floats_nonstatic_k), e)) = (floats_static_h ++ floats_static_k, letRecSmart (floats_nonstatic_h ++ floats_nonstatic_k) e)
   where (floats_static_h, floats_nonstatic_h) = residualisePureHeap ids h
@@ -49,6 +46,6 @@ pPrintFullState :: State -> Doc
 pPrintFullState = pPrintFullUnnormalisedState . denormalise
 
 pPrintFullUnnormalisedState :: UnnormalisedState -> Doc
-pPrintFullUnnormalisedState state = pPrint (M.fromList floats_static) $$ pPrint e
-  where (floats_static, e) = residualiseUnnormalisedState state
+pPrintFullUnnormalisedState (deeds, heap, k, in_e) = text "Deeds:" <+> pPrint deeds $$ pPrint (M.fromList floats_static) $$ pPrint e
+  where (floats_static, e) = residualiseHeap heap (\ids -> residualiseStack ids k (residualiseTerm ids in_e))
 
