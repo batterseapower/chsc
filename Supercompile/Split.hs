@@ -723,7 +723,7 @@ transitiveInline init_h_inlineable (deeds, Heap h ids, k, in_e)
         -- NB: we also rely here on the fact that the original h contains "optional" bindings in the sense that they are shadowed
         -- by something bound above - i.e. it just tells us how to unfold case scrutinees within a case branch.
         {-# INLINE consider_inlining #-} -- Force specialisation on the first, boolean, argument for extra speed
-        consider_inlining from_init_h_inlineable x' hb (deeds, h_output, live)
+        consider_inlining from_init_h_inlineable x' hb no_change@(deeds, h_output, live)
           | x' `S.member` live        -- Is the binding actually live at all?
           , x' `M.notMember` h_output -- Have we not inlined it already?
           , (deeds, inline_hb) <- case claimDeeds deeds (heapBindingSize hb) of -- Do we have enough deeds to inline an unmodified version?
@@ -736,9 +736,9 @@ transitiveInline init_h_inlineable (deeds, Heap h ids, k, in_e)
                          else inline_hb { howBound = LambdaBound, heapBindingTerm = Nothing }
           , inline_hb <- if pHANTOM_LOOKTHROUGH || howBound inline_hb /= LetBound then inline_hb else inline_hb { heapBindingTerm = Nothing } -- Only let us look into "classic" let-bound phantoms in specific situations
           -- , traceRender ("Extra liveness from", pPrint inline_hb, "is", heapBindingLiveness inline_hb) True
-          = (deeds, M.insert x' inline_hb h_output, live `S.union` heapBindingFreeVars inline_hb)
+          = ((deeds,,) $! M.insert x' inline_hb h_output) $! live `S.union` heapBindingFreeVars inline_hb
           | otherwise
-          = (deeds, h_output, live)
+          = no_change
 
 -- TODO: replace with a genuine evaluator. However, think VERY hard about the termination implications of this!
 -- I think we can only do it when the splitter is being invoked by a non-whistling invocation of sc.
