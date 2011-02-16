@@ -241,8 +241,7 @@ data Promise f = P {
   }
 
 instance MonadStatics ScpM where
-    bindCapturedFloats extra_statics mx | dISCARD_FULFILMENTS_ON_ROLLBACK = bindFloats (\_ -> partitionFulfilments fulfilmentRefersTo S.fromList extra_statics) mx
-                                        | otherwise                       = fmap ([],) mx -- NB: we can't use bindFloats or some fulfilments get lost when we roll back since they are hidden in the promises temporarily by bindFlotas
+    bindCapturedFloats = bindFloats
 
 -- Note [Floating h-functions past the let-bound variables to which they refer]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -304,18 +303,21 @@ fulfilmentReferredTo fvs (promise, e') = guard (fun promise `S.member` fvs) >> r
 -- have created (and make reference to) some h-function that *does* actually refer to one
 -- of the static variables.
 -- See also Note [Phantom variables and bindings introduced by scrutinisation]
-partitionFulfilments :: (a -> Fulfilment -> Maybe b)  -- ^ Decide whether a fulfilment should be residualised given our current a, returning a new b if so
+partitionFulfilments :: (a -> fulfilment -> Maybe b)  -- ^ Decide whether a fulfilment should be residualised given our current a, returning a new b if so
                      -> ([b] -> a)                    -- ^ Combine bs of those fufilments being residualised into a new a
                      -> a                             -- ^ Used to decide whether the fufilments right here are suitable for residualisation
-                     -> [Fulfilment]                  -- ^ Fulfilments to partition
-                     -> ([Fulfilment], [Fulfilment])  -- ^ Fulfilments that should be bound and those that should continue to float, respectively
+                     -> [fulfilment]                  -- ^ Fulfilments to partition
+                     -> ([fulfilment], [fulfilment])  -- ^ Fulfilments that should be bound and those that should continue to float, respectively
 partitionFulfilments p combine = go
   where go x fs -- | traceRender ("partitionFulfilments", x, map (fun . fst) fs) False = undefined
                 | null fs_now' = ([], fs) 
                 | otherwise    = first (fs_now' ++) $ go (combine xs') fs'
                 where (unzip -> (fs_now', xs'), fs') = extractJusts (\fulfilment -> fmap (fulfilment,) $ p x fulfilment) fs
 
--- NB: be careful of this subtle problem:
+-- Note [Where to residualise fulfilments with FVs]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+--
+-- Be careful of this subtle problem:
 --
 --  let h6 = D[e1]
 --      residual = ...
@@ -330,13 +332,16 @@ partitionFulfilments p combine = go
 -- The right thing to do is to make sure that fulfilments created in different "branches" of the process tree aren't eligible for early binding in
 -- that manner, but we still want to tie back to them if possible. The bindFloats function achieves this by carefully shuffling information between the
 -- fulfilments and promises parts of the monadic-carried state.
-bindFloats :: (a -> [Fulfilment] -> ([Fulfilment], [Fulfilment]))
-           -> ScpM a -> ScpM (Out [(Var, FVedTerm)], a)
-bindFloats partition_floats mx
-  = ScpM $ \e s k -> unScpM mx (e { promises = mapMaybe fulfilmentPromise (fulfilments s) ++ promises e }) (s { fulfilments = [] })
-                               (\x (s'@(ScpState { fulfilments = (partition_floats x -> (fs_now, fs_later)) })) -> -- traceRender ("bindFloats", [(fun p, fvedTermFreeVars e) | (p, e) <- fs_now], [(fun p, fvedTermFreeVars e) | (p, e) <- fs_later]) $
-                                                                                                                   k (sortBy (comparing ((read :: String -> Int) . dropLastWhile (== '\'') . drop 1 . name_string . fst)) [(fun p, e') | (p, e') <- fs_now], x)
-                                                                                                                     (s' { fulfilments = fs_later ++ fulfilments s }))
+bindFloats :: FreeVars -> ScpM a -> ScpM (Out [(Var, FVedTerm)], a)
+bindFloats extra_statics mx
+  = ScpM $ \e s k -> unScpM mx (e { promises = mapMaybe fulfilmentPromise (fulfilments s) ++ promises e, fulfilmentStack = (fulfilments s, extra_statics) : fulfilmentStack e }) (s { fulfilments = [] }) (kontinue e s k)
+  where
+    kontinue _e s k x s' = -- traceRender ("bindFloats", [(fun p, fvedTermFreeVars e) | (p, e) <- fs_now], [(fun p, fvedTermFreeVars e) | (p, e) <- fs_later]) $
+                           k (fulfilmentsToBinds fs_now, x) (s' { fulfilments = fs_later ++ fulfilments s })
+      where (fs_now, fs_later) = partitionFulfilments fulfilmentRefersTo S.fromList extra_statics (fulfilments s')
+
+fulfilmentsToBinds :: [Fulfilment] -> Out [(Var, FVedTerm)]
+fulfilmentsToBinds fs = sortBy (comparing ((read :: String -> Int) . dropLastWhile (== '\'') . drop 1 . name_string . fst)) [(fun p, e') | (p, e') <- fs]
 
 freshHName :: ScpM Var
 freshHName = ScpM $ \_e s k -> k (expectHead "freshHName" (names s)) (s { names = tail (names s) })
@@ -346,10 +351,10 @@ fulfilmentPromise (P fun abstracted (Just meaning), _) = Just (P fun abstracted 
 fulfilmentPromise _                                    = Nothing
 
 getPromises :: ScpM [Promise Identity]
-getPromises = ScpM $ \e s k -> k (promises e ++ mapMaybe fulfilmentPromise (fulfilments s)) s
+getPromises = ScpM $ \e s k -> k (mapMaybe fulfilmentPromise (fulfilments s) ++ promises e) s
 
 getPromiseNames :: ScpM [Var]
-getPromiseNames = ScpM $ \e s k -> k (map fun (promises e) ++ [fun p | (p, _) <- fulfilments s]) s
+getPromiseNames = fmap (map fun) getPromises
 
 promise :: Promise Identity -> ScpM (a, Out FVedTerm) -> ScpM (a, Out FVedTerm)
 promise p opt = ScpM $ \e s k -> {- traceRender ("promise", fun p, abstracted p) $ -} unScpM (mx p) (e { promises = p : promises e, depth = 1 + depth e }) s k
@@ -363,6 +368,8 @@ promise p opt = ScpM $ \e s k -> {- traceRender ("promise", fun p, abstracted p)
       -- If some of the fufilments we have already generated refer to us, we need to fix them up because their application sites will apply more arguments than we
       -- actually need. We aren't able to do anything about the stuff they spuriously allocate as a result, but we can make generate a little wrapper that just discards
       -- those arguments. With luck, GHC will inline it and good things will happen.
+      --
+      -- TODO: we can generate the wrappers in a smarter way now that we can always see all possible fulfilments?
       let fvs' = fvedTermFreeVars e'
           abstracted_set = S.fromList (abstracted p)
           abstracted'_set = fvs' `S.intersection` abstracted_set -- We still don't want to abstract over e.g. phantom bindings
@@ -383,15 +390,19 @@ promise p opt = ScpM $ \e s k -> {- traceRender ("promise", fun p, abstracted p)
 
 
 data ScpEnv = ScpEnv {
-    promises :: [Promise Identity],
-    depth :: Int
+    promises        :: [Promise Identity],
+    fulfilmentStack :: [([Fulfilment], FreeVars)], -- Fulfilments at each level and the free variables of bindCapturedFloats that caused them to pushed.
+                                                   -- We guarantee that promises for each these are already present in the promises field.
+                                                   -- I have to store these in the monad-carried information because catchScpM has to be able to restore
+                                                   -- (a subset of) them when rollback is initiated. See also Note [Where to residualise fulfilments with FVs]
+    depth           :: Int
   }
 
 type Fulfilment = (Promise Maybe, Out FVedTerm)
 
 data ScpState = ScpState {
     names       :: [Var],
-    fulfilments :: [Fulfilment],
+    fulfilments :: [Fulfilment], -- Fulfilments at the current level only
     stats       :: SCStats
   }
 
@@ -405,9 +416,9 @@ instance Monad ScpM where
     (!mx) >>= fxmy = ScpM $ \e s k -> unScpM mx e s (\x s -> unScpM (fxmy x) e s k)
 
 runScpM :: ScpM (Out FVedTerm) -> (SCStats, Out FVedTerm)
-runScpM me = unScpM (bindFloats (\e' -> partitionFulfilments fulfilmentReferredTo S.unions (fvedTermFreeVars e')) me) init_e init_s (\(xes', e') s -> (stats s, letRecSmart xes' e'))
+runScpM me = unScpM me init_e init_s (\e' s -> (stats s, letRecSmart (fulfilmentsToBinds $ fst $ partitionFulfilments fulfilmentReferredTo S.unions (fvedTermFreeVars e') (fulfilments s)) e'))
   where
-    init_e = ScpEnv { promises = [], depth = 0 }
+    init_e = ScpEnv { promises = [], fulfilmentStack = [], depth = 0 }
     init_s = ScpState { names = map (\i -> name $ 'h' : show (i :: Int)) [0..], fulfilments = [], stats = mempty }
 
 catchScpM :: ((forall b. c -> ScpM b) -> ScpM a) -- ^ Action to try: supplies a function than can be called to "raise an exception". Raising an exception restores the original ScpEnv and ScpState
@@ -417,8 +428,17 @@ catchScpM f_try f_abort = ScpM $ \e s k -> unScpM (f_try (\c -> ScpM $ \e' s' _k
     unScpM (f_abort c) e (if dISCARD_FULFILMENTS_ON_ROLLBACK
                           then s
                           else let not_completed = S.fromList (map fun (promises e')) S.\\ S.fromList (map fun (promises e))
-                                   (_fs_discard, fs_ok) = partitionFulfilments fulfilmentRefersTo S.fromList not_completed (fulfilments s')
-                               in s' { fulfilments = fs_ok })
+                                   (fss_candidates, _fss_common) = splitByReverse (fulfilmentStack e) (fulfilmentStack e')
+                                   
+                                   -- Since we are rolling back we need to float as many of the fulfilments created in between here and the rollback point
+                                   -- upwards. This means that we don't lose the work that we already did to supercompile those bindings.
+                                   --
+                                   -- The approach is to accumulate a set of floating fulfilments that I try to move past each statics set one at a time,
+                                   -- from inside (deeper in the tree) to the outside (closer to top level).
+                                   go fs_floating [] = fs_floating
+                                   go fs_floating ((fs_candidates, extra_statics):fss_candidates) = go fs_ok fss_candidates
+                                      where (_fs_discard, fs_ok) = partitionFulfilments fulfilmentRefersTo S.fromList (not_completed `S.union` extra_statics) (fs_candidates ++ fs_floating)
+                               in s' { fulfilments = go [] fss_candidates ++ fulfilments s })
                          k)) e s k
 
 addStats :: SCStats -> ScpM ()

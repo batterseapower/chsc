@@ -532,6 +532,9 @@ splitBy :: [b] -> [a] -> ([a], [a])
 splitBy []     xs     = ([], xs)
 splitBy (_:ys) (x:xs) = first (x:) $ splitBy ys xs
 
+splitByReverse :: [b] -> [a] -> ([a], [a])
+splitByReverse ys xs = case splitBy ys (reverse xs) of (xs1, xs2) -> (reverse xs2, reverse xs1)
+
 splitManyBy :: [[b]] -> [a] -> [[a]]
 splitManyBy []       xs = [xs]
 splitManyBy (ys:yss) xs = case splitBy ys xs of (xs1, xs2) -> xs1 : splitManyBy yss xs2
