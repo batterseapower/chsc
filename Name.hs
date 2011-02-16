@@ -6,7 +6,6 @@ module Name (
 import Utilities
 
 import Data.Char
-import Data.Function
 import Data.Ord
 
 
@@ -22,10 +21,19 @@ instance Show Name where
     show n = "(name " ++ show (show (pPrint n)) ++ ")"
 
 instance Eq Name where
-    (==) = (==) `on` name_key
+    -- I used to inject into Either String Id as an intermidate step but the resulting name_key function
+    -- accounted for like 88% of total allocation. Write it direct style for performance:
+    n1 == n2 = case (name_id n1, name_id n2) of
+        (Nothing, Nothing)   -> name_string n1 == name_string n2
+        (Just id1, Just id2) -> id1 == id2
+        _                    -> False
 
 instance Ord Name where
-    compare = comparing name_key
+    n1 `compare` n2 = case (name_id n1, name_id n2) of
+        (Nothing, Nothing)   -> name_string n1 `compare` name_string n2
+        (Just id1, Just id2) -> id1 `compare` id2
+        (Just _, Nothing)    -> GT
+        (Nothing, Just _)    -> LT
 
 instance Pretty Name where
     pPrintPrec level _ n = text (escape $ name_string n) <> maybe empty (\i -> text "_" <> text (show i)) (name_id n)
@@ -35,9 +43,6 @@ instance Pretty Name where
               | c == 'z'                             = "zz"
               | isAlphaNum c || c `elem` ['_', '\''] = [c]
               | otherwise                            = 'z' : show (ord c)
-
-name_key :: Name -> Either String Id
-name_key n = maybe (Left $ name_string n) Right (name_id n)
 
 name :: String -> Name
 name s = Name s Nothing
