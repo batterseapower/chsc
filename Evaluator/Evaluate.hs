@@ -14,6 +14,7 @@ import Renaming
 import StaticFlags
 import Utilities
 
+import qualified Data.Set as S
 import qualified Data.Map as M
 
 
@@ -34,7 +35,7 @@ step' :: Bool -> UnnormalisedState -> (Bool, State) -- The flag indicates whethe
 step' normalising state =
     (\res@(_reduced, state') -> assertRender (hang (text "step': deeds lost or gained:") 2 (pPrint state $$ pPrint state'))
                                              (noChange (releaseStateDeed state) (releaseStateDeed state')) $
-                                assertRender (text "step': FVs" $$ pPrint (stateFreeVars state) $$ pPrint state $$ pPrint (stateFreeVars state') $$ pPrint state') (stateFreeVars state == stateFreeVars state') $
+                                assertRender (text "step': FVs" $$ pPrint (stateFreeVars state) $$ pPrint state $$ pPrint (stateFreeVars state') $$ pPrint state') (stateFreeVars state' `S.isSubsetOf` stateFreeVars state) $
                                 -- traceRender (text "normalising" $$ nest 2 (pPrintFullUnnormalisedState state) $$ text "to" $$ nest 2 (pPrintFullState state')) $
                                 res) $
     go state
