@@ -54,7 +54,7 @@ data TagCollectionType = TagBag | TagBagStrong | TagGraph | TagSet
 
 {-# NOINLINE tAG_COLLECTION #-}
 tAG_COLLECTION :: TagCollectionType
-tAG_COLLECTION = parseEnum "--tag-collection" TagGraph [("bags", TagBag), ("bags-strong", TagBagStrong), ("graphs", TagGraph), ("sets", TagSet)]
+tAG_COLLECTION = parseEnum "--tag-collection" TagBag [("bags", TagBag), ("bags-strong", TagBagStrong), ("graphs", TagGraph), ("sets", TagSet)]
 
 {-# NOINLINE gENERALISATION #-}
 gENERALISATION :: Bool
