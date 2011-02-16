@@ -671,6 +671,19 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
 -- Both of these oddities are a consequence of the fact that this heap is only non-empty in the splitter for states
 -- originating from the branch of some residual case expression. See Note [Phantom variables and bindings introduced by scrutinisation]
 -- for details about point 2 in particular.
+--
+-- Note [Performance of transitiveInline]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- This function is rather performance critical: I originally benchmarked it as taking 59.2% of runtime for DigitsOfE2.
+-- I've made several changes to try to increase performance:
+--  1. I used to union together h and init_h_inlineable to make a big h_inlineable. However, I can avoid allocating
+--     both the new map and testing to see if the binding under consideration originally came from init_h_inlineable
+--     if I just try to inline from each heap seperately.
+--  2. I used to remove something from h_inlineable whenever it proved too big to inline for deeds reasons. However,
+--     that means that I rubuild way too many versions of the map. Let's just take the deeds check every time - its pretty fast.
+--
+-- A possible future improvement would be to improve the implementation of restrict: it's presently O(n log n) but there
+-- is no reason that it can't be O(n), as long as I can access the internals of Data.Map.
 transitiveInline :: PureHeap                           -- ^ What to inline. We have not claimed deeds for any of this.
                  -> (Deeds, Heap, Stack, In (Anned a)) -- ^ What to inline into
                  -> (Deeds, Heap, Stack, In (Anned a))
@@ -679,7 +692,7 @@ transitiveInline init_h_inlineable (deeds, Heap h ids, k, in_e)
       -- traceRender ("transitiveInline", "had bindings for", pureHeapBoundVars init_h_inlineable, "FVs were", state_fvs, "so inlining", pureHeapBoundVars h') $
       (deeds', Heap h' ids, k, in_e)
   where
-    (deeds', h') = go 0 deeds (h `M.union` init_h_inlineable) M.empty (stateFreeVars (deeds, Heap M.empty ids, k, in_e))
+    (deeds', h') = go 0 deeds M.empty (stateFreeVars (deeds, Heap M.empty ids, k, in_e))
       -- NB: we prefer bindings from h to those from init_h_inlineable if there is any conflict. This is motivated by
       -- the fact that bindings from case branches are usually more informative than e.g. a phantom binding for the scrutinee.
     
@@ -690,14 +703,18 @@ transitiveInline init_h_inlineable (deeds, Heap h ids, k, in_e)
     --  3. We want to inline phantom versions of non-phantom definitions if they occur as free variables of inlined phantoms
     --  4. If we inlined something according to criteria 3. and that definition later becomes a free variable of a non-phantom,
     --     we need to make sure that phantom definition is replaced with a real one
-    go :: Int -> Deeds -> PureHeap -> PureHeap -> FreeVars -> (Deeds, PureHeap)
-    go n deeds h_inlineable h_output live
+    go :: Int -> Deeds -> PureHeap -> FreeVars -> (Deeds, PureHeap)
+    go n deeds h_output live
       = -- traceRender ("go", n, M.keysSet h_inlineable, M.keysSet h_output, fvs) $
         if live == live'
         then (deeds', h_output') -- NB: it's important we use the NEW versions of h_output/deeds, because we might have inlined extra stuff even though live hasn't changed!
-        else go (n + 1) deeds' h_inlineable' h_output' live' -- NB: the argument order to union is important because we want to overwrite an existing phantom binding (if any) with the concrete one
+        else go (n + 1) deeds' h_output' live' -- NB: the argument order to union is important because we want to overwrite an existing phantom binding (if any) with the concrete one
       where 
-        (deeds', h_inlineable', h_output', live') = M.foldrWithKey consider_inlining (deeds, M.empty, h_output, live) h_inlineable
+        -- See Note [Performance of transitiveInline]
+        (deeds', h_output', live') = M.foldrWithKey (consider_inlining False)
+                                    (M.foldrWithKey (consider_inlining True)
+                                                    (deeds, h_output, live) init_h_inlineable)
+                                                                            h
         
         -- NB: we rely here on the fact that our caller will still be able to fill in bindings for stuff from h_inlineable
         -- even if we choose not to inline it into the State, and that such bindings will not be evaluated until they are
@@ -705,21 +722,23 @@ transitiveInline init_h_inlineable (deeds, Heap h ids, k, in_e)
         --
         -- NB: we also rely here on the fact that the original h contains "optional" bindings in the sense that they are shadowed
         -- by something bound above - i.e. it just tells us how to unfold case scrutinees within a case branch.
-        consider_inlining x' hb (deeds, h_inlineable, h_output, live)
-          | x' `S.member` live -- Is the binding actually live at all?
-          , (deeds, h_inlineable, inline_hb) <- case claimDeeds deeds (heapBindingSize hb) of -- Do we have enough deeds to inline an unmodified version?
-                Just deeds ->                                                     (deeds,                h_inlineable, hb)
-                Nothing    -> trace (render $ text "inline-deeds:" <+> pPrint x') (deeds, M.insert x' hb h_inlineable, hb { howBound = if nAIVE_LOCAL_TIEBACKS || heapBindingProbablyValue hb then LetBound else LambdaBound } {- TODO: should probably blast associated term if is non-value (the evalutor won't inline it anyway, but it might improve matcher) -}) -- Heuristic: only inline phantom bindings if they are likely to refer to values
+        {-# INLINE consider_inlining #-} -- Force specialisation on the first, boolean, argument for extra speed
+        consider_inlining from_init_h_inlineable x' hb (deeds, h_output, live)
+          | x' `S.member` live        -- Is the binding actually live at all?
+          , x' `M.notMember` h_output -- Have we not inlined it already?
+          , (deeds, inline_hb) <- case claimDeeds deeds (heapBindingSize hb) of -- Do we have enough deeds to inline an unmodified version?
+                Just deeds ->                                                     (deeds, hb)
+                Nothing    -> trace (render $ text "inline-deeds:" <+> pPrint x') (deeds, hb { howBound = if nAIVE_LOCAL_TIEBACKS || heapBindingProbablyValue hb then LetBound else LambdaBound } {- TODO: should probably blast associated term if is non-value (the evalutor won't inline it anyway, but it might improve matcher) -}) -- Heuristic: only inline phantom bindings if they are likely to refer to values
           , inline_hb <- if howBound inline_hb == InternallyBound
                             || ((lOCAL_TIEBACKS || heapBindingEnvironmental inline_hb) -- Be careful: even if we don't want local tiebacks, we don't want to abstract over free variables of the original input
-                                && x' `M.notMember` h)                                 -- The Hack: only inline stuff from h *concretely*
+                                && from_init_h_inlineable)                             -- The Hack: only inline stuff from h *concretely*
                          then inline_hb
                          else inline_hb { howBound = LambdaBound, heapBindingTerm = Nothing }
           , inline_hb <- if pHANTOM_LOOKTHROUGH || howBound inline_hb /= LetBound then inline_hb else inline_hb { heapBindingTerm = Nothing } -- Only let us look into "classic" let-bound phantoms in specific situations
           -- , traceRender ("Extra liveness from", pPrint inline_hb, "is", heapBindingLiveness inline_hb) True
-          = (deeds, h_inlineable, M.insert x' inline_hb h_output, live `S.union` heapBindingFreeVars inline_hb)
+          = (deeds, M.insert x' inline_hb h_output, live `S.union` heapBindingFreeVars inline_hb)
           | otherwise
-          = (deeds, M.insert x' hb h_inlineable, h_output, live)
+          = (deeds, h_output, live)
 
 -- TODO: replace with a genuine evaluator. However, think VERY hard about the termination implications of this!
 -- I think we can only do it when the splitter is being invoked by a non-whistling invocation of sc.
