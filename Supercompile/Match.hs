@@ -213,7 +213,8 @@ matchEnvironment ids bound_eqs free_eqs h_l h_r = matchLoop bound_eqs free_eqs S
                -- This also ensures that the outgoing knowns can be used to build a renaming that includes the RHS of these bindings.
               ((_how_l, mb_in_e_l), (_how_r, mb_in_e_r)) | x_l == x_r -> case (mb_in_e_l, mb_in_e_r) of
                   (Nothing,     Nothing)     -> go [] used_l used_r
-                  (Just in_e_l, Just in_e_r) -> go [(x, x) | x <- S.toList (inFreeVars annedTermFreeVars in_e_l)] (markUsed x_l in_e_l used_l) (markUsed x_r in_e_r used_r)
+                  (Just in_e_l, Just in_e_r) -> assertRender ("match", in_e_l, in_e_r) (inFreeVars annedTermFreeVars in_e_r `S.isSubsetOf` inFreeVars annedTermFreeVars in_e_l) $
+                                                go [(x, x) | x <- S.toList (inFreeVars annedTermFreeVars in_e_l)] (markUsed x_l in_e_l used_l) (markUsed x_r in_e_r used_r)
                   _                          -> Nothing
                -- If the template internalises a binding of this form, check that the matchable semantics is the same.
                -- If the matchable doesn't have a corresponding binding tieback is impossible because we have less info this time.
