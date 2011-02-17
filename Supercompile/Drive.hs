@@ -107,9 +107,12 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) (emptyLosers, S.empty)
         _              -> ((losers, speculated), (mempty, state)) -- We MUST NOT EVER reduce in this branch or speculation will loop on e.g. infinite map
     
     continue depth hist (losers, speculated) state = -- traceRender ("speculate:continue", pPrintFullState state, pPrintFullState _state')
-                                                     ((losers', speculated'), (stats', (deeds'', Heap (h'_winners' `M.union` h'_losers) ids'', k, in_e)))
+                                                     assertRender (hang (text "speculate: deeds lost or gained:") 2 (pPrint state $$ pPrint state''))
+                                                                  (noChange (releaseStateDeed state) (releaseStateDeed state'')) $
+                                                     ((losers', speculated'), (stats', state''))
       where
         (stats, _state'@(deeds', Heap h' ids', k, in_e)) = reduce state
+        state'' = (deeds'', Heap (h'_winners' `M.union` h'_losers) ids'', k, in_e)
         
         -- Note [Controlling speculation]
         -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -152,9 +155,11 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) (emptyLosers, S.empty)
           | InternallyBound <- howBound hb
           , Just (_, annedTag -> tg) <- heapBindingTerm hb
           , x' `S.notMember` speculated
+          , let e_x' = annedTerm tg (Var x')
+          , Just deeds <- claimDeeds deeds (annedSize e_x') -- We have to pay for the syntax we use to start the speculation!! Small but subtle point that makes a big difference.
           , let -- We're going to be a bit clever here: to speculate a heap binding, just put that variable into the focus and reduce the resulting term.
                 -- The only complication occurs when comes back with a non-empty stack, in which case we need to deal with any unreduced update frames.
-                ((losers', speculated'), (stats', state'@(_, _, k, _))) = go (depth + 1) hist (losers, S.insert x' speculated) (normalise (deeds, Heap h'_winners ids, [], (mkIdentityRenaming [x'], annedTerm tg (Var x'))))
+                ((losers', speculated'), (stats', state'@(_, _, k, _))) = go (depth + 1) hist (losers, S.insert x' speculated) (normalise (deeds, Heap h'_winners ids, [], (mkIdentityRenaming [x'], e_x')))
                 -- Update frames present in the output indicate a failed speculation attempt. (Though if a var is the focus without an update frame yet that is also failure of a sort...)
                 --
                 -- Old Plan
