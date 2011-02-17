@@ -374,8 +374,9 @@ optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
         bracketeds_deeded_heap = M.fromList (heap_xs `zip` zipWith (\deeds_heap -> modifyFillers (zipWith addStateDeeds deeds_heap)) deedss_heap bracketeds_heap_elts)
         bracketed_deeded_focus = modifyFillers (zipWith addStateDeeds deeds_focus) bracketed_focus
     
-    assertRenderM (text "optimiseSplit: deeds lost or gained!") (noChange (sumMap (releaseBracketedDeeds releaseStateDeed) bracketeds_heap        + releaseBracketedDeeds releaseStateDeed bracketed_focus        + deeds)
-                                                                          (sumMap (releaseBracketedDeeds releaseStateDeed) bracketeds_deeded_heap + releaseBracketedDeeds releaseStateDeed bracketed_deeded_focus + deeds_initial))
+    assertRenderM (text "optimiseSplit: deeds lost or gained!", deeds, (deeds_initial, deeds_focus, deedss_heap))
+                  (noChange (sumMap (releaseBracketedDeeds releaseStateDeed) bracketeds_heap        + releaseBracketedDeeds releaseStateDeed bracketed_focus        + deeds)
+                            (sumMap (releaseBracketedDeeds releaseStateDeed) bracketeds_deeded_heap + releaseBracketedDeeds releaseStateDeed bracketed_deeded_focus + deeds_initial))
     
     -- 1) Recursively drive the focus itself
     let extra_statics = M.keysSet bracketeds_heap

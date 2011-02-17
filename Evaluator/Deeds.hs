@@ -21,9 +21,14 @@ claimDeeds deeds want = guard (not dEEDS || deeds >= want) >> return (deeds - wa
 -- | Splits up a number evenly across several partitions in proportions to weights given to those partitions.
 --
 -- > sum (apportion n weights) == n
+--
+-- Annoyingly, it is important that this works properly if n is negative as well -- these can occur
+-- when we have turned off deed checking. I don't care about handling negative weights.
 apportion :: Deeds -> [Deeds] -> [Deeds]
 apportion _      []        = error "apportion: empty list"
-apportion orig_n weighting = result
+apportion orig_n weighting
+  | orig_n < 0 = map negate $ apportion (negate orig_n) weighting
+  | otherwise  = result
   where
     fracs :: [Rational]
     fracs = assertRender (text "apportion: must have at least one non-zero weight") (denominator /= 0) $
