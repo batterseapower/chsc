@@ -47,7 +47,7 @@ data DeedsPolicy = FCFS | Proportional
 
 {-# NOINLINE dEEDS_POLICY #-}
 dEEDS_POLICY :: DeedsPolicy
-dEEDS_POLICY = parseEnum "--deeds-policy" FCFS [("fcfs", FCFS), ("proportional", Proportional)]
+dEEDS_POLICY = parseEnum "--deeds-policy" Proportional [("fcfs", FCFS), ("proportional", Proportional)]
 
 data TagCollectionType = TagBag | TagBagStrong | TagGraph | TagSet
                    deriving (Show)
