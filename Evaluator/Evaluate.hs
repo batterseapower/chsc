@@ -72,7 +72,11 @@ step' normalising state =
     
     -- Deal with a variable at the top of the stack
     -- Might have to claim deeds if inlining a non-value non-internally-bound thing here
-    force deeds (Heap h ids) k tg x' = do { hb <- M.lookup x' h; in_e@(_, e) <- heapBindingTerm hb; deeds <- claimDeeds deeds (annedSize e - heapBindingSize hb); return (deeds, Heap (M.delete x' h) ids, Tagged tg (Update x') : k, in_e) }
+    force deeds (Heap h ids) k tg x'
+      | Just in_v <- lookupValue (Heap h ids) x'
+      = do { (deeds, in_v) <- prepareValue deeds x' in_v; unwind deeds (Heap h ids) k tg in_v }
+      | otherwise -- NB: we MUST NOT create update frames for non-concrete bindings!! This has bitten me in the past, and it is seriously confusing.
+      = do { hb <- M.lookup x' h; guard (howBound hb == InternallyBound); in_e <- heapBindingTerm hb; return (deeds, Heap (M.delete x' h) ids, Tagged tg (Update x') : k, in_e) }
 
     -- Deal with a value at the top of the stack
     unwind :: Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> Maybe UnnormalisedState
