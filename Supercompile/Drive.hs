@@ -104,12 +104,12 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) (emptyLosers, S.empty)
   where
     go depth hist (losers, speculated) state = case terminate hist state of
         Continue hist' -> continue depth hist' (losers, speculated) state
-        _              -> ((losers, speculated), (mempty, state)) -- We MUST NOT EVER reduce in this branch or speculation will loop on e.g. infinite map
+        _              -> ((hist, losers, speculated), (mempty, state)) -- We MUST NOT EVER reduce in this branch or speculation will loop on e.g. infinite map
     
     continue depth hist (losers, speculated) state = -- traceRender ("speculate:continue", pPrintFullState state, pPrintFullState _state')
                                                      assertRender (hang (text "speculate: deeds lost or gained:") 2 (pPrint state $$ pPrint state''))
                                                                   (noChange (releaseStateDeed state) (releaseStateDeed state'')) $
-                                                     ((losers', speculated'), (stats', state''))
+                                                     ((threaded_hist', losers', speculated'), (stats', state''))
       where
         (stats, _state'@(deeds', Heap h' ids', k, in_e)) = reduce state
         state'' = (deeds'', Heap (h'_winners' `M.union` h'_losers) ids'', k, in_e)
@@ -149,8 +149,8 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) (emptyLosers, S.empty)
         -- TODO: there is a difference between losers due to termination-halting and losers because we didn't have enough
         -- information available to complete evaluation
         -- TODO: speculation could be more efficient if I could see the bindings that I speculated on the last invocation of the speculate function
-        (stats', deeds'', Heap h'_winners' ids'', losers', speculated') = M.foldrWithKey speculate_one (stats, deeds', Heap h'_winners ids', losers, speculated) h'_winners
-        speculate_one x' hb (stats, deeds, Heap h'_winners ids, losers, speculated)
+        (stats', deeds'', Heap h'_winners' ids'', threaded_hist', losers', speculated') = M.foldrWithKey speculate_one (stats, deeds', Heap h'_winners ids', hist, losers, speculated) h'_winners
+        speculate_one x' hb (stats, deeds, Heap h'_winners ids, threaded_hist, losers, speculated)
           -- | not (isValue (annee (snd in_e))), traceRender ("speculate", x', depth, pPrintFullUnnormalisedState (Heap (h {- `exclude` M.keysSet base_h -}) ids, k, in_e)) False = undefined
           | InternallyBound <- howBound hb
           , Just (_, annedTag -> tg) <- heapBindingTerm hb
@@ -159,7 +159,7 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) (emptyLosers, S.empty)
           , Just deeds <- claimDeeds deeds (annedSize e_x') -- We have to pay for the syntax we use to start the speculation!! Small but subtle point that makes a big difference.
           , let -- We're going to be a bit clever here: to speculate a heap binding, just put that variable into the focus and reduce the resulting term.
                 -- The only complication occurs when comes back with a non-empty stack, in which case we need to deal with any unreduced update frames.
-                ((losers', speculated'), (stats', state'@(_, _, k, _))) = go (depth + 1) hist (losers, S.insert x' speculated) (normalise (deeds, Heap h'_winners ids, [], (mkIdentityRenaming [x'], e_x')))
+                ((threaded_hist', losers', speculated'), (stats', state'@(_, _, k, _))) = go (depth + 1) (if tHREAD_SPECULATOR_HISTORY then threaded_hist else hist) (losers, S.insert x' speculated) (normalise (deeds, Heap h'_winners ids, [], (mkIdentityRenaming [x'], e_x')))
                 -- Update frames present in the output indicate a failed speculation attempt. (Though if a var is the focus without an update frame yet that is also failure of a sort...)
                 --
                 -- Old Plan
@@ -204,9 +204,9 @@ speculate reduce = snd . go (0 :: Int) (mkHistory wQO) (emptyLosers, S.empty)
                 (deeds', heap') = partiallyRebuildState state'
                 spec_failed_xs = S.fromList [x' | Update x' <- map tagee k]
                 spec_failed_h = h'_winners `restrict` spec_failed_xs
-          = (stats `mappend` stats', deeds', heap', IS.fromList [tg | hb <- M.elems spec_failed_h, Just tg <- [heapBindingTag hb]] `IS.union` losers', spec_failed_xs `S.union` speculated')
+          = (stats `mappend` stats', deeds', heap', threaded_hist', IS.fromList [tg | hb <- M.elems spec_failed_h, Just tg <- [heapBindingTag hb]] `IS.union` losers', spec_failed_xs `S.union` speculated')
           | otherwise
-          = (stats, deeds, Heap h'_winners ids, losers, speculated)
+          = (stats, deeds, Heap h'_winners ids, threaded_hist, losers, speculated)
 
     partiallyRebuildState :: State -> (Deeds, Heap)
     partiallyRebuildState (deeds, Heap h ids, k, (rn, qa)) = (deeds + annedSize e', Heap (h `M.union` h_updated) ids)
