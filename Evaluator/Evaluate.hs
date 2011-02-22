@@ -67,7 +67,7 @@ step' normalising state =
     lookupValue (Heap h _) x' = do
         hb <- M.lookup x' h
         case heapBindingTerm hb of
-          Just  (rn, anned_e) -> fmap ((rn,) . annee) $ termToValue anned_e
+          Just  (rn, anned_e) -> fmap ((rn,) . annee) $ termToValue anned_e -- FIXME: it would be cooler if we could exploit cheap non-values in unfoldings as well..
           Nothing             -> Nothing
     
     -- Deal with a variable at the top of the stack

@@ -284,7 +284,18 @@ fmapMap :: (Ord a, Ord b) => (a -> b) -> M.Map a v -> M.Map b v
 fmapMap f = M.fromList . map (first f) . M.toList
 
 restrict :: Ord k => M.Map k v -> S.Set k -> M.Map k v
-restrict m s = M.filterWithKey (\k _ -> k `S.member` s) m
+-- restrict m s
+--   | M.size m < S.size s = M.filterWithKey (\k _ -> k `S.member` s) m                                                   -- O(m * log s)
+--   | otherwise           = S.fold (\k out -> case M.lookup k m of Nothing -> out; Just v -> M.insert k v out) M.empty s -- O(s * log m)
+restrict m s = M.fromDistinctAscList $ merge (M.toAscList m) (S.toAscList s)
+  where
+    -- Theoretically O(max(m, s)), so should outperform previous algorithm...
+    merge _              []       = []
+    merge []             _        = []
+    merge ((k_m, v):kvs) (k_s:ks) = case compare k_m k_s of
+        LT ->          merge kvs            (k_s:ks)
+        EQ -> (k_m, v):merge kvs            ks
+        GT ->          merge ((k_m, v):kvs) ks
 
 exclude :: Ord k => M.Map k v -> S.Set k -> M.Map k v
 exclude m s = M.filterWithKey (\k _ -> k `S.notMember` s) m
@@ -296,7 +307,7 @@ listToMap :: Ord k => v -> [k] -> M.Map k v
 listToMap v = M.fromList . map (,v)
 
 setToMap :: Ord k => v -> S.Set k -> M.Map k v
-setToMap v = M.fromAscList . map (,v) . S.toAscList
+setToMap v = M.fromDistinctAscList . map (,v) . S.toAscList
 
 -- Essentially XOR on sets. See <http://en.wikipedia.org/wiki/Symmetric_difference>
 symmetricDifference :: Ord a => S.Set a -> S.Set a -> S.Set a

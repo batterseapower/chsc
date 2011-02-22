@@ -91,6 +91,7 @@ denormalise :: State -> UnnormalisedState
 denormalise (deeds, h, k, (rn, qa)) = (deeds, h, k, (rn, fmap qaToAnnedTerm' qa))
 
 
+-- Invariant: LetBound things cannot refer to LambdaBound things
 data HowBound = InternallyBound | LambdaBound | LetBound
               deriving (Eq, Show)
 
@@ -148,18 +149,6 @@ instance Pretty StackFrame where
         PrimApply pop in_vs in_es -> pPrintPrecPrimOp level prec pop (map SomePretty in_vs ++ map SomePretty in_es)
         Update x'                 -> pPrintPrecApp level prec (text "update") x'
 
-
-heapBindingEnvironmental :: HeapBinding -> Bool
-heapBindingEnvironmental (HB LetBound Nothing Nothing) = True
-heapBindingEnvironmental _                             = False
-
--- A heap binding is a value if the binding above is likely to be discovered to be a value by GHC. Used for heuristics about local heap bindings.
---
--- Actually, this is only ever called with an InternallyBound HeapBinding, so don't worry too much about what it returns in other cases.
-heapBindingProbablyValue :: HeapBinding -> Bool
-heapBindingProbablyValue hb = case heapBindingTerm hb of
-    Nothing   -> heapBindingTag hb == Nothing                 -- Assume top level bindings are values -- it is harmless to assume to them freely
-    Just in_e -> sPECULATION `implies` termIsValue (snd in_e) -- Tnings with expressions are judged by the actual content of their RHSs
 
 -- | Size of HeapBinding for Deeds purposes
 heapBindingSize :: HeapBinding -> Size

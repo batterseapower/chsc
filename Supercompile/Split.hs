@@ -471,19 +471,13 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
       -- of obtaining the fixed point. That is what we are interested in, not the fixed point itselF!
       -- TODO: eliminate redundant recomputation here?
   where
-    -- Heuristic: represent lambdas as phantoms (we can't do this in the extract_cheap because not_resid_xs needs to be correct so that
-    -- h_residualised contains bindings for all things that we turn into phantoms here. This bit me on e.g. SlowComputation.core. We also
-    -- can't just change gen_xs because that even prevents phantoms from being pushed down!)
-    init_deeds_resid_xs | pHANTOM_LOOKTHROUGH = M.keysSet (M.filter (\hb -> maybe False (\() -> True) $ do { guard (InternallyBound == howBound hb); (_, e) <- heapBindingTerm hb; Lambda _ _ <- fmap annee (termToValue e); return () }) h)
-                        | otherwise           = S.empty
-
     -- We compute the correct way to split as a least fixed point, slowly building up a set of variables
     -- (bound by heap bindings and update frames) that it is safe *not* to residualise.
     --
     -- Note that as an optimisation, optimiseSplit will only actually creates those residual bindings if the
     -- corresponding variables are free *after driving*. Of course, we have no way of knowing which bindings
     -- will get this treatment here, so just treat resid_xs as being exactly the set of residualised stuff.
-    split_fp = lfpFrom (S.empty, init_deeds_resid_xs) (fst . split_step)
+    split_fp = lfpFrom (S.empty, S.empty) (fst . split_step)
     
     -- Simultaneously computes the next fixed-point step and some artifacts computed along the way,
     -- which happen to correspond to exactly what I need to return from splitt.
@@ -503,7 +497,7 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
         fill_ids :: Bracketed (Entered, IdSupply -> UnnormalisedState) -> Bracketed (Entered, UnnormalisedState) -- NB: do NOT normalise at this stage because in transitiveInline we assume that State heaps are droppable!
         fill_ids = fmap (\(ent, f) -> (ent, f ids_brack))
         (deeds1, bracketeds_updated, bracketed_focus)
-          = (\(a, b, c) -> (a, M.map (second fill_ids) b, fill_ids c)) $
+          = (\(a, b, c) -> (a, M.map fill_ids b, fill_ids c)) $
             pushStack ids deeds scruts [(need_not_resid_kf i kf, kf) | (i, kf) <- named_k] bracketed_qa
             
         need_not_resid_kf i kf
@@ -517,7 +511,7 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
         -- 2) Build a splitting for those elements of the heap we propose to residualise not in not_resid_xs
         -- TODO: I should residualise those Unfoldings whose free variables have become interesting due to intervening scrutinisation
         (h_not_residualised, h_residualised) = M.partitionWithKey (\x' _ -> x' `S.member` not_resid_xs) h
-        bracketeds_nonupdated = M.mapMaybeWithKey (\x' hb -> do { guard (howBound hb == InternallyBound); in_e@(_, e) <- heapBindingTerm hb; return (HB LetBound (Just (annedTag e)) (guard (termIsValue e) >> Just in_e), fill_ids $ oneBracketed (Once (fromJust (name_id x')), \ids -> (0, Heap M.empty ids, [], in_e))) }) h_residualised
+        bracketeds_nonupdated = M.mapMaybeWithKey (\x' hb -> do { guard (howBound hb == InternallyBound); in_e <- heapBindingTerm hb; return (fill_ids $ oneBracketed (Once (fromJust (name_id x')), \ids -> (0, Heap M.empty ids, [], in_e))) }) h_residualised
         -- For every heap binding we ever need to deal with, contains:
         --  1) A phantom version of that heap binding
         --  2) A version of that heap binding as a concrete Bracketed thing
@@ -558,8 +552,7 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
         -- Basically the idea of this heap is "stuff we want to make available to push down"
         h_inlineable = setToMap (HB LambdaBound Nothing Nothing) gen_xs `M.union` -- The exclusion just makes sure we don't inline explicitly generalised bindings (even phantom ones)
                        (h_not_residualised `M.union`                              -- Take any non-residualised bindings from the input heap/stack...
-                        h_cheap_and_phantom `M.union`                             -- ...failing which, take concrete definitions for cheap heap bindings even if they are also residualised...
-                        M.map fst bracketeds_heap)                                -- ...failing which, take a phantom version of the remaining non-residualised heap/stack bindings
+                        h_cheap_and_phantom)                                      -- ...failing which, take concrete definitions for cheap heap bindings (even if they are also residualised) or phantom definitions for expensive ones...
         
         -- Generalising the final proposed floats may cause some bindings that we *thought* were going to be inlined to instead be
         -- residualised. We need to account for this in the Entered information (for work-duplication purposes), and in that we will
@@ -595,8 +588,8 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
         
         -- 3c) Actually do the inlining of as much of the heap as possible into the proposed floats
         -- We also take this opportunity to strip out the Entered information from each context.
-        (deeds3, entered_focus, bracketed_focus') =             inlineBracketHeap deeds2            bracketed_focus
-        (deeds4, entered_heap,  bracketeds_heap') = inlineHeapT inlineBracketHeap deeds3 (M.map snd bracketeds_heap)
+        (deeds3, entered_focus, bracketed_focus') =             inlineBracketHeap deeds2 bracketed_focus
+        (deeds4, entered_heap,  bracketeds_heap') = inlineHeapT inlineBracketHeap deeds3 bracketeds_heap
 
         -- 4) Construct the next element of the fixed point process:
         --  a) We should residualise:
@@ -614,11 +607,13 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
         --     does not appear to be invalidated when we decide not to residualise an additional binding.
         entered    = entered_focus `join` entered_heap
         safe_not_resid_xs' = -- traceRender ("candidates", onces, must_resid_xs, not_resid_xs, candidates S.\\ not_resid_xs) $
-                             safe_not_resid_xs `S.union` candidates
+                             safe_not_resid_xs `S.union` (onces S.\\ must_resid_xs)
           where onces = S.filter (\x' -> maybe True isOnce (M.lookup x' entered)) bound_xs
-                candidates = onces S.\\ must_resid_xs
         --   c) We should *start* residualising those bindings we thought were safe to inline but we actually couldn't inline because
         --      deeds issues prevented us from inlining them into *all* contexts that needed them. See also Note [Deeds and splitting]
+        --
+        --      This should also deal with residualising any InternallyBound stuff that we decided to instead let/lambda bound to e.g. prevent
+        --      value duplication, because the names of such bound things will be free in the proposed states.
         deeds_resid_xs' = deeds_resid_xs `S.union` (safe_not_resid_xs `S.intersection` (bracketedFreeVars stateFreeVars bracketed_focus' `S.union`
                                                                                         S.unions (map (bracketedFreeVars stateFreeVars) (M.elems bracketeds_heap'))))
     
@@ -628,19 +623,28 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
     -- Heap full of cheap expressions and any phantom stuff from the input heap.
     -- Used within the main loop in the process of computing h_inlineable -- see comments there for the full meaning of this stuff.
     extract_cheap_hb hb
+       -- We better not try to push down any bindings that would introduce work-duplication issues
       | InternallyBound <- howBound hb
       , Just (_, e) <- heapBindingTerm hb
-      = case termToValue e of
-          Just v | not dUPLICATE_VALUES_SPLITTER, representWithUnfolding (annee v) -> Just $ hb { howBound = LambdaBound }
-          _                                                                        -> guard (isCheap (annee e)) >> Just hb -- TODO: this is a remaining source of duplicated allocation
+      = if isCheap (annee e)
+        then hb {                            howBound = howToBind (annee e) } -- Use binding heuristics to determine how to refer to the cheap thing
+        else hb { heapBindingTerm = Nothing, howBound = LambdaBound }         -- GHC is unlikely to get any benefit from seeing the binding sites for non-cheap things
+       -- Inline phantom/unfolding stuff verbatim: there is no work duplication issue (the caller would not have created the bindings unless they were safe-for-duplication)
       | otherwise
-      = Just hb -- Inline phantom/unfolding stuff verbatim: there is no work duplication issue
+      = hb
       where
-        representWithUnfolding (Lambda _ _) = uNFOLD_LAMBDAS -- Heuristic: only lambda-abstract over the bindings of let-bound *data*, not lambdas
-        representWithUnfolding (Data _ xs)  = not (null xs)  -- Heuristic: GHC will actually statically allocate data with no arguments (this also has the side effect of preventing tons of type errors due to [] getting shared)
-        representWithUnfolding (Literal _)  = uNFOLD_LITERALS
-        representWithUnfolding (Indirect _) = False
-    h_cheap_and_phantom = M.mapMaybe extract_cheap_hb h
+        howToBind e
+          | not lOCAL_TIEBACKS = InternallyBound
+          | dUPLICATE_VALUES_SPLITTER = InternallyBound
+          | Value v <- e = case v of
+            Lambda _ _ -> LetBound -- Heuristic: GHC would lose too much if we cut the connection between the definition and use sites
+            Data _ xs | null xs   -> InternallyBound -- Heuristic: GHC will actually statically allocate data with no arguments (this also has the side effect of preventing tons of type errors due to [] getting shared)
+                      | otherwise -> LambdaBound
+            Literal _  -> InternallyBound -- No allocation duplication since GHC will float them (and common them up, if necessary)
+            Indirect _ -> InternallyBound -- Always eliminated by GHC
+           -- GHC is unlikely to get anything useful from seeing the definition of cheap non-values, so we'll have them as unfoldings
+          | otherwise = LambdaBound
+    h_cheap_and_phantom = M.map extract_cheap_hb h
 
 
 -- Note [Deeds and splitting]
@@ -693,13 +697,10 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
 
 -- We are going to use this helper function to inline any eligible inlinings to produce the expressions for driving.
 --
--- WARNING! We treat bindings in the incoming Heap very specially:
---   1. We assume that we haven't yet claimed any deeds for them
---   2. We NEVER inline a phantom version of them -- only a concrete version
+-- WARNING! We treat bindings in the incoming Heap very specially we assume that we haven't yet claimed any deeds for them
 --
--- Both of these oddities are a consequence of the fact that this heap is only non-empty in the splitter for states
--- originating from the branch of some residual case expression. See Note [Phantom variables and bindings introduced by scrutinisation]
--- for details about point 2 in particular.
+-- This is a consequence of the fact that this heap is only non-empty in the splitter for states originating from the
+-- branch of some residual case expression.
 --
 -- Note [Performance of transitiveInline]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -725,23 +726,16 @@ transitiveInline init_h_inlineable (deeds, Heap h ids, k, in_e)
       -- NB: we prefer bindings from h to those from init_h_inlineable if there is any conflict. This is motivated by
       -- the fact that bindings from case branches are usually more informative than e.g. a phantom binding for the scrutinee.
     
-    -- NB: in the presence of phantoms, this loop gets weird.
-    --  1. We want to inline phantoms if they occur as free variables of the state, so we get staticness
-    --  2. We want to inline phantoms if they ocucr as free variables of inlined phantoms, so we get to see chains of staticness
-    --    arising from e.g. foldl', hence allowing us to do intelligent staticness generalisation
-    --  3. We want to inline phantom versions of non-phantom definitions if they occur as free variables of inlined phantoms
-    --  4. If we inlined something according to criteria 3. and that definition later becomes a free variable of a non-phantom,
-    --     we need to make sure that phantom definition is replaced with a real one
     go :: Int -> Deeds -> PureHeap -> FreeVars -> (Deeds, PureHeap)
     go n deeds h_output live
       = -- traceRender ("go", n, M.keysSet h_inlineable, M.keysSet h_output, fvs) $
         if live == live'
-        then (deeds', h_output') -- NB: it's important we use the NEW versions of h_output/deeds, because we might have inlined extra stuff even though live hasn't changed!
+        then (deeds', h_output')               -- NB: it's important we use the NEW versions of h_output/deeds, because we might have inlined extra stuff even though live hasn't changed!
         else go (n + 1) deeds' h_output' live' -- NB: the argument order to union is important because we want to overwrite an existing phantom binding (if any) with the concrete one
       where 
         -- See Note [Performance of transitiveInline]
-        (deeds', h_output', live') = M.foldrWithKey (consider_inlining False)
-                                    (M.foldrWithKey (consider_inlining True)
+        (deeds', h_output', live') = M.foldrWithKey consider_inlining
+                                    (M.foldrWithKey consider_inlining -- FIXME: more speed
                                                     (deeds, h_output, live) init_h_inlineable)
                                                                             h
         
@@ -751,23 +745,24 @@ transitiveInline init_h_inlineable (deeds, Heap h ids, k, in_e)
         --
         -- NB: we also rely here on the fact that the original h contains "optional" bindings in the sense that they are shadowed
         -- by something bound above - i.e. it just tells us how to unfold case scrutinees within a case branch.
-        {-# INLINE consider_inlining #-} -- Force specialisation on the first, boolean, argument for extra speed
-        consider_inlining from_init_h_inlineable x' hb no_change@(deeds, h_output, live)
+        consider_inlining x' hb no_change@(deeds, h_output, live)
           | x' `S.member` live        -- Is the binding actually live at all?
           , x' `M.notMember` h_output -- Have we not inlined it already?
           , (deeds, inline_hb) <- case claimDeeds deeds (heapBindingSize hb) of -- Do we have enough deeds to inline an unmodified version?
                 Just deeds ->                                                     (deeds, hb)
-                Nothing    -> trace (render $ text "inline-deeds:" <+> pPrint x') (deeds, hb { howBound = if nAIVE_LOCAL_TIEBACKS || heapBindingProbablyValue hb then LetBound else LambdaBound } {- TODO: should probably blast associated term if is non-value (the evalutor won't inline it anyway, but it might improve matcher) -}) -- Heuristic: only inline phantom bindings if they are likely to refer to values
-          , inline_hb <- if howBound inline_hb == InternallyBound
-                            || ((lOCAL_TIEBACKS || heapBindingEnvironmental inline_hb) -- Be careful: even if we don't want local tiebacks, we don't want to abstract over free variables of the original input
-                                && from_init_h_inlineable)                             -- The Hack: only inline stuff from h *concretely*
-                         then inline_hb
-                         else inline_hb { howBound = LambdaBound, heapBindingTerm = Nothing }
-          , inline_hb <- if pHANTOM_LOOKTHROUGH || howBound inline_hb /= LetBound then inline_hb else inline_hb { heapBindingTerm = Nothing } -- Only let us look into "classic" let-bound phantoms in specific situations
-          -- , traceRender ("Extra liveness from", pPrint inline_hb, "is", heapBindingLiveness inline_hb) True
+                Nothing    -> trace (render $ text "inline-deeds:" <+> pPrint x') (deeds, makeFreeForDeeds hb) 
           = ((deeds,,) $! M.insert x' inline_hb h_output) $! live `S.union` heapBindingFreeVars inline_hb
           | otherwise
           = no_change
+
+    -- Given a HeapBinding that costs some deeds, return one that costs no deeds (and so can be inlined unconditionally)
+    makeFreeForDeeds (HB InternallyBound mb_tag (Just in_e))
+      | not lOCAL_TIEBACKS     = HB LambdaBound Nothing Nothing     -- Without local tiebacks, we just lose information here
+      | termIsCheap (snd in_e) = HB how         mb_tag  (Just in_e) -- With local tiebacks, we can keep the RHS (perhaps we can use it in the future?) but have to make it be able to pass it in from the caller somehow
+      | otherwise              = HB LambdaBound Nothing Nothing     -- All non-cheap things
+      where how | termIsValue (snd in_e) = LetBound    -- Heuristic: only refer to *values* via a free variable, as those are the ones GHC will get some benefit from. TODO: make data/function distinction here?
+                | otherwise              = LambdaBound
+    makeFreeForDeeds hb = panic "howToBind: should only be needed for internally bound things with a term" (pPrint hb)
 
 -- TODO: replace with a genuine evaluator. However, think VERY hard about the termination implications of this!
 -- I think we can only do it when the splitter is being invoked by a non-whistling invocation of sc.
@@ -798,7 +793,7 @@ pushStack :: IdSupply
           -> [(Bool, Tagged StackFrame)]
           -> Bracketed (Entered, IdSupply -> UnnormalisedState)
           -> (Deeds,
-              M.Map (Out Var) (HeapBinding, Bracketed (Entered, IdSupply -> UnnormalisedState)),
+              M.Map (Out Var) (Bracketed (Entered, IdSupply -> UnnormalisedState)),
               Bracketed (Entered, IdSupply -> UnnormalisedState))
 pushStack _   deeds _      []                 bracketed_hole = (deeds, M.empty, bracketed_hole)
 pushStack ids deeds scruts ((may_push, kf):k) bracketed_hole = second3 (`M.union` bracketed_heap') $ pushStack ids2 deeds' scruts' k bracketed_hole'
@@ -830,7 +825,7 @@ splitStackFrame :: IdSupply
                 -> [Out Var]
                 -> Bracketed (Entered, IdSupply -> UnnormalisedState)
                 -> ([Out Var],
-                    M.Map (Out Var) (HeapBinding, Bracketed (Entered, IdSupply -> UnnormalisedState)),
+                    M.Map (Out Var) (Bracketed (Entered, IdSupply -> UnnormalisedState)),
                     Bracketed (Entered, IdSupply -> UnnormalisedState))
 splitStackFrame ids kf scruts bracketed_hole
   | Update x' <- tagee kf = splitUpdate (tag kf) scruts x' bracketed_hole
@@ -875,8 +870,8 @@ splitStackFrame ids kf scruts bracketed_hole
 -- x into this hole in the bracketed. However, the fact that we do this is *critical* to the algorithm I use to ensure that
 -- we can make variables bound by update frames as non-residualised: see Note [Residualisation of things referred to in extraFvs]
 splitUpdate :: Tag -> [Out Var] -> Var -> Bracketed (Entered, IdSupply -> UnnormalisedState)
-            -> ([Out Var], M.Map (Out Var) (HeapBinding, Bracketed (Entered, IdSupply -> UnnormalisedState)), Bracketed (Entered, IdSupply -> UnnormalisedState))
-splitUpdate tg_kf scruts x' bracketed_hole = (x' : scruts, M.singleton x' (HB LetBound (Just tg_kf) Nothing, bracketed_hole),
+            -> ([Out Var], M.Map (Out Var) (Bracketed (Entered, IdSupply -> UnnormalisedState)), Bracketed (Entered, IdSupply -> UnnormalisedState))
+splitUpdate tg_kf scruts x' bracketed_hole = (x' : scruts, M.singleton x' bracketed_hole,
                                               oneBracketed (Once ctxt_id, \ids -> (0, Heap M.empty ids, [], (mkIdentityRenaming [x'], annedTerm tg_kf (Var x')))))
   where
     ctxt_id = fromJust (name_id x')

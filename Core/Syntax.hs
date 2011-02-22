@@ -173,15 +173,18 @@ altConBinders (DataAlt _ xs)    = xs
 altConBinders (LiteralAlt _)    = []
 altConBinders (DefaultAlt mb_x) = maybeToList mb_x
 
+termToValue :: Copointed ann => ann (TermF ann) -> Maybe (ann (ValueF ann))
+termToValue e = case extract e of Value v -> Just (fmap (const v) e); _ -> Nothing
+
+termIsValue :: Copointed ann => ann (TermF ann) -> Bool
+termIsValue = isValue . extract
+
 isValue :: TermF ann -> Bool
 isValue (Value _) = True
 isValue _         = False
 
-termIsValue :: Copointed ann => ann (TermF ann) -> Bool
-termIsValue = isJust . termToValue
-
-termToValue :: Copointed ann => ann (TermF ann) -> Maybe (ann (ValueF ann))
-termToValue e = case extract e of Value v -> Just (fmap (const v) e); _ -> Nothing
+termIsCheap :: Copointed ann => ann (TermF ann) -> Bool
+termIsCheap = isCheap . extract
 
 isCheap :: Copointed ann => TermF ann -> Bool
 isCheap _ | cALL_BY_NAME = True -- A cunning hack. I think this is all that should be required...
@@ -189,9 +192,6 @@ isCheap (Var _)     = True
 isCheap (Value _)   = True
 isCheap (Case e []) = isCheap (extract e) -- NB: important for pushing down let-bound applications of ``error''
 isCheap _           = False
-
-termIsCheap :: Term -> Bool
-termIsCheap = isCheap . unI
 
 
 class Symantics ann where

@@ -112,10 +112,6 @@ sPECULATE_ON_LOSERS = "--speculate-on-losers" `elem` unsafePerformIO getArgs
 lOCAL_TIEBACKS :: Bool
 lOCAL_TIEBACKS = not $ "--no-local-tiebacks" `elem` unsafePerformIO getArgs
 
-{-# NOINLINE nAIVE_LOCAL_TIEBACKS #-}
-nAIVE_LOCAL_TIEBACKS :: Bool
-nAIVE_LOCAL_TIEBACKS = "--naive-local-tiebacks" `elem` unsafePerformIO getArgs
-
 {-# NOINLINE rEDUCE_ROLLBACK #-}
 rEDUCE_ROLLBACK :: Bool
 rEDUCE_ROLLBACK = not $ "--no-reduce-rollback" `elem` unsafePerformIO getArgs
@@ -150,18 +146,6 @@ dUPLICATE_VALUES_EVALUATOR, dUPLICATE_VALUES_SPLITTER :: Bool
 dUPLICATE_VALUES_EVALUATOR = "--duplicate-values-evaluator" `elem` unsafePerformIO getArgs
 dUPLICATE_VALUES_SPLITTER = "--duplicate-values-splitter" `elem` unsafePerformIO getArgs
 
-{-# NOINLINE pHANTOM_LOOKTHROUGH #-}
-pHANTOM_LOOKTHROUGH :: Bool
-pHANTOM_LOOKTHROUGH = "--phantom-lookthrough" `elem` unsafePerformIO getArgs
-
 {-# NOINLINE rEFINE_FULFILMENT_FVS #-}
 rEFINE_FULFILMENT_FVS :: Bool
 rEFINE_FULFILMENT_FVS = not $ "--no-refine-fulfilment-fvs" `elem` unsafePerformIO getArgs
-
-{-# NOINLINE uNFOLD_LAMBDAS #-}
-uNFOLD_LAMBDAS :: Bool
-uNFOLD_LAMBDAS = "--unfold-lambdas" `elem` unsafePerformIO getArgs
-
-{-# NOINLINE uNFOLD_LITERALS #-}
-uNFOLD_LITERALS :: Bool
-uNFOLD_LITERALS = "--unfold-literals" `elem` unsafePerformIO getArgs
