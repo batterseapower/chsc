@@ -114,6 +114,34 @@ mkEnteredEnv = setToMap
 -- lambda or case-alt -- since it was free in h1 we probably had no information about what it was), we will residualise h2
 -- and h3, because we can see that they mention x as a static. It's not immediately cleary that h1 should be residualised
 -- because x wasn't free in it, but the fixed point will spot that h2/h3 are free in it and hence bind h1 as well.
+--
+-- FIXME: this is out of date because scrutinisation introduces an unfolding now
+--
+--
+-- Note [When to bind captured floats]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+--
+-- Ordinarily, we only need to check to see if we residualise some floating h-functions when we produce
+-- a residual let-binding.  This is because in the normal course of things any binding that was originally
+-- introduced as a lambda/alt-binding will never be made into a free variable of a final h-function.  However,
+-- there are two situations which break this invariant:
+--  1. We might choose to create a LetBound heap binding when driving the branches of a residual case expression
+--     that scrutinises a free variable. This changes a LambdaBound thing into a LetBound one, so we need to be
+--     careful to residualise the resulting h-function under that lambda-binder.
+--
+--     In fact, we used to do this but don't any more - see Note [Phantom variables and bindings introduced by scrutinisation]
+--  2. More relevantly, we might implement an optimisation that prevents h-functions from being lambda-abstracted
+--     over anything lambda-bound above a let-binding that we can see will trap the h-function under a let. For example,
+--     when driving:
+--
+--       \x -> let f = \y -> ...
+--             in D[<x |-> \lambda{}, f |-> l{\y -> ...} | ... f ... x ...>]
+--
+--     There is no point lambda-abstracting over x because we're going to have to drop the h-function under the f
+--     binding anyway. To implement this we might drive with (x |-> l{}) instead, but once again this converts a
+--     lambda-binding to a let-binding.
+--
+-- For this reason, we are careful to use bindCapturedFloats even when driving the arms of case expressions/bodies of lambdas.
 
 
 {-# INLINE split #-}
@@ -328,10 +356,11 @@ optimiseBracketed :: MonadStatics m
                   => (State -> m (Deeds, Out FVedTerm))
                   -> (Deeds, Bracketed State)
                   -> m (Deeds, Out FVedTerm)
-optimiseBracketed opt (deeds, b) = liftM (second (rebuild b)) $ optimiseMany optimise_one (deeds, fillers b)
-  where optimise_one (deeds, (s_deeds, s_heap, s_k, s_e)) = opt (deeds + s_deeds, s_heap, s_k, s_e)
-        -- No h-functions can refer to the lambda/case-alt bound variables around this hole.
-        -- See the Note [Phantom variables and bindings introduced by scrutinisation]
+optimiseBracketed opt (deeds, b) = liftM (second (rebuild b)) $ optimiseMany optimise_one (deeds, extraBvs b `zip` fillers b)
+  where optimise_one (deeds, (extra_bvs, (s_deeds, s_heap, s_k, s_e))) = liftM (\(xes, (deeds, e)) -> (deeds, letRecSmart xes e)) $ bindCapturedFloats extra_bvs $ opt (deeds + s_deeds, s_heap, s_k, s_e)
+        -- Because h-functions might potentially refer to the lambda/case-alt bound variables around this hole,
+        -- we use bindCapturedFloats to residualise such bindings within exactly this context.
+        -- See Note [When to bind captured floats]
 
 
 transformWholeList :: ([a] -> [b]) -- Transformer of concatenated lists -- must be length-preserving!
