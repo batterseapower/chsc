@@ -85,37 +85,6 @@ mkEnteredEnv = setToMap
 --
 -- Note that x was not static (free) in h1, but it is static (free) in h2. Thus, h-functions generated
 -- during supercompilation (h2, h3) have more free variables than the term from which they were generated (h1).
--- This is absolutely the only place that a lexically free variable changes to static!
---
--- There are three options:
---   1. Float h2 and h3 to the binding site for x, then notice that h1 refers to h2/h3 and residualise that
---      in the same place.
---   2. Do not float h2 and h3: just residualise them directly within the case branches
---   3. Do not add phantom bindings for free variables to the heap *at all*.
---
--- Option 1 is rather a bad idea because it means we end up specialising lots of code on boring variables
--- bound by lambdas -- h1 could be applied to any x, but in the proposed scheme it would be bound within
--- whatever happens to bind x, so we can't use it for any other x.
---
--- Option 2 is better, but still a bit complex. We do option 3 instead.
---
--- With option 2/3, when choosing which h-functions to bind, we could simply pick those whose free variables
--- intersected with variables bound by residual let-bindings.
---
--- If we wanted to do option 1, we would have to add two more complications:
---   1. Because we can case-scrutinise variables that were originally bound by a *lambda or case alt* rather than a
---      let, we have to bind h-functions inside *all* binding sites that we generate, NOT JUST lets
---   2. Because bound h-functions (e.g. h2 or h3) may be referred to by other h-functions (e.g. h1) which do not
---      refer to any of the free variables of the h-functions we are about to bind, we have an additionaly reason
---      to have a fixed point in bindCapturedFloats. This fixed point ensures we bind those h-functions that have
---      as free variables any h-functions we are about to bind.
---
--- This makes option 1 work, because, when we evaluate optimiseBracketed for whoever originally binds the x (probably a
--- lambda or case-alt -- since it was free in h1 we probably had no information about what it was), we will residualise h2
--- and h3, because we can see that they mention x as a static. It's not immediately cleary that h1 should be residualised
--- because x wasn't free in it, but the fixed point will spot that h2/h3 are free in it and hence bind h1 as well.
---
--- FIXME: this is out of date because scrutinisation introduces an unfolding now
 --
 --
 -- Note [When to bind captured floats]
@@ -142,6 +111,13 @@ mkEnteredEnv = setToMap
 --     lambda-binding to a let-binding.
 --
 -- For this reason, we are careful to use bindCapturedFloats even when driving the arms of case expressions/bodies of lambdas.
+--
+--
+-- Note [Bind captured floats fixed point]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- Because bound h-functions (e.g. h2 or h3) may be referred to by other h-functions (e.g. h1) which do not
+-- refer to any of the free variables of the h-functions we are about to bind, we have a fixed point in bindCapturedFloats.
+-- This fixed point ensures we bind those h-functions that have as free variables any h-functions we are about to bind.
 
 
 {-# INLINE split #-}
