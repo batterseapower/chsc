@@ -248,5 +248,9 @@ matchEnvironment ids bound_eqs free_eqs h_l h_r = matchLoop bound_eqs free_eqs S
                -- However, this is very dangerous because we don't want to match the template {x |-> let {Just y}, y |-> lam {}}
                -- against the matchable {x' |-> let {Just y'}, y' |-> lam {}}, since the template may still be able to reach y via the binding
                -- for x (we renamed the lambda-abstracted y to y' so there is nothing to fear from there).
+               --
+               -- NB: we can treat this *almost* exactly like the LambdaBound+unfolding case now since we have the invariant that LetBound things never
+               -- refer to LambdaBound things. *However* we anticipate that doing so would almost always fail to tieback, so we elect to just stick with
+               -- the "cheap-but-inaccurate" name-matching heuristic.
               ((LetBound, _), _) -> Nothing
       where go extra_free_eqs = matchLoop ((x_l, x_r) : known) (extra_free_eqs ++ free_eqs)

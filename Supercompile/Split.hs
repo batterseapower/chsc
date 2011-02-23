@@ -710,21 +710,21 @@ transitiveInline init_h_inlineable (deeds, Heap h ids, k, in_e)
       -- traceRender ("transitiveInline", "had bindings for", pureHeapBoundVars init_h_inlineable, "FVs were", state_fvs, "so inlining", pureHeapBoundVars h') $
       (deeds', Heap h' ids, k, in_e)
   where
-    (deeds', h') = go 0 deeds M.empty (stateFreeVars (deeds, Heap M.empty ids, k, in_e))
+    (deeds', h') = go 0 deeds M.empty (stateFreeVars (deeds, Heap M.empty ids, k, in_e)) S.empty
     
     -- NB: we prefer bindings from h to those from init_h_inlineable if there is any conflict. This is motivated by
     -- the fact that bindings from case branches are usually more informative than e.g. a phantom binding for the scrutinee.
     h_inlineable = h `M.union` init_h_inlineable
     
     -- This function is rather performance critical: I originally benchmarked transitiveInline as taking 59.2% of runtime for DigitsOfE2!
-    go :: Int -> Deeds -> PureHeap -> FreeVars -> (Deeds, PureHeap)
-    go n deeds h_output live
+    go :: Int -> Deeds -> PureHeap -> FreeVars -> FreeVars -> (Deeds, PureHeap)
+    go n deeds h_output live live_in_let
       = -- traceRender ("go", n, M.keysSet h_inlineable, M.keysSet h_output, fvs) $
         if live == live'
-        then (deeds', h_output')               -- NB: it's important we use the NEW versions of h_output/deeds, because we might have inlined extra stuff even though live hasn't changed!
-        else go (n + 1) deeds' h_output' live' -- NB: the argument order to union is important because we want to overwrite an existing phantom binding (if any) with the concrete one
+        then (deeds', neutraliseLetLives live_in_let' h_output') -- NB: it's important we use the NEW versions of h_output/deeds, because we might have inlined extra stuff even though live hasn't changed!
+        else go (n + 1) deeds' h_output' live' live_in_let'      -- NB: the argument order to union is important because we want to overwrite an existing phantom binding (if any) with the concrete one
       where 
-        (deeds', h_output', live') = M.foldrWithKey consider_inlining (deeds, h_output, live) ((h_inlineable `restrict` live) M.\\ h_output)
+        (deeds', h_output', live', live_in_let') = M.foldrWithKey consider_inlining (deeds, h_output, live, live_in_let) ((h_inlineable `restrict` live) M.\\ h_output)
         
         -- NB: we rely here on the fact that our caller will still be able to fill in bindings for stuff from h_inlineable
         -- even if we choose not to inline it into the State, and that such bindings will not be evaluated until they are
@@ -732,9 +732,10 @@ transitiveInline init_h_inlineable (deeds, Heap h ids, k, in_e)
         --
         -- NB: we also rely here on the fact that the original h contains "optional" bindings in the sense that they are shadowed
         -- by something bound above - i.e. it just tells us how to unfold case scrutinees within a case branch.
-        consider_inlining x' hb (deeds, h_output, live)
-          = ((deeds',,) $! M.insert x' inline_hb h_output) $! live `S.union` heapBindingFreeVars inline_hb
-          where (deeds', inline_hb) = case claimDeeds deeds (heapBindingSize hb) of -- Do we have enough deeds to inline an unmodified version?
+        consider_inlining x' hb (deeds, h_output, live, live_in_let)
+          = (deeds', M.insert x' inline_hb h_output, live `S.union` fvs, if howBound inline_hb == LetBound then live_in_let `S.union` fvs else live_in_let)
+          where fvs = heapBindingFreeVars inline_hb
+                (deeds', inline_hb) = case claimDeeds deeds (heapBindingSize hb) of -- Do we have enough deeds to inline an unmodified version?
                   Just deeds' ->                                                     (deeds', hb)
                   Nothing     -> trace (render $ text "inline-deeds:" <+> pPrint x') (deeds,  makeFreeForDeeds hb)
 
@@ -746,6 +747,9 @@ transitiveInline init_h_inlineable (deeds, Heap h ids, k, in_e)
       where how | termIsValue (snd in_e) = LetBound    -- Heuristic: only refer to *values* via a free variable, as those are the ones GHC will get some benefit from. TODO: make data/function distinction here?
                 | otherwise              = LambdaBound
     makeFreeForDeeds hb = panic "howToBind: should only be needed for internally bound things with a term" (pPrint hb)
+    
+    -- Enforce the invariant that anything referred to by a LetBound thing cannot be LambdaBound
+    neutraliseLetLives live_in_let h = M.mapWithKey (\x' hb -> if howBound hb == LambdaBound && x' `S.member` live_in_let then hb { howBound = LetBound } else hb) h
 
 -- TODO: replace with a genuine evaluator. However, think VERY hard about the termination implications of this!
 -- I think we can only do it when the splitter is being invoked by a non-whistling invocation of sc.
