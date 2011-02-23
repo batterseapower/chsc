@@ -10,7 +10,7 @@ import Core.Syntax
 import Evaluator.Deeds
 import Evaluator.Evaluate (normalise)
 import Evaluator.FreeVars
---import Evaluator.Residualise
+import Evaluator.Residualise
 import Evaluator.Syntax
 
 import Termination.Generaliser (Generaliser(..))
@@ -513,9 +513,7 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
         -- TODO: I should residualise those Unfoldings whose free variables have become interesting due to intervening scrutinisation
         (h_not_residualised, h_residualised) = M.partitionWithKey (\x' _ -> x' `S.member` not_resid_xs) h
         bracketeds_nonupdated = M.mapMaybeWithKey (\x' hb -> do { guard (howBound hb == InternallyBound); in_e <- heapBindingTerm hb; return (fill_ids $ oneBracketed (Once (fromJust (name_id x')), \ids -> (0, Heap M.empty ids, [], in_e))) }) h_residualised
-        -- For every heap binding we ever need to deal with, contains:
-        --  1) A phantom version of that heap binding
-        --  2) A version of that heap binding as a concrete Bracketed thing
+        -- For every heap binding we ever need to deal with, contains a version of that heap binding as a concrete Bracketed thing
         bracketeds_heap = bracketeds_updated `M.union` bracketeds_nonupdated
         
         -- 3) Inline as much of the Heap as possible into the candidate splitting
@@ -551,9 +549,11 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
         -- like to push down *some* version of it, hence the h_cheap full of indirections. And even if a concrete term is residualised we'd like a phantom version of it.
         --
         -- Basically the idea of this heap is "stuff we want to make available to push down"
+        h_updated_phantoms = M.fromDistinctAscList [(x', HB LambdaBound Nothing Nothing) | x' <- M.keys bracketeds_updated] -- TODO: move this into h_cheap_and_phantoms?
         h_inlineable = setToMap (HB LambdaBound Nothing Nothing) gen_xs `M.union` -- The exclusion just makes sure we don't inline explicitly generalised bindings (even phantom ones)
                        (h_not_residualised `M.union`                              -- Take any non-residualised bindings from the input heap/stack...
-                        h_cheap_and_phantom)                                      -- ...failing which, take concrete definitions for cheap heap bindings (even if they are also residualised) or phantom definitions for expensive ones...
+                        h_cheap_and_phantom `M.union`                             -- ...failing which, take concrete definitions for cheap heap bindings (even if they are also residualised) or phantom definitions for expensive ones...
+                        h_updated_phantoms)                                       -- ...failing which, take phantoms for things bound by update frames (if supercompilation couldn't turn these into values, GHC is unlikely to get anything good from seeing defs)
         
         -- Generalising the final proposed floats may cause some bindings that we *thought* were going to be inlined to instead be
         -- residualised. We need to account for this in the Entered information (for work-duplication purposes), and in that we will
@@ -621,7 +621,7 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
     -- Bound variables: those variables that I am interested in making a decision about whether to residualise or not
     bound_xs = pureHeapBoundVars h `S.union` stackBoundVars (map snd named_k)
     
-    -- Heap full of cheap expressions and any phantom stuff from the input heap.
+    -- Heap full of cheap expressions and any phantom stuff from the input heap but NOT from update frames
     -- Used within the main loop in the process of computing h_inlineable -- see comments there for the full meaning of this stuff.
     extract_cheap_hb hb
        -- We better not try to push down any bindings that would introduce work-duplication issues
@@ -702,15 +702,20 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
 --
 -- This is a consequence of the fact that this heap is only non-empty in the splitter for states originating from the
 -- branch of some residual case expression.
-transitiveInline :: PureHeap                           -- ^ What to inline. We have not claimed deeds for any of this.
-                 -> (Deeds, Heap, Stack, In (Anned a)) -- ^ What to inline into
-                 -> (Deeds, Heap, Stack, In (Anned a))
-transitiveInline init_h_inlineable (deeds, Heap h ids, k, in_e)
+transitiveInline :: PureHeap          -- ^ What to inline. We have not claimed deeds for any of this.
+                 -> UnnormalisedState -- ^ What to inline into
+                 -> UnnormalisedState
+transitiveInline init_h_inlineable _state@(deeds, Heap h ids, k, in_e)
     = -- (if not (S.null not_inlined_vs') then traceRender ("transitiveInline: generalise", not_inlined_vs') else id) $
       -- traceRender ("transitiveInline", "had bindings for", pureHeapBoundVars init_h_inlineable, "FVs were", state_fvs, "so inlining", pureHeapBoundVars h') $
-      (deeds'', Heap h' ids, k', in_e)
+      assertRender ("transitiveInline", M.keysSet h_inlineable, pPrintFullUnnormalisedState _state, pPrintFullUnnormalisedState state', stateUncoveredVars state', M.keysSet h', live') (S.null (stateUncoveredVars state'))
+      state'
   where
-    (live', deeds', h') = heap_worker 0 deeds M.empty (stateFreeVars (deeds, Heap M.empty ids, k, in_e)) S.empty
+    state' = (deeds'', Heap h' ids, k', in_e)
+    
+    -- We need to filter out update frames here or the lives won't include those things bound by k. This would mean that stack frames binding stuff only used by
+    -- in_e would look dead to us... (this bit me in Generalisation.core, among others)
+    (live', deeds', h') = heap_worker 0 deeds M.empty (stateFreeVars (deeds, Heap M.empty ids, [kf | kf <- k, case tagee kf of Update _ -> False; _ -> True], in_e)) S.empty
     
     -- Collecting dead update frames doesn't make any new heap bindings dead since they don't refer to anything
     -- It is a good idea to do this so that our output states are more likely to match.
@@ -754,7 +759,7 @@ transitiveInline init_h_inlineable (deeds, Heap h ids, k, in_e)
     makeFreeForDeeds hb = panic "howToBind: should only be needed for internally bound things with a term" (pPrint hb)
     
     -- Enforce the invariant that anything referred to by a LetBound thing cannot be LambdaBound
-    neutraliseLetLives live_in_let h = M.mapWithKey (\x' hb -> if howBound hb == LambdaBound && x' `S.member` live_in_let then hb { howBound = LetBound } else hb) h
+    neutraliseLetLives live_in_let = M.mapWithKey (\x' hb -> if howBound hb == LambdaBound && x' `S.member` live_in_let then hb { howBound = LetBound } else hb)
 
 -- TODO: replace with a genuine evaluator. However, think VERY hard about the termination implications of this!
 -- I think we can only do it when the splitter is being invoked by a non-whistling invocation of sc.

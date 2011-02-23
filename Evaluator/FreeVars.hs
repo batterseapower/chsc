@@ -3,7 +3,7 @@ module Evaluator.FreeVars (
     inFreeVars,
     heapBindingFreeVars,
     pureHeapBoundVars, stackBoundVars, stackFrameBoundVars,
-    pureHeapVars, stateFreeVars, stateLetBounders, stateLambdaBounders, stateInternalBounders
+    pureHeapVars, stateFreeVars, stateLetBounders, stateLambdaBounders, stateInternalBounders, stateUncoveredVars
   ) where
 
 import Evaluator.Deeds
@@ -76,3 +76,7 @@ stateLambdaBounders = ($ LambdaBound) . fst . stateVars
 
 stateInternalBounders :: (Deeds, Heap, Stack, In (Anned a)) -> BoundVars
 stateInternalBounders = ($ InternallyBound) . fst . stateVars
+
+stateUncoveredVars :: (Deeds, Heap, Stack, In (Anned a)) -> FreeVars
+stateUncoveredVars s = fvs S.\\ bvs InternallyBound S.\\ bvs LetBound S.\\ bvs LambdaBound
+  where (bvs, fvs) = stateVars s
