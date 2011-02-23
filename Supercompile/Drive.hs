@@ -73,24 +73,51 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ second (fVedTermToTe
 -- == Bounded multi-step reduction ==
 --
 
+-- We used to garbage-collect in the evaluator, when we executed the rule for update frames. This had two benefits:
+--  1) We don't have to actually update the heap or even claim a new deed
+--  2) We make the supercompiler less likely to terminate, because GCing so tends to reduce TagBag sizes
+--
+-- However, this caused problems with speculation: to prevent incorrectly garbage collecting bindings from the invisible "enclosing"
+-- heap when we speculated one of the bindings from the heap, we had to pass around an extra "live set" of parts of the heap that might
+-- be referred to later on. Furthermore:
+--  * Finding FVs when executing every update step was a bit expensive (though they were memoized on each of the State components)
+--  * This didn't GC cycles (i.e. don't consider stuff from the Heap that was only referred to by the thing being removed as "GC roots")
+--  * It didn't seem to make any difference to the benchmark numbers anyway
+--
+-- So I nixed in favour of a bit of gc in this module.
+--
 -- TODO: have the garbage collector collapse indirections to indirections (but unlike GHC, not further!)
--- TODO: have the garbage collector eliminate extra update frames
+-- TODO: have the garbage collector coalesce adjacent update frames
 gc :: State -> State
-gc (deeds, Heap h ids, k, in_e) = transitiveInline h (releasePureHeapDeeds deeds h, Heap M.empty ids, k, in_e)
+gc (deeds0, Heap h ids, k, in_e) = (deeds2, Heap h' ids, k', in_e)
   where
-    -- We used to garbage-collect in the evaluator, when we executed the rule for update frames. This had two benefits:
-    --  1) We don't have to actually update the heap or even claim a new deed
-    --  2) We make the supercompiler less likely to terminate, because GCing so tends to reduce TagBag sizes
-    --
-    -- However, this caused problems with speculation: to prevent incorrectly garbage collecting bindings from the invisible "enclosing"
-    -- heap when we speculated one of the bindings from the heap, we had to pass around an extra "live set" of parts of the heap that might
-    -- be referred to later on. Furthermore:
-    --  * Finding FVs when executing every update step was a bit expensive (though they were memoized on each of the State components)
-    --  * This didn't GC cycles (i.e. don't consider stuff from the Heap that was only referred to by the thing being removed as "GC roots")
-    --  * It didn't seem to make any difference to the benchmark numbers anyway
-    --
-    -- So I nixed in favour of a bit of gc in this module. TODO: experiment with not GCing here either.
-
+    live0 = stateFreeVars (deeds0, Heap M.empty ids, k, in_e)
+    (deeds1, h', live1) = inlineLiveHeap deeds0 h live0
+    -- Collecting dead update frames doesn't make any new heap bindings dead since they don't refer to anything
+    (deeds2, k') = pruneLiveStack deeds1 k live1
+    
+    inlineLiveHeap :: Deeds -> PureHeap -> FreeVars -> (Deeds, PureHeap, FreeVars)
+    inlineLiveHeap deeds h live = (deeds `releasePureHeapDeeds` h_dead, h_live, live')
+      where
+        (h_dead, h_live, live') = heap_worker h M.empty live
+        
+        -- This is just like Split.transitiveInline, but simpler since it never has to worry about running out of deeds:
+        heap_worker :: PureHeap -> PureHeap -> FreeVars -> (PureHeap, PureHeap, FreeVars)
+        heap_worker h_pending h_output live
+          = if live == live'
+            then (h_pending', h_output', live')
+            else heap_worker h_pending' h_output' live'
+          where 
+            (h_pending_kvs', h_output', live') = M.foldlWithKey consider_inlining ([], h_output, live) h_pending
+            h_pending' = M.fromDistinctAscList h_pending_kvs'
+        
+            consider_inlining (h_pending_kvs, h_output, live) x' hb
+              | x' `S.member` live = (h_pending_kvs,            M.insert x' hb h_output, live `S.union` heapBindingFreeVars hb)
+              | otherwise          = ((x', hb) : h_pending_kvs, h_output,                live)
+    
+    pruneLiveStack :: Deeds -> Stack -> FreeVars -> (Deeds, Stack)
+    pruneLiveStack deeds k live = (deeds `releaseStackDeeds` k_dead, k_live)
+      where (k_dead, k_live) = partition (\kf -> case tagee kf of Update x' -> x' `S.member` live; _ -> True) k
 
 type Losers = IS.IntSet
 

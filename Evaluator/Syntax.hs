@@ -178,8 +178,8 @@ releaseHeapBindingDeeds deeds hb = deeds + heapBindingSize hb
 releasePureHeapDeeds :: Deeds -> PureHeap -> Deeds
 releasePureHeapDeeds = M.fold (flip releaseHeapBindingDeeds)
 
+releaseStackDeeds :: Deeds -> Stack -> Deeds
+releaseStackDeeds = foldl' (\deeds kf -> deeds + stackFrameSize (tagee kf))
+
 releaseStateDeed :: (Deeds, Heap, Stack, In (Anned a)) -> Deeds
-releaseStateDeed (deeds, Heap h _, k, (_, e))
-  = foldl' (\deeds kf -> deeds + stackFrameSize (tagee kf))
-           (releasePureHeapDeeds (deeds + annedSize e) h)
-           k
+releaseStateDeed (deeds, Heap h _, k, (_, e)) = releaseStackDeeds (releasePureHeapDeeds (deeds + annedSize e) h) k
