@@ -96,7 +96,8 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ second (fVedTermToTe
 --
 -- TODO: have the garbage collector collapse (let x = True in x) to (True) -- but note that this requires onceness analysis
 gc :: State -> State
-gc _state@(deeds0, Heap h ids, k, in_e) = assertRender ("gc", stateFreeVars _state S.\\ stateFreeVars state') (stateFreeVars _state `S.isSubsetOf` stateFreeVars state')
+gc _state@(deeds0, Heap h ids, k, in_e) = assertRender ("gc: free vars", stateFreeVars _state S.\\ stateFreeVars state') (stateFreeVars _state `S.isSubsetOf` stateFreeVars state')
+                                          assertRender ("gc: uncovered vars", final_rn, stateUncoveredVars state', pPrintFullState _state, pPrintFullState state') (S.null (stateUncoveredVars state'))
                                           state'
   where
     state' = (deeds2, Heap h' ids, k', renameInRenaming final_rn in_e)
@@ -136,7 +137,7 @@ gc _state@(deeds0, Heap h ids, k, in_e) = assertRender ("gc", stateFreeVars _sta
                   Just (e_rn, e) | Just y <- termToVar e
                                  , let final_y' = rename (final_rn `renameRenaming` e_rn) y
                                        y'       = rename e_rn                             y
-                                 -- , traceRender ("gc: variable in heap", y') True
+                                 -- , traceRender ("gc: variable in heap", x', y') True
                                  -> (insertRenaming x' final_y' rn, (x', hb) : h_pending_kvs,                                             h_output, S.insert y' live)
                   _              -> (rn,                                       h_pending_kvs, M.insert x' (renameHeapBinding final_rn hb) h_output, live `S.union` heapBindingFreeVars hb)
               | otherwise = (rn, (x', hb) : h_pending_kvs, h_output, live)
@@ -156,8 +157,10 @@ gc _state@(deeds0, Heap h ids, k, in_e) = assertRender ("gc", stateFreeVars _sta
           | Update x' <- tagee kf
           , (kf':k') <- k
           , Update y' <- tagee kf'
-          -- , traceRender ("gc: update frame squeezing", x') True
-          = second3 (kf:) $ stack_worker (insertRenaming x' (rename_maybe final_rn y' `orElse` y') rn) (kf':k')
+          -- , traceRender ("gc: update frame squeezing", x', y') True
+          -- NB: by recursing with kf at the front, we avoid a bugs that might happen if kf' was not live but
+          -- kf was, where kf would be dropped as dead (bit me in SpeculationWorstCase)
+          = second3 (kf':) $ stack_worker (insertRenaming y' (rename_maybe final_rn x' `orElse` x') rn) (kf:k')
            -- Keep any other stack frames
           | otherwise
           = third3 (fmap (renameStackFrame final_rn) kf:) $ stack_worker rn k
