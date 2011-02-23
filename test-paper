@@ -3,7 +3,7 @@
 
 ./test-all ghc > results-ghc.tex
 
-BEST_OPTS="raw --no-deeds"
+BEST_OPTS="raw --no-deeds --speculate-on-losers --thread-speculator-history"
 
 # Straightforward single-flag tests
 ./test-all $BEST_OPTS > results-best.tex
@@ -15,13 +15,18 @@ BEST_OPTS="raw --no-deeds"
 ./test-all $BEST_OPTS --no-discard-fulfilments-on-rollback > results-no-discard-fulfilments-on-rollback.tex
 ./test-all $BEST_OPTS --duplicate-values-evaluator > results-duplicate-values-evaluator.tex
 ./test-all $BEST_OPTS --no-refine-fulfilment-fvs > results-no-refine-fulfilment-fvs.tex
+./test-all ${BEST_OPTS/--speculate-on-losers --thread-speculator-history/} > results-losers.tex
 
-# TODO: more tests here (--phantom-lookthrough, --naive-local-tiebacks)
+./test-all $BEST_OPTS --tag-collection=sets > results-sets.tex
+./test-all $BEST_OPTS --tag-collection=graphs > results-graphs.tex
+
 ./test-all $BEST_OPTS --no-local-tiebacks > results-no-local-tiebacks.tex
 ./test-all $BEST_OPTS --duplicate-values-splitter > results-duplicate-values-splitter
 
-# TODO: test deeds and the two deeds policies, bloat factors
-
+for bloat in 1 10 20 30 40 50; do
+  ./test-all ${BEST_OPTS/--no-deeds/--deeds-policy=fcfs --bloat=$bloat} | tee results-deeds-fcfs+bloat-$bloat.tex
+  ./test-all ${BEST_OPTS/--no-deeds/--deeds-policy=proportional --bloat=$bloat} | tee results-deeds-proportional+bloat-$bloat.tex
+done
 
 # The options that we should use to make the supercompiler as close as possible to the SbE paper
 #VANILLA_OPTS="raw --no-primops --no-deeds --tag-collection=bags --no-generalisation --cheapification --no-speculation --no-local-tiebacks --no-reduce-rollback --no-sc-rollback --duplicate-values-evaluator --duplicate-values-splitter --no-refine-fulfilment-fvs"
