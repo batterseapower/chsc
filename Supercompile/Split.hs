@@ -628,25 +628,25 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
       | InternallyBound <- howBound hb
       , Just (_, e) <- heapBindingTerm hb
       = if isCheap (annee e)
-        then hb {                            howBound = howToBind (annee e) } -- Use binding heuristics to determine how to refer to the cheap thing
-        else hb { heapBindingTerm = Nothing, howBound = LambdaBound }         -- GHC is unlikely to get any benefit from seeing the binding sites for non-cheap things
+        then hb {                            howBound = howToBindCheap e } -- Use binding heuristics to determine how to refer to the cheap thing
+        else hb { heapBindingTerm = Nothing, howBound = LambdaBound }      -- GHC is unlikely to get any benefit from seeing the binding sites for non-cheap things
        -- Inline phantom/unfolding stuff verbatim: there is no work duplication issue (the caller would not have created the bindings unless they were safe-for-duplication)
       | otherwise
       = hb
-      where
-        howToBind e
-          | not lOCAL_TIEBACKS = InternallyBound
-          | dUPLICATE_VALUES_SPLITTER = InternallyBound
-          | Value v <- e = case v of
-            Lambda _ _ -> LetBound -- Heuristic: GHC would lose too much if we cut the connection between the definition and use sites
-            Data _ xs | null xs   -> InternallyBound -- Heuristic: GHC will actually statically allocate data with no arguments (this also has the side effect of preventing tons of type errors due to [] getting shared)
-                      | otherwise -> LambdaBound
-            Literal _  -> InternallyBound -- No allocation duplication since GHC will float them (and common them up, if necessary)
-            Indirect _ -> InternallyBound -- Always eliminated by GHC
-           -- GHC is unlikely to get anything useful from seeing the definition of cheap non-values, so we'll have them as unfoldings
-          | otherwise = LambdaBound
     h_cheap_and_phantom = M.map extract_cheap_hb h
 
+howToBindCheap :: AnnedTerm -> HowBound
+howToBindCheap e
+  | not lOCAL_TIEBACKS = InternallyBound
+  | dUPLICATE_VALUES_SPLITTER = InternallyBound
+  | Value v <- annee e = case v of
+    Lambda _ _ -> LetBound -- Heuristic: GHC would lose too much if we cut the connection between the definition and use sites
+    Data _ xs | null xs   -> InternallyBound -- Heuristic: GHC will actually statically allocate data with no arguments (this also has the side effect of preventing tons of type errors due to [] getting shared)
+              | otherwise -> LambdaBound
+    Literal _  -> InternallyBound -- No allocation duplication since GHC will float them (and common them up, if necessary)
+    Indirect _ -> InternallyBound -- Always eliminated by GHC
+   -- GHC is unlikely to get anything useful from seeing the definition of cheap non-values, so we'll have them as unfoldings
+  | otherwise = LambdaBound
 
 -- Note [Deeds and splitting]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -830,7 +830,7 @@ splitStackFrame ids kf scruts bracketed_hole
     Apply x2' -> zipBracketeds (\[e] -> e `app` x2') (\[fvs] -> S.insert x2' fvs) [id] (\_ -> Nothing) [bracketed_hole]
     Scrutinise (rn, unzip -> (alt_cons, alt_es)) -> -- (if null k_remaining then id else traceRender ("splitStack: FORCED SPLIT", M.keysSet entered_hole, [x' | Tagged _ (Update x') <- k_remaining])) $
                                                     -- (if not (null k_not_inlined) then traceRender ("splitStack: generalise", k_not_inlined) else id) $
-                                                    zipBracketeds (\(e_hole:es_alts) -> case_ e_hole (alt_cons' `zip` es_alts)) (\(fvs_hole:fvs_alts) -> fvs_hole `S.union` S.unions (zipWith (S.\\) fvs_alts alt_bvss)) (id:[\bvs -> bvs S.\\ alt_bvs | alt_bvs <- alt_bvss]) (\(_tails_hole:tailss_alts) -> liftM concat (sequence tailss_alts)) (bracketed_hole : bracketed_alts)
+                                                    zipBracketeds (\(e_hole:es_alts) -> case_ e_hole (alt_cons' `zip` es_alts)) (\(fvs_hole:fvs_alts) -> fvs_hole `S.union` S.unions (zipWith (S.\\) fvs_alts alt_bvss)) (id:[\bvs -> bvs `S.union` alt_bvs | alt_bvs <- alt_bvss]) (\(_tails_hole:tailss_alts) -> liftM concat (sequence tailss_alts)) (bracketed_hole : bracketed_alts)
       where -- 0) Manufacture context identifier
             (ids', state_ids) = splitIdSupply ids
             ctxt_id = idFromSupply state_ids
@@ -843,7 +843,7 @@ splitStackFrame ids kf scruts bracketed_hole
             -- ===>
             --  case x of C -> let unk = C; z = C in ...
             alt_in_es = alt_rns `zip` alt_es
-            alt_hs = zipWith4 (\alt_rn alt_con alt_bvs alt_tg -> setToMap (HB LambdaBound Nothing Nothing) alt_bvs `M.union` M.fromList (do { Just scrut_v <- [altConToValue alt_con]; scrut <- scruts; return (scrut, HB (if dUPLICATE_VALUES_SPLITTER then InternallyBound else LetBound) (Just alt_tg) (Just (alt_rn, annedTerm alt_tg (Value scrut_v)))) })) alt_rns alt_cons alt_bvss (map annedTag alt_es) -- NB: don't need to grab deeds for these just yet, due to the funny contract for transitiveInline
+            alt_hs = zipWith4 (\alt_rn alt_con alt_bvs alt_tg -> setToMap (HB LambdaBound Nothing Nothing) alt_bvs `M.union` M.fromList (do { Just scrut_v <- [altConToValue alt_con]; scrut_e <- [annedTerm alt_tg (Value scrut_v)]; scrut <- scruts; return (scrut, HB (howToBindCheap scrut_e) (Just alt_tg) (Just (alt_rn, scrut_e))) })) alt_rns alt_cons alt_bvss (map annedTag alt_es) -- NB: don't need to grab deeds for these just yet, due to the funny contract for transitiveInline
             alt_bvss = map (\alt_con' -> fst $ altConOpenFreeVars alt_con' (S.empty, S.empty)) alt_cons'
             bracketed_alts = zipWith (\alt_h alt_in_e -> oneBracketed (Once ctxt_id, \ids -> (0, Heap alt_h ids, [], alt_in_e))) alt_hs alt_in_es
     PrimApply pop in_vs in_es -> zipBracketeds (primOp pop) S.unions (repeat id) (\_ -> Nothing) (bracketed_vs ++ bracketed_hole : bracketed_es)
