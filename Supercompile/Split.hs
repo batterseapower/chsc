@@ -701,19 +701,6 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
 --
 -- This is a consequence of the fact that this heap is only non-empty in the splitter for states originating from the
 -- branch of some residual case expression.
---
--- Note [Performance of transitiveInline]
--- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
--- This function is rather performance critical: I originally benchmarked it as taking 59.2% of runtime for DigitsOfE2.
--- I've made several changes to try to increase performance:
---  1. I used to union together h and init_h_inlineable to make a big h_inlineable. However, I can avoid allocating
---     both the new map and testing to see if the binding under consideration originally came from init_h_inlineable
---     if I just try to inline from each heap seperately.
---  2. I used to remove something from h_inlineable whenever it proved too big to inline for deeds reasons. However,
---     that means that I rubuild way too many versions of the map. Let's just take the deeds check every time - its pretty fast.
---
--- A possible future improvement would be to improve the implementation of restrict: it's presently O(n log n) but there
--- is no reason that it can't be O(n), as long as I can access the internals of Data.Map.
 transitiveInline :: PureHeap                           -- ^ What to inline. We have not claimed deeds for any of this.
                  -> (Deeds, Heap, Stack, In (Anned a)) -- ^ What to inline into
                  -> (Deeds, Heap, Stack, In (Anned a))
@@ -723,9 +710,12 @@ transitiveInline init_h_inlineable (deeds, Heap h ids, k, in_e)
       (deeds', Heap h' ids, k, in_e)
   where
     (deeds', h') = go 0 deeds M.empty (stateFreeVars (deeds, Heap M.empty ids, k, in_e))
-      -- NB: we prefer bindings from h to those from init_h_inlineable if there is any conflict. This is motivated by
-      -- the fact that bindings from case branches are usually more informative than e.g. a phantom binding for the scrutinee.
     
+    -- NB: we prefer bindings from h to those from init_h_inlineable if there is any conflict. This is motivated by
+    -- the fact that bindings from case branches are usually more informative than e.g. a phantom binding for the scrutinee.
+    h_inlineable = h `M.union` init_h_inlineable
+    
+    -- This function is rather performance critical: I originally benchmarked transitiveInline as taking 59.2% of runtime for DigitsOfE2!
     go :: Int -> Deeds -> PureHeap -> FreeVars -> (Deeds, PureHeap)
     go n deeds h_output live
       = -- traceRender ("go", n, M.keysSet h_inlineable, M.keysSet h_output, fvs) $
@@ -733,11 +723,7 @@ transitiveInline init_h_inlineable (deeds, Heap h ids, k, in_e)
         then (deeds', h_output')               -- NB: it's important we use the NEW versions of h_output/deeds, because we might have inlined extra stuff even though live hasn't changed!
         else go (n + 1) deeds' h_output' live' -- NB: the argument order to union is important because we want to overwrite an existing phantom binding (if any) with the concrete one
       where 
-        -- See Note [Performance of transitiveInline]
-        (deeds', h_output', live') = M.foldrWithKey consider_inlining
-                                    (M.foldrWithKey consider_inlining -- FIXME: more speed
-                                                    (deeds, h_output, live) init_h_inlineable)
-                                                                            h
+        (deeds', h_output', live') = M.foldrWithKey consider_inlining (deeds, h_output, live) ((h_inlineable `restrict` live) M.\\ h_output)
         
         -- NB: we rely here on the fact that our caller will still be able to fill in bindings for stuff from h_inlineable
         -- even if we choose not to inline it into the State, and that such bindings will not be evaluated until they are
@@ -745,15 +731,11 @@ transitiveInline init_h_inlineable (deeds, Heap h ids, k, in_e)
         --
         -- NB: we also rely here on the fact that the original h contains "optional" bindings in the sense that they are shadowed
         -- by something bound above - i.e. it just tells us how to unfold case scrutinees within a case branch.
-        consider_inlining x' hb no_change@(deeds, h_output, live)
-          | x' `S.member` live        -- Is the binding actually live at all?
-          , x' `M.notMember` h_output -- Have we not inlined it already?
-          , (deeds, inline_hb) <- case claimDeeds deeds (heapBindingSize hb) of -- Do we have enough deeds to inline an unmodified version?
-                Just deeds ->                                                     (deeds, hb)
-                Nothing    -> trace (render $ text "inline-deeds:" <+> pPrint x') (deeds, makeFreeForDeeds hb) 
-          = ((deeds,,) $! M.insert x' inline_hb h_output) $! live `S.union` heapBindingFreeVars inline_hb
-          | otherwise
-          = no_change
+        consider_inlining x' hb (deeds, h_output, live)
+          = ((deeds',,) $! M.insert x' inline_hb h_output) $! live `S.union` heapBindingFreeVars inline_hb
+          where (deeds', inline_hb) = case claimDeeds deeds (heapBindingSize hb) of -- Do we have enough deeds to inline an unmodified version?
+                  Just deeds' ->                                                     (deeds', hb)
+                  Nothing     -> trace (render $ text "inline-deeds:" <+> pPrint x') (deeds,  makeFreeForDeeds hb)
 
     -- Given a HeapBinding that costs some deeds, return one that costs no deeds (and so can be inlined unconditionally)
     makeFreeForDeeds (HB InternallyBound mb_tag (Just in_e))

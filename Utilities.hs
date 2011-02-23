@@ -289,7 +289,7 @@ restrict :: Ord k => M.Map k v -> S.Set k -> M.Map k v
 --   | otherwise           = S.fold (\k out -> case M.lookup k m of Nothing -> out; Just v -> M.insert k v out) M.empty s -- O(s * log m)
 restrict m s = M.fromDistinctAscList $ merge (M.toAscList m) (S.toAscList s)
   where
-    -- Theoretically O(max(m, s)), so should outperform previous algorithm...
+    -- Theoretically O(m + s), so should outperform previous algorithm...
     merge _              []       = []
     merge []             _        = []
     merge ((k_m, v):kvs) (k_s:ks) = case compare k_m k_s of
@@ -298,7 +298,16 @@ restrict m s = M.fromDistinctAscList $ merge (M.toAscList m) (S.toAscList s)
         GT ->          merge ((k_m, v):kvs) ks
 
 exclude :: Ord k => M.Map k v -> S.Set k -> M.Map k v
-exclude m s = M.filterWithKey (\k _ -> k `S.notMember` s) m
+--exclude m s = M.filterWithKey (\k _ -> k `S.notMember` s) m -- O(m * log s)
+exclude m s = M.fromDistinctAscList $ merge (M.toAscList m) (S.toAscList s)
+  where
+    -- Theoretically O(m + s), so should outperform previous algorithm...
+    merge kvs            []       = kvs
+    merge []             _        = []
+    merge ((k_m, v):kvs) (k_s:ks) = case compare k_m k_s of
+        LT -> (k_m, v):merge kvs            (k_s:ks)
+        EQ ->          merge kvs            ks
+        GT ->          merge ((k_m, v):kvs) ks
 
 mapMaybeSet :: (Ord a, Ord b) => (a -> Maybe b) -> S.Set a -> S.Set b
 mapMaybeSet f = S.fromList . mapMaybe f . S.toList
