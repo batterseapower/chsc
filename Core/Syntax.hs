@@ -70,7 +70,7 @@ type AltF ann = (AltCon, ann (TermF ann))
 type Value = ValueF Identity
 type TaggedValue = ValueF Tagged
 type CountedValue = ValueF Counted
-data ValueF ann = Indirect Var | Lambda Var (ann (TermF ann)) | Data DataCon [Var] | Literal Literal
+data ValueF ann = Indirect Var | Lambda Var (ann (TermF ann)) | Data DataCon [Var] | Literal Literal -- TODO: add PAPs as well? Would avoid duplicating function bodies too eagerly.
                 deriving (Eq, Show)
 
 instance NFData PrimOp
