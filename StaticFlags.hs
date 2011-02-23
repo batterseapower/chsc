@@ -47,7 +47,7 @@ data DeedsPolicy = FCFS | Proportional
 
 {-# NOINLINE dEEDS_POLICY #-}
 dEEDS_POLICY :: DeedsPolicy
-dEEDS_POLICY = parseEnum "--deeds-policy" FCFS [("fcfs", FCFS), ("proportional", Proportional)]
+dEEDS_POLICY = parseEnum "--deeds-policy" Proportional [("fcfs", FCFS), ("proportional", Proportional)]
 
 data TagCollectionType = TagBag | TagBagStrong | TagGraph | TagSet
                    deriving (Show)
@@ -107,6 +107,10 @@ sPECULATION = not $ "--no-speculation" `elem` unsafePerformIO getArgs
 {-# NOINLINE sPECULATE_ON_LOSERS #-}
 sPECULATE_ON_LOSERS :: Bool
 sPECULATE_ON_LOSERS = "--speculate-on-losers" `elem` unsafePerformIO getArgs
+
+{-# NOINLINE tHREAD_SPECULATOR_HISTORY #-}
+tHREAD_SPECULATOR_HISTORY :: Bool
+tHREAD_SPECULATOR_HISTORY = "--thread-speculator-history" `elem` unsafePerformIO getArgs
 
 {-# NOINLINE lOCAL_TIEBACKS #-}
 lOCAL_TIEBACKS :: Bool

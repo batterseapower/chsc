@@ -201,6 +201,11 @@ matchEnvironment ids bound_eqs free_eqs h_l h_r = matchLoop bound_eqs free_eqs S
           (Just hb_l, Just hb_r) -> case ((howBound &&& heapBindingTerm) hb_l, (howBound &&& heapBindingTerm) hb_r) of
                -- If the template provably doesn't use this heap binding, we can match it against anything at all
               ((InternallyBound, Nothing), _) -> matchLoop known free_eqs used_l used_r
+               -- If the template internalises a binding of this form, check that the matchable semantics is the same.
+               -- If the matchable doesn't have a corresponding binding tieback is impossible because we have less info this time.
+              ((InternallyBound, Just in_e_l), (_how_r, mb_in_e_r)) -> case mb_in_e_r of
+                  Just in_e_r | x_l `S.notMember` used_l, x_r `S.notMember` used_r -> matchInTerm ids in_e_l in_e_r >>= \extra_free_eqs -> go extra_free_eqs (markUsed x_l in_e_l used_l) (markUsed x_r in_e_r used_r)
+                  _ -> Nothing
                -- We assume no-shadowing, so if two names are the same they must refer to the same thing
                -- NB: because I include this case, we may not include a renaming for some lambda-bound variables in the final knowns
                --
@@ -211,15 +216,23 @@ matchEnvironment ids bound_eqs free_eqs h_l h_r = matchLoop bound_eqs free_eqs S
                -- Of course, we still need to match the FVs on both sides. For example, the LHS could be {x |-> Just y} with the RHS
                -- {x |-> Just y, y |-> True} -- better not tie back in this situation, so we validate that the y bindings still match.
                -- This also ensures that the outgoing knowns can be used to build a renaming that includes the RHS of these bindings.
+               --
+               -- OK, I don't think this is safe in the case where either side is not LetBound. The reason is that we might have:
+               --     D[(let x = e1 in x, let x = e2 in x)]
+               -- ==> (D[let x = e1 in x], D[let x = e2 in x])
+               --
+               -- Which floats to:
+               --     let h0 = D[let x = e1 in x]
+               --     in in (h0, D[let x = e2 in x])
+               --
+               -- We better not tieback the second tuple component to h0 on the basis that the two x binders match!
+               -- They are only guaranteed to match if the are Lambda/Let bound, because in that case those binders must have been
+               -- created by a common ancestor and hence we can just match the uniques to determine whether the binders are the "same".
               ((_how_l, mb_in_e_l), (_how_r, mb_in_e_r)) | x_l == x_r -> case (mb_in_e_l, mb_in_e_r) of
                   (Nothing,     Nothing)     -> go [] used_l used_r
-                  (Just in_e_l, Just in_e_r) -> go [(x, x) | x <- S.toList (inFreeVars annedTermFreeVars in_e_l)] (markUsed x_l in_e_l used_l) (markUsed x_r in_e_r used_r)
+                  (Just in_e_l, Just in_e_r) -> assertRender ("match", x_l, _how_l, in_e_l, x_r, _how_r, in_e_r) (inFreeVars annedTermFreeVars in_e_r `S.isSubsetOf` inFreeVars annedTermFreeVars in_e_l) $
+                                                go [(x, x) | x <- S.toList (inFreeVars annedTermFreeVars in_e_l)] (markUsed x_l in_e_l used_l) (markUsed x_r in_e_r used_r)
                   _                          -> Nothing
-               -- If the template internalises a binding of this form, check that the matchable semantics is the same.
-               -- If the matchable doesn't have a corresponding binding tieback is impossible because we have less info this time.
-              ((InternallyBound, Just in_e_l), (_how_r, mb_in_e_r)) -> case mb_in_e_r of
-                  Just in_e_r | x_l `S.notMember` used_l, x_r `S.notMember` used_r -> matchInTerm ids in_e_l in_e_r >>= \extra_free_eqs -> go extra_free_eqs (markUsed x_l in_e_l used_l) (markUsed x_r in_e_r used_r)
-                  _ -> Nothing
                -- If the template has no information but exposes a lambda, we can rename to tie back.
                -- If there is a corresponding binding in the matchable we can't tieback because we have more info this time.
               ((LambdaBound, Nothing), (_how_r, mb_in_e_r)) -> case mb_in_e_r of
