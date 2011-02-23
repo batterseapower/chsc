@@ -711,16 +711,9 @@ transitiveInline init_h_inlineable _state@(deeds, Heap h ids, k, in_e)
       assertRender ("transitiveInline", M.keysSet h_inlineable, pPrintFullUnnormalisedState _state, pPrintFullUnnormalisedState state', stateUncoveredVars state', M.keysSet h', live') (S.null (stateUncoveredVars state'))
       state'
   where
-    state' = (deeds'', Heap h' ids, k', in_e)
+    state' = (deeds', Heap h' ids, k, in_e)
     
-    -- We need to filter out update frames here or the lives won't include those things bound by k. This would mean that stack frames binding stuff only used by
-    -- in_e would look dead to us... (this bit me in Generalisation.core, among others)
-    (live', deeds', h') = heap_worker 0 deeds M.empty (stateFreeVars (deeds, Heap M.empty ids, [kf | kf <- k, case tagee kf of Update _ -> False; _ -> True], in_e)) S.empty
-    
-    -- Collecting dead update frames doesn't make any new heap bindings dead since they don't refer to anything
-    -- It is a good idea to do this so that our output states are more likely to match.
-    (deeds'', k') = (deeds' `releaseStackDeeds` k_dead, k_live)
-      where (k_live, k_dead) = partition (\kf -> case tagee kf of Update x' -> x' `S.member` live'; _ -> True) k
+    (live', deeds', h') = heap_worker 0 deeds M.empty (stateFreeVars (deeds, Heap M.empty ids, k, in_e)) S.empty
     
     -- NB: we prefer bindings from h to those from init_h_inlineable if there is any conflict. This is motivated by
     -- the fact that bindings from case branches are usually more informative than e.g. a phantom binding for the scrutinee.

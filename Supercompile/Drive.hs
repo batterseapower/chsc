@@ -84,53 +84,79 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ second (fVedTermToTe
 --  * This didn't GC cycles (i.e. don't consider stuff from the Heap that was only referred to by the thing being removed as "GC roots")
 --  * It didn't seem to make any difference to the benchmark numbers anyway
 --
--- So I nixed in favour of:
--- 1. Dropping dead update frames in transitiveInline (which is anyway responsible for ensuring there is no dead stuff in the stack)
--- 2. "Squeezing" just before the matcher: this shorts out indirections-to-indirections and does update-frame stack squeezing.
---    You might think that it would be cool to do this in normalisation, but then when normalising during specualation the enclosing
+-- You might think a good alternative approach is to:
+-- 1. Drop dead update frames in transitiveInline (which is anyway responsible for ensuring there is no dead stuff in the stack)
+-- 2. "Squeeze" just before the matcher: this shorts out indirections-to-indirections and does update-frame stack squeezing.
+--    You might also think that it would be cool to just do this in normalisation, but then when normalising during specualation the enclosing
 --    context wouldn't get final_rned :-(
 --
+-- HOWEVER. That doesn't work properly because normalisation itself can introduce dead bindings - i.e. in order to be guaranteed to
+-- catch all the junk we have to GC normalised bindings, not the pre-normalised ones that transitiveInline sees. So the new plan is to do
+-- both points 1 and 2 right just before we go to the matcher.
+--
 -- TODO: have the garbage collector collapse (let x = True in x) to (True) -- but note that this requires onceness analysis
-squeeze :: State -> State
-squeeze _state@(deeds0, Heap h ids, k, in_e) = assertRender ("squeeze", stateFreeVars state' S.\\ stateFreeVars _state) (stateFreeVars state' `S.isSubsetOf` stateFreeVars _state)
-                                               state'
+gc :: State -> State
+gc _state@(deeds0, Heap h ids, k, in_e) = assertRender ("gc", stateFreeVars _state S.\\ stateFreeVars state') (stateFreeVars _state `S.isSubsetOf` stateFreeVars state')
+                                          state'
   where
     state' = (deeds2, Heap h' ids, k', renameInRenaming final_rn in_e)
     
     rn0 = emptyRenaming
-    (rn1, deeds1, h') = inlineLiveHeap rn0 deeds0 h
-    (final_rn {- NB: loop through this variable -}, deeds2, k') = pruneLiveStack rn1 deeds1 k
+    -- We need to filter out update frames here or the lives won't include those things bound by k. This would mean that stack frames
+    -- binding stuff only used by in_e would look dead to us... (this bit me in Generalisation.core, among others)
+    live0 = stateFreeVars (deeds0, Heap M.empty ids, [kf | kf <- k, case tagee kf of Update _ -> False; _ -> True], in_e)
+    (rn1, deeds1, h', live1) = inlineLiveHeap rn0 deeds0 h live0
+    -- Collecting dead update frames doesn't make any new heap bindings dead since they don't refer to anything
+    (final_rn {- NB: loop through this variable -}, deeds2, k') = pruneLiveStack rn1 deeds1 k live1
     
     -- The threaded renamings map ORIGINAL variables to INTERMEDIATE ones. You shouldn't look at those!
     -- The final renaming maps ORIGINAL variables to FINALISED ones
     -- The live set tests on ORIGINAL variables only
     
-    inlineLiveHeap :: Renaming -> Deeds -> PureHeap -> (Renaming, Deeds, PureHeap)
-    inlineLiveHeap rn deeds h = -- traceRender ("inlineLiveHeap", h, live, M.keysSet h_live, live')
-                              (rn', deeds `releasePureHeapDeeds` M.fromDistinctAscList h_dead_kvs, M.fromDistinctAscList h_live_kvs)
+    inlineLiveHeap :: Renaming -> Deeds -> PureHeap -> FreeVars -> (Renaming, Deeds, PureHeap, FreeVars)
+    inlineLiveHeap rn deeds h live = -- traceRender ("inlineLiveHeap", h, live, M.keysSet h_live, live')
+                                     (rn', deeds `releasePureHeapDeeds` h_dead, h_live, live')
       where
-        (rn', h_dead_kvs, h_live_kvs) = M.foldrWithKey consider_inlining (rn, [], []) h
+        (rn', h_dead, h_live, live') = heap_worker rn h M.empty live
         
-        consider_inlining x' hb (rn, h_dead_kvs, h_output_kvs)
-          = case heapBindingTerm hb of
-              Just (e_rn, e) | Just y <- termToVar e
-                             , let final_y' = rename (final_rn `renameRenaming` e_rn) y
-                             -- , traceRender ("squeeze: variable in heap", y') True
-                             -> (insertRenaming x' final_y' rn, (x', hb) : h_dead_kvs,                                       h_output_kvs)
-              _              -> (rn,                                       h_dead_kvs, (x', renameHeapBinding final_rn hb) : h_output_kvs)
+        -- This is just like Split.transitiveInline, but simpler since it never has to worry about running out of deeds:
+        heap_worker :: Renaming -> PureHeap -> PureHeap -> FreeVars -> (Renaming, PureHeap, PureHeap, FreeVars)
+        heap_worker rn h_pending h_output live
+          = if live == live'
+            then (rn', h_pending', h_output', live')
+            else heap_worker rn' h_pending' h_output' live'
+          where 
+            (rn', h_pending_kvs', h_output', live') = M.foldrWithKey consider_inlining (rn, [], h_output, live) h_pending
+            h_pending' = M.fromDistinctAscList h_pending_kvs'
+        
+            consider_inlining x' hb (rn, h_pending_kvs, h_output, live)
+              | x' `S.member` live
+              , Nothing <- rename_maybe rn x' -- Ensure that we don't try to short out indirections twice
+              = case heapBindingTerm hb of
+                  Just (e_rn, e) | Just y <- termToVar e
+                                 , let final_y' = rename (final_rn `renameRenaming` e_rn) y
+                                       y'       = rename e_rn                             y
+                                 -- , traceRender ("gc: variable in heap", y') True
+                                 -> (insertRenaming x' final_y' rn, (x', hb) : h_pending_kvs,                                             h_output, S.insert y' live)
+                  _              -> (rn,                                       h_pending_kvs, M.insert x' (renameHeapBinding final_rn hb) h_output, live `S.union` heapBindingFreeVars hb)
+              | otherwise = (rn, (x', hb) : h_pending_kvs, h_output, live)
     
-    pruneLiveStack :: Renaming ->  Deeds -> Stack -> (Renaming, Deeds, Stack)
-    pruneLiveStack rn deeds k = (rn', deeds `releaseStackDeeds` k_dead, k_live)
+    pruneLiveStack :: Renaming ->  Deeds -> Stack -> FreeVars -> (Renaming, Deeds, Stack)
+    pruneLiveStack rn deeds k live = (rn', deeds `releaseStackDeeds` k_dead, k_live)
       where
         (rn', k_dead, k_live) = stack_worker rn k
         
         stack_worker rn [] = (rn, [], [])
         stack_worker rn (kf:k)
+           -- Eliminate dead stack frames
+          | Update x' <- tagee kf
+          , x' `S.notMember` live
+          = second3 (kf:) $ stack_worker rn k
            -- Collapse nested stack frames (GHC calls this "stack squeezing")
           | Update x' <- tagee kf
           , (kf':k') <- k
           , Update y' <- tagee kf'
-          -- , traceRender ("squeeze: update frame squeezing", y') True
+          -- , traceRender ("gc: update frame squeezing", x') True
           = second3 (kf:) $ stack_worker (insertRenaming x' (rename_maybe final_rn y' `orElse` y') rn) (kf':k')
            -- Keep any other stack frames
           | otherwise
@@ -497,7 +523,7 @@ addStats scstats = ScpM $ \_e s k -> k () (s { stats = stats s `mappend` scstats
 type RollbackScpM = Generaliser -> ScpM (Deeds, Out FVedTerm)
 
 sc, sc' :: History (State, RollbackScpM) (Generaliser, RollbackScpM) -> State -> ScpM (Deeds, Out FVedTerm)
-sc  hist = memo (sc' hist) . squeeze
+sc  hist = memo (sc' hist) . gc
 sc' hist state = (\raise -> check raise) `catchScpM` \gen -> stop gen hist -- TODO: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
   where
     check this_rb = case terminate hist (state, this_rb) of
@@ -519,7 +545,7 @@ memo opt state = do
          , Just rn_lr <- [-- (\res -> if isNothing res then traceRender ("no match:", fun p) res else res) $
                            match (unI (meaning p)) state]
           -- NB: because I can trim reduce the set of things abstracted over above, it's OK if the renaming derived from the meanings renames vars that aren't in the abstracted list, but NOT vice-versa
-         , let bad_renames = S.fromList (abstracted p) S.\\ M.keysSet (unRenaming rn_lr) in assertRender (text "Renaming was inexhaustive:" <+> pPrint bad_renames $$ pPrint rn_lr $$ pPrintFullState state) (S.null bad_renames) True
+         , let bad_renames = S.fromList (abstracted p) S.\\ M.keysSet (unRenaming rn_lr) in assertRender (text "Renaming was inexhaustive:" <+> pPrint bad_renames $$ pPrint (fun p) $$ pPrintFullState (unI (meaning p)) $$ pPrint rn_lr $$ pPrintFullState state) (S.null bad_renames) True
          , let rn_fvs = map (safeRename ("tieback: FVs for " ++ render (pPrint (fun p) $$ text "Us:" $$ pPrint state $$ text "Them:" $$ pPrint (meaning p)))
                                         rn_lr) -- NB: If tb contains a dead PureHeap binding (hopefully impossible) then it may have a free variable that I can't rename, so "rename" will cause an error. Not observed in practice yet.
                tb_dynamic_vs = rn_fvs (abstracted p)
