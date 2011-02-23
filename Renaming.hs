@@ -67,12 +67,10 @@ renameBinders ids rn = reassociate . mapAccumL ((associate .) . uncurry renameBi
   where associate   (ids, rn, n)    = ((ids, rn), n)
         reassociate ((ids, rn), ns) = (ids, rn, ns)
 
--- NB: throws away something from the Renaming being renamed if it is not in the domain of rn_by.
--- This is useful behaviour for the term normalisation logic in the supercompiler, because the
--- "normalising" renaming will only contain entries for actual free variables, but the "internal"
--- renamings (e.g. those in the Heaps' In Terms') may contain many more entries.
+-- NB: does not rename if the rn_by doesn't contain the relevant variable. This is useful for the squeezer,
+-- which is in fact the only client of this code
 renameRenaming :: Renaming -> Renaming -> Renaming
-renameRenaming rn_by = Renaming . M.mapMaybe (rename_maybe rn_by) . unRenaming
+renameRenaming rn_by = Renaming . M.map (\x -> rename_maybe rn_by x `orElse` x) . unRenaming
 
 foldRenaming :: (In Name -> Out Name -> b -> b) -> b -> Renaming -> b
 foldRenaming f b = M.foldrWithKey f b . unRenaming

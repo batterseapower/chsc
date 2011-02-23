@@ -193,6 +193,12 @@ isCheap (Value _)   = True
 isCheap (Case e []) = isCheap (extract e) -- NB: important for pushing down let-bound applications of ``error''
 isCheap _           = False
 
+termToVar :: Copointed ann => ann (TermF ann) -> Maybe Var
+termToVar e = case extract e of
+    Value (Indirect x) -> Just x
+    Var x              -> Just x
+    _                  -> Nothing
+
 
 class Symantics ann where
     var    :: Var -> ann (TermF ann)

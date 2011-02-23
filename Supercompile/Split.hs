@@ -708,21 +708,26 @@ transitiveInline :: PureHeap                           -- ^ What to inline. We h
 transitiveInline init_h_inlineable (deeds, Heap h ids, k, in_e)
     = -- (if not (S.null not_inlined_vs') then traceRender ("transitiveInline: generalise", not_inlined_vs') else id) $
       -- traceRender ("transitiveInline", "had bindings for", pureHeapBoundVars init_h_inlineable, "FVs were", state_fvs, "so inlining", pureHeapBoundVars h') $
-      (deeds', Heap h' ids, k, in_e)
+      (deeds'', Heap h' ids, k', in_e)
   where
-    (deeds', h') = go 0 deeds M.empty (stateFreeVars (deeds, Heap M.empty ids, k, in_e)) S.empty
+    (live', deeds', h') = heap_worker 0 deeds M.empty (stateFreeVars (deeds, Heap M.empty ids, k, in_e)) S.empty
+    
+    -- Collecting dead update frames doesn't make any new heap bindings dead since they don't refer to anything
+    -- It is a good idea to do this so that our output states are more likely to match.
+    (deeds'', k') = (deeds' `releaseStackDeeds` k_dead, k_live)
+      where (k_live, k_dead) = partition (\kf -> case tagee kf of Update x' -> x' `S.member` live'; _ -> True) k
     
     -- NB: we prefer bindings from h to those from init_h_inlineable if there is any conflict. This is motivated by
     -- the fact that bindings from case branches are usually more informative than e.g. a phantom binding for the scrutinee.
     h_inlineable = h `M.union` init_h_inlineable
     
     -- This function is rather performance critical: I originally benchmarked transitiveInline as taking 59.2% of runtime for DigitsOfE2!
-    go :: Int -> Deeds -> PureHeap -> FreeVars -> FreeVars -> (Deeds, PureHeap)
-    go n deeds h_output live live_in_let
+    heap_worker :: Int -> Deeds -> PureHeap -> FreeVars -> FreeVars -> (FreeVars, Deeds, PureHeap)
+    heap_worker n deeds h_output live live_in_let
       = -- traceRender ("go", n, M.keysSet h_inlineable, M.keysSet h_output, fvs) $
         if live == live'
-        then (deeds', neutraliseLetLives live_in_let' h_output') -- NB: it's important we use the NEW versions of h_output/deeds, because we might have inlined extra stuff even though live hasn't changed!
-        else go (n + 1) deeds' h_output' live' live_in_let'      -- NB: the argument order to union is important because we want to overwrite an existing phantom binding (if any) with the concrete one
+        then (live', deeds', neutraliseLetLives live_in_let' h_output') -- NB: it's important we use the NEW versions of h_output/deeds, because we might have inlined extra stuff even though live hasn't changed!
+        else heap_worker (n + 1) deeds' h_output' live' live_in_let'
       where 
         (deeds', h_output', live', live_in_let') = M.foldrWithKey consider_inlining (deeds, h_output, live, live_in_let) ((h_inlineable `restrict` live) M.\\ h_output)
         
