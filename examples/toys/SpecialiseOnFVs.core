@@ -1,0 +1,8 @@
+-- Output program should return functions that do not scrutinise y
+root y = let f = \x -> if y then Left x else Right x
+         in if y then Left f else Right f
+
+tests = [
+    (case root True  of Left f  -> f (), Left ()),
+    (case root False of Right f -> f (), Right ())
+  ]
