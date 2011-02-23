@@ -1,62 +1,82 @@
 #!/bin/bash
 #
 
-# The options that we should use to make the supercompiler as close as possible to the SbE paper
-VANILLA_OPTS="raw --no-primops --no-deeds --tag-collection=bags --no-generalisation --cheapification --no-speculation --no-local-tiebacks --no-reduce-rollback --no-sc-rollback --duplicate-values-evaluator --duplicate-values-splitter --no-refine-fulfilment-fvs"
-
 ./test-all ghc > results-ghc.tex
 
-./test-all $VANILLA_OPTS > results-vanilla.tex
-./test-all ${VANILLA_OPTS/--cheapification/} > results-no-cheapification.tex
+BEST_OPTS="raw --no-deeds"
 
-./test-all raw > nresults-vanilla.tex
+# Straightforward single-flag tests
+./test-all $BEST_OPTS > results-best.tex
+./test-all $BEST_OPTS --no-primops > results-no-primops.tex
+./test-all $BEST_OPTS --no-generalisation > results-no-generalisation.tex
+./test-all $BEST_OPTS --no-speculation > results-no-speculation.tex
+./test-all $BEST_OPTS --no-reduce-rollback > results-no-reduce-rollback.tex
+./test-all $BEST_OPTS --no-sc-rollback > results-no-sc-rollback.tex
+./test-all $BEST_OPTS --no-discard-fulfilments-on-rollback > results-no-discard-fulfilments-on-rollback.tex
+./test-all $BEST_OPTS --duplicate-values-evaluator > results-duplicate-values-evaluator.tex
+./test-all $BEST_OPTS --no-refine-fulfilment-fvs > results-no-refine-fulfilment-fvs.tex
 
-./test-all ${VANILLA_OPTS/--no-generalisation/} | tee results-generalisation.tex
+# TODO: more tests here (--phantom-lookthrough, --naive-local-tiebacks)
+./test-all $BEST_OPTS --no-local-tiebacks > results-no-local-tiebacks.tex
+./test-all $BEST_OPTS --duplicate-values-splitter > results-duplicate-values-splitter
 
-REFINE_OPTS=${VANILLA_OPTS/--no-refine-fulfilment-fvs/}
-./test-all $REFINE_OPTS | tee results-refine-fulfilment-fvs.tex
+# TODO: test deeds and the two deeds policies, bloat factors
 
-./test-all ${VANILLA_OPTS/--duplicate-values-evaluator/} | tee results-no-duplicate-values-evaluator.tex
-./test-all ${VANILLA_OPTS/--duplicate-values-splitter/} | tee results-no-duplicate-values-splitter.tex
-./test-all ${VANILLA_OPTS/--duplicate-values-evaluator --duplicate-values-splitter/} | tee results-no-duplicate-values.tex
-./test-all ${REFINE_OPTS/--duplicate-values-evaluator --duplicate-values-splitter/} | tee results-refine-fulfilment-fvs+no-duplicate-values.tex
 
+# The options that we should use to make the supercompiler as close as possible to the SbE paper
+#VANILLA_OPTS="raw --no-primops --no-deeds --tag-collection=bags --no-generalisation --cheapification --no-speculation --no-local-tiebacks --no-reduce-rollback --no-sc-rollback --duplicate-values-evaluator --duplicate-values-splitter --no-refine-fulfilment-fvs"
 #
-
-./test-all ${VANILLA_OPTS/--no-reduce-rollback/} | tee results-reduce-rollback.tex
-./test-all ${VANILLA_OPTS/--no-sc-rollback/} | tee results-sc-rollback.tex
-./test-all ${VANILLA_OPTS/--no-sc-rollback/--no-discard-fulfilments-on-rollback} | tee results-sc-rollback-no-discard.tex
-./test-all ${VANILLA_OPTS/--no-reduce-rollback --no-sc-rollback/} | tee results-rollback.tex
-
-# ./test-all raw --no-reduce-rollback | tee nresults-reduce-rollback.tex
-# ./test-all raw --no-sc-rollback | tee nresults-sc-rollback.tex
-# ./test-all raw --no-reduce-rollback --no-sc-rollback | tee nresults-rollback.tex
-
-./test-all ${VANILLA_OPTS/=bags/=sets} | tee results-tagsets.tex
-./test-all ${VANILLA_OPTS/=bags/=bags-strong} | tee results-strongtagbags.tex
-./test-all ${VANILLA_OPTS/=bags/=graphs} | tee results-taggraphs.tex
-
-# ./test-all raw --tag-collection=sets | tee nresults-tagsets.tex
-# ./test-all raw --tag-collection=bags | tee nresults-tagbags.tex
-# ./test-all raw --tag-collection=graphs | tee nresults-taggraphs.tex
-
-./test-all ${VANILLA_OPTS/--no-local-tiebacks/} | tee results-local-tiebacks.tex
-#./test-all raw --no-local-tiebacks | tee nresults-local-tiebacks.tex
-
-./test-all ${VANILLA_OPTS/--cheapification --no-speculation/} | tee results-speculation.tex
-#./test-all raw --cheapification --no-speculation | tee nresults-speculation.tex
-
-# # You just can't use deeds without local tiebacks because the resulting programs are almost never typeable in Hindley Milner:
-# ./test-all ${VANILLA_OPTS/--no-deeds/--deeds-policy=fcfs} | tee results-deeds-fcfs.tex
-# ./test-all ${VANILLA_OPTS/--no-deeds/--deeds-policy=proportional} | tee results-deeds-proportional.tex
-LOCAL_H_OPTS=${VANILLA_OPTS/--no-local-tiebacks/}
-./test-all ${LOCAL_H_OPTS/--no-deeds/--deeds-policy=fcfs} | tee results-local-tiebacks+deeds-fcfs.tex
-./test-all ${LOCAL_H_OPTS/--no-deeds/--deeds-policy=proportional} | tee results-local-tiebacks+deeds-proportional.tex
-
-for bloat in 1 2 3 4 5 6 7 8 9 10 20 30 40 50; do
-  ./test-all ${LOCAL_H_OPTS/--no-deeds/--deeds-policy=fcfs --bloat=$bloat} | tee results-local-tiebacks+deeds-fcfs+bloat-$bloat.tex
-  ./test-all ${LOCAL_H_OPTS/--no-deeds/--deeds-policy=proportional --bloat=$bloat} | tee results-local-tiebacks+deeds-proportional+bloat-$bloat.tex
-done
-
-# ./test-all raw --no-deeds | tee nresults-deeds.tex
-# ./test-all raw --deeds-policy=proportional | tee nresults-proportional-deeds.tex
+# ./test-all $VANILLA_OPTS > results-vanilla.tex
+# ./test-all ${VANILLA_OPTS/--cheapification/} > results-no-cheapification.tex
+# 
+# ./test-all raw > nresults-vanilla.tex
+# 
+# ./test-all ${VANILLA_OPTS/--no-generalisation/} | tee results-generalisation.tex
+# 
+# REFINE_OPTS=${VANILLA_OPTS/--no-refine-fulfilment-fvs/}
+# ./test-all $REFINE_OPTS | tee results-refine-fulfilment-fvs.tex
+# 
+# ./test-all ${VANILLA_OPTS/--duplicate-values-evaluator/} | tee results-no-duplicate-values-evaluator.tex
+# ./test-all ${VANILLA_OPTS/--duplicate-values-splitter/} | tee results-no-duplicate-values-splitter.tex
+# ./test-all ${VANILLA_OPTS/--duplicate-values-evaluator --duplicate-values-splitter/} | tee results-no-duplicate-values.tex
+# ./test-all ${REFINE_OPTS/--duplicate-values-evaluator --duplicate-values-splitter/} | tee results-refine-fulfilment-fvs+no-duplicate-values.tex
+# 
+# #
+# 
+# ./test-all ${VANILLA_OPTS/--no-reduce-rollback/} | tee results-reduce-rollback.tex
+# ./test-all ${VANILLA_OPTS/--no-sc-rollback/} | tee results-sc-rollback.tex
+# ./test-all ${VANILLA_OPTS/--no-sc-rollback/--no-discard-fulfilments-on-rollback} | tee results-sc-rollback-no-discard.tex
+# ./test-all ${VANILLA_OPTS/--no-reduce-rollback --no-sc-rollback/} | tee results-rollback.tex
+# 
+# # ./test-all raw --no-reduce-rollback | tee nresults-reduce-rollback.tex
+# # ./test-all raw --no-sc-rollback | tee nresults-sc-rollback.tex
+# # ./test-all raw --no-reduce-rollback --no-sc-rollback | tee nresults-rollback.tex
+# 
+# ./test-all ${VANILLA_OPTS/=bags/=sets} | tee results-tagsets.tex
+# ./test-all ${VANILLA_OPTS/=bags/=bags-strong} | tee results-strongtagbags.tex
+# ./test-all ${VANILLA_OPTS/=bags/=graphs} | tee results-taggraphs.tex
+# 
+# # ./test-all raw --tag-collection=sets | tee nresults-tagsets.tex
+# # ./test-all raw --tag-collection=bags | tee nresults-tagbags.tex
+# # ./test-all raw --tag-collection=graphs | tee nresults-taggraphs.tex
+# 
+# ./test-all ${VANILLA_OPTS/--no-local-tiebacks/} | tee results-local-tiebacks.tex
+# #./test-all raw --no-local-tiebacks | tee nresults-local-tiebacks.tex
+# 
+# ./test-all ${VANILLA_OPTS/--cheapification --no-speculation/} | tee results-speculation.tex
+# #./test-all raw --cheapification --no-speculation | tee nresults-speculation.tex
+# 
+# # # You just can't use deeds without local tiebacks because the resulting programs are almost never typeable in Hindley Milner:
+# # ./test-all ${VANILLA_OPTS/--no-deeds/--deeds-policy=fcfs} | tee results-deeds-fcfs.tex
+# # ./test-all ${VANILLA_OPTS/--no-deeds/--deeds-policy=proportional} | tee results-deeds-proportional.tex
+# LOCAL_H_OPTS=${VANILLA_OPTS/--no-local-tiebacks/}
+# ./test-all ${LOCAL_H_OPTS/--no-deeds/--deeds-policy=fcfs} | tee results-local-tiebacks+deeds-fcfs.tex
+# ./test-all ${LOCAL_H_OPTS/--no-deeds/--deeds-policy=proportional} | tee results-local-tiebacks+deeds-proportional.tex
+# 
+# for bloat in 1 2 3 4 5 6 7 8 9 10 20 30 40 50; do
+#   ./test-all ${LOCAL_H_OPTS/--no-deeds/--deeds-policy=fcfs --bloat=$bloat} | tee results-local-tiebacks+deeds-fcfs+bloat-$bloat.tex
+#   ./test-all ${LOCAL_H_OPTS/--no-deeds/--deeds-policy=proportional --bloat=$bloat} | tee results-local-tiebacks+deeds-proportional+bloat-$bloat.tex
+# done
+# 
+# # ./test-all raw --no-deeds | tee nresults-deeds.tex
+# # ./test-all raw --deeds-policy=proportional | tee nresults-proportional-deeds.tex
