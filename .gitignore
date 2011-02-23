@@ -9,6 +9,7 @@ Thumbs.db
 
 # Cabal and Haskell stuff
 dist/
+dist-ticky/
 dist-profiling/
 *.hi
 *.o
