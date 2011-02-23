@@ -126,7 +126,7 @@ sC_ROLLBACK = not $ "--no-sc-rollback" `elem` unsafePerformIO getArgs
 
 {-# NOINLINE dISCARD_FULFILMENTS_ON_ROLLBACK #-}
 dISCARD_FULFILMENTS_ON_ROLLBACK :: Bool
-dISCARD_FULFILMENTS_ON_ROLLBACK = not ("--no-discard-fulfilments-on-rollback" `elem` unsafePerformIO getArgs)
+dISCARD_FULFILMENTS_ON_ROLLBACK = "--discard-fulfilments-on-rollback" `elem` unsafePerformIO getArgs
 
 {-# NOINLINE eXPAND_CASE_DEFAULTS #-}
 eXPAND_CASE_DEFAULTS :: Bool
