@@ -777,6 +777,36 @@ cheapifyHeap deeds (Heap h (splitIdSupply -> (ids, ids'))) = (deeds', Heap (M.fr
             associate (deeds, ids, floats, in_e) = ((deeds, ids), (floats, in_e))
 
 
+-- TODO: I have a clever idea. Currently, if we supercompile:
+--  D[ < H | if x then y else z | K > ]
+--
+-- And we don't know anything about y or z we get:
+--  if x
+--   then K(True/x)[y]
+--   else K(False/x)[z]
+--
+-- This is not too bad, but I suspect that it is common that K doesn't actually depend on x, in which case we could
+-- instead produce:
+--  let $j it = K[it]
+--  in if x then $j y else $j z
+--
+-- This is an improvement because we get code sharing. Furthermore, $j won't be causing extra allocation because it's
+-- pretty much guaranteed to be a let-no-escape.
+--
+-- The best part is that making this happen isn't really much much work (I think). One option would be to actually add
+-- a (JoinPoint Var) stack frame, and introduce them (along with their corresponding bindings) in the splitter. The reduction
+-- rule would be:
+--   < H | v | $j [_], K > --> < H, x |-> v | e | K >
+--      \x.e = deref(H, $j)
+--
+-- If we said join points were LetBound this would also let us delay inlining them (and hence consuming deeds) until we
+-- were sure we could get some benefit from it.
+--
+-- The major issue is exactly what *should* be bound up into a join point. We could create one per stack frame, but that
+-- might lead to quite a lot of code bloat. I think that ideally we want to create one per shared stack suffix: there is no
+-- point creating join points that are only used in one place! But how to detect that?? After all, because h-functions can
+-- be tied back to at any later point it looks like we should create one for every possible prefix as they might be useful
+-- for guys in the future.
 pushStack :: IdSupply
           -> Deeds
           -> [Out Var]
