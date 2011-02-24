@@ -20,6 +20,7 @@ import System.Directory
 import System.Environment
 import System.FilePath ((</>), dropExtension, takeFileName, takeDirectory, replaceExtension)
 import System.IO
+import System.Timeout
 
 import Numeric (showFFloat)
 
@@ -83,16 +84,19 @@ testOne (ghc_way, sc_way) file = do
             try_sc = do
               rnf e `seq` return ()
               let (stats, e') = supercompile e
-              super_t <- time_ (rnf e' `seq` return ())
+              mb_super_t <- timeout (tIMEOUT_SECONDS * 1000000) (time_ (rnf e' `seq` return ()))
               
-              (after_code, after_res) <- runCompiled wrapper e' test_e
+              case mb_super_t of
+                  Nothing -> return $ Left "Supercompilation timeout"
+                  Just super_t -> do
+                      (after_code, after_res) <- runCompiled wrapper e' test_e
               
-              -- Save a copy of the supercompiled code somewhere so I can consult it at my leisure
-              let output_dir = "output" </> cODE_IDENTIFIER </> rUN_IDENTIFIER
-              createDirectoryIfMissing True (takeDirectory $ output_dir </> file)
-              writeFile (output_dir </> replaceExtension file ".hs") (unlines ["-- Code: " ++ cODE_IDENTIFIER, "-- Run: " ++ rUN_IDENTIFIER, "", after_code])
+                      -- Save a copy of the supercompiled code somewhere so I can consult it at my leisure
+                      let output_dir = "output" </> cODE_IDENTIFIER </> rUN_IDENTIFIER
+                      createDirectoryIfMissing True (takeDirectory $ output_dir </> file)
+                      writeFile (output_dir </> replaceExtension file ".hs") (unlines ["-- Code: " ++ cODE_IDENTIFIER, "-- Run: " ++ rUN_IDENTIFIER, "", after_code])
               
-              return $ fmap (,termSize e',Just (super_t,stats)) after_res
+                      return $ fmap (,termSize e',Just (super_t,stats)) after_res
         
         let benchmark = escape $ map toLower $ takeFileName $ dropExtension file
             dp1 x = showFFloat (Just 1) x ""

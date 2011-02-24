@@ -17,6 +17,9 @@ cODE_IDENTIFIER = head $ lines $ unsafePerformIO (readProcess "git" ["log", "--f
 rUN_IDENTIFIER :: String
 rUN_IDENTIFIER = intercalate " " [filter (/= '-') arg | '-':'-':arg <- unsafePerformIO getArgs]
 
+tIMEOUT_SECONDS :: Int
+tIMEOUT_SECONDS = 120
+
 
 {-# NOINLINE aSSERTIONS #-}
 aSSERTIONS :: Bool
