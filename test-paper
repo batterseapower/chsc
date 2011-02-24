@@ -6,18 +6,18 @@
 BEST_OPTS="raw --no-deeds --speculate-on-losers --thread-speculator-history"
 
 # Straightforward single-flag tests
-./test-all $BEST_OPTS > results-best.tex
-./test-all $BEST_OPTS --no-primops > results-no-primops.tex
-./test-all $BEST_OPTS --no-generalisation > results-no-generalisation.tex
-./test-all $BEST_OPTS --no-speculation > results-no-speculation.tex
-./test-all $BEST_OPTS --no-reduce-rollback > results-no-reduce-rollback.tex
-./test-all $BEST_OPTS --no-sc-rollback > results-no-sc-rollback.tex
-./test-all $BEST_OPTS --no-discard-fulfilments-on-rollback > results-no-discard-fulfilments-on-rollback.tex
-./test-all $BEST_OPTS --duplicate-values-evaluator > results-duplicate-values-evaluator.tex
-./test-all $BEST_OPTS --no-refine-fulfilment-fvs > results-no-refine-fulfilment-fvs.tex
-./test-all ${BEST_OPTS/--speculate-on-losers --thread-speculator-history/} > results-losers.tex
+./test-all $BEST_OPTS > results-best.tex                                    # Stack
+./test-all $BEST_OPTS --no-primops > results-no-primops.tex                 # Stack
+./test-all $BEST_OPTS --no-generalisation > results-no-generalisation.tex   # Stack
+./test-all $BEST_OPTS --no-speculation > results-no-speculation.tex         # OK
+./test-all $BEST_OPTS --no-reduce-rollback > results-no-reduce-rollback.tex # OK
+./test-all $BEST_OPTS --no-sc-rollback > results-no-sc-rollback.tex         # OOM
+./test-all $BEST_OPTS --discard-fulfilments-on-rollback > results-discard-fulfilments-on-rollback.tex # Stack
+./test-all $BEST_OPTS --duplicate-values-evaluator > results-duplicate-values-evaluator.tex # Stack
+./test-all $BEST_OPTS --no-refine-fulfilment-fvs > results-no-refine-fulfilment-fvs.tex     # Stack
+./test-all ${BEST_OPTS/--speculate-on-losers --thread-speculator-history/} > results-losers.tex # OK
 
-./test-all $BEST_OPTS --tag-collection=sets > results-sets.tex
+./test-all $BEST_OPTS --tag-collection=sets > results-sets.tex     # Stack?
 ./test-all $BEST_OPTS --tag-collection=graphs > results-graphs.tex
 
 ./test-all $BEST_OPTS --no-local-tiebacks > results-no-local-tiebacks.tex
