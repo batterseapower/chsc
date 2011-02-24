@@ -3,7 +3,7 @@ module Renaming (
     Renaming(..),
     emptyRenaming, mkRenaming, mkIdentityRenaming,
     insertRenaming, insertRenamings,
-    rename, rename_maybe, safeRename, unrename,
+    rename, rename_maybe, renameIfPresent, safeRename, unrename,
     renameBinder, renameBinders,
     renameRenaming,
     foldRenaming
@@ -55,6 +55,9 @@ safeRename' mb_stk rn n | Just n' <- rename_maybe rn n = n'
 rename_maybe :: Renaming -> In Name -> Maybe (Out Name)
 rename_maybe rn n = M.lookup n (unRenaming rn)
 
+renameIfPresent :: Renaming -> In Name -> Out Name
+renameIfPresent rn n = M.findWithDefault n n (unRenaming rn)
+
 unrename :: Renaming -> Out Name -> [In Name]
 unrename rn n' = [m | (m, m') <- M.toList (unRenaming rn), m' == n']
 
@@ -70,7 +73,7 @@ renameBinders ids rn = reassociate . mapAccumL ((associate .) . uncurry renameBi
 -- NB: does not rename if the rn_by doesn't contain the relevant variable. This is useful for the squeezer,
 -- which is in fact the only client of this code
 renameRenaming :: Renaming -> Renaming -> Renaming
-renameRenaming rn_by = Renaming . M.map (\x -> rename_maybe rn_by x `orElse` x) . unRenaming
+renameRenaming rn_by = Renaming . M.map (renameIfPresent rn_by) . unRenaming
 
 foldRenaming :: (In Name -> Out Name -> b -> b) -> b -> Renaming -> b
 foldRenaming f b = M.foldrWithKey f b . unRenaming

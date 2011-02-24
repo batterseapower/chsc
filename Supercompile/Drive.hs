@@ -160,7 +160,7 @@ gc _state@(deeds0, Heap h ids, k, in_e) = assertRender ("gc: free vars", stateFr
           -- , traceRender ("gc: update frame squeezing", x', y') True
           -- NB: by recursing with kf at the front, we avoid a bugs that might happen if kf' was not live but
           -- kf was, where kf would be dropped as dead (bit me in SpeculationWorstCase)
-          = second3 (kf':) $ stack_worker (insertRenaming y' (rename_maybe final_rn x' `orElse` x') rn) (kf:k')
+          = second3 (kf':) $ stack_worker (insertRenaming y' (renameIfPresent final_rn x') rn) (kf:k')
            -- Keep any other stack frames
           | otherwise
           = third3 (fmap (renameStackFrame final_rn) kf:) $ stack_worker rn k

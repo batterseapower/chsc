@@ -11,7 +11,7 @@ import Data.Ord
 
 data Name = Name {
     name_string :: String,
-    name_id :: Maybe Id
+    name_id :: !(Maybe Id)
   }
 
 instance NFData Name where
