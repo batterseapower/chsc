@@ -100,9 +100,14 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ second (fVedTermToTe
 --
 -- TODO: have the garbage collector collapse (let x = True in x) to (True) -- but note that this requires onceness analysis
 gc :: State -> State
-gc (deeds0, Heap h ids, k, in_e) = (deeds2, Heap h' ids, k', in_e)
+gc _state@(deeds0, Heap h ids, k, in_e) = assertRender ("gc", stateUncoveredVars state', pPrintFullState _state, pPrintFullState state') (S.null (stateUncoveredVars state'))
+                                          state'
   where
-    live0 = stateFreeVars (deeds0, Heap M.empty ids, k, in_e)
+    state' = (deeds2, Heap h' ids, k', in_e)
+    
+    -- We have to use stateAllFreeVars here rather than stateFreeVars because in order to safely prune the live stack we need
+    -- variables bound by k to be part of the live set if they occur within in_e or the rest of the k
+    live0 = stateAllFreeVars (deeds0, Heap M.empty ids, k, in_e)
     (deeds1, h', live1) = inlineLiveHeap deeds0 h live0
     -- Collecting dead update frames doesn't make any new heap bindings dead since they don't refer to anything
     (deeds2, k') = pruneLiveStack deeds1 k live1
