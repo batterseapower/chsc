@@ -248,6 +248,7 @@ speculate reduce _state@(deeds, Heap h ids, k, in_e) = assertRender (hang (text 
         | HB InternallyBound mb_tag (Just in_e) <- hb
         , let state = normalise (deeds, Heap (xes `M.union` M.fromList xes_pending) ids, [], in_e)
         , Continue hist <- terminate hist state
+        -- , traceRender ("speculating", x', pPrintFullState state, case snd (reduce state) of state'@(_, _, _, (_, e)) -> pPrintFullState state' $$ text (show e)) True
         , (stats', (deeds, Heap h ids, [], qaToValue -> Just in_v)) <- reduce state
         , let (xes', h_pending') = M.partitionWithKey (\x' _ -> x' `M.member` xes) h
               h_pending'' = M.filterWithKey (\x' _ -> not (x' `S.member` xes_pending_set)) h_pending'
@@ -255,6 +256,7 @@ speculate reduce _state@(deeds, Heap h ids, k, in_e) = assertRender (hang (text 
         = go hist (stats `mappend` stats') deeds xes_pending' (M.keysSet h_pending') (M.insert x' (HB InternallyBound mb_tag (Just (fmap (fmap Value) in_v))) xes') ids
          -- We MUST NOT EVER reduce in this branch or speculation will loop on e.g. infinite map
         | otherwise
+        -- , traceRender ("not speculating", x', howBound hb, isJust (heapBindingTerm hb)) True
         = go hist stats deeds xes_pending xes_pending_set (M.insert x' hb xes) ids
 
 reduce :: State -> (SCStats, State)

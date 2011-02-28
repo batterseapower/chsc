@@ -74,6 +74,7 @@ toAnnedTerm = tagFVedTerm . reflect
 
 data QA = Question Var
         | Answer   (ValueF Anned)
+        deriving (Show)
 
 instance Pretty QA where
     pPrintPrec level prec = pPrintPrec level prec . qaToAnnedTerm'
