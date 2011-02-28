@@ -33,7 +33,6 @@ import qualified Data.Map as M
 import Data.Monoid
 import Data.Ord
 import qualified Data.Set as S
-import qualified Data.IntSet as IS
 
 
 -- The termination argument is a but subtler due to HowBounds but I think it still basically works.
@@ -165,138 +164,98 @@ gc _state@(deeds0, Heap h ids, k, in_e) = assertRender ("gc: free vars", stateFr
           | otherwise
           = third3 (fmap (renameStackFrame final_rn) kf:) $ stack_worker rn k
 
-type Losers = IS.IntSet
-
-emptyLosers :: Losers
-emptyLosers = IS.empty
-
 
 speculate :: (State -> (SCStats, State))
           -> State -> (SCStats, State)
-speculate reduce = snd . go (0 :: Int) (mkHistory wQO) (emptyLosers, S.empty)
+speculate reduce _state@(deeds, Heap h ids, k, in_e) = assertRender (hang (text "speculate: deeds lost or gained:") 2 (pPrint _state $$ pPrint state'))
+                                                                    (noChange (releaseStateDeed _state) (releaseStateDeed state')) $
+                                                       (stats, state')
   where
-    go depth hist (losers, speculated) state = case terminate hist state of
-        Continue hist' -> continue depth hist' (losers, speculated) state
-        _              -> ((hist, losers, speculated), (mempty, state)) -- We MUST NOT EVER reduce in this branch or speculation will loop on e.g. infinite map
+    state' = (deeds', heap', k, in_e)
+    (stats, deeds', heap') = go (mkHistory wQO) mempty deeds (M.toList h) (M.keysSet h) M.empty ids
     
-    continue depth hist (losers, speculated) state = -- traceRender ("speculate:continue", pPrintFullState state, pPrintFullState _state')
-                                                     assertRender (hang (text "speculate: deeds lost or gained:") 2 (pPrint state $$ pPrint state''))
-                                                                  (noChange (releaseStateDeed state) (releaseStateDeed state'')) $
-                                                     ((threaded_hist', losers', speculated'), (stats', state''))
-      where
-        (stats, _state'@(deeds', Heap h' ids', k, in_e)) = reduce state
-        state'' = (deeds'', Heap (h'_winners' `M.union` h'_losers) ids'', k, in_e)
-        
-        -- Note [Controlling speculation]
-        -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        --
-        -- Speculation gets out of hand easily. A motivating example is DigitsOfE2: without some way to control
-        -- speculation, it blows up, and I have not observed it to terminate.
-        --
-        -- One approach is using "losers". In this approach, we prevent speculation from forcing heap-carried things
-        -- that have proved to be losers in the past, as indicated by their tags being part of an accumulated losers set.
-        -- The losers set was threaded through "go", and hence generated anew for each call to "speculate".
-        --
-        -- An attractive approach (inspired by Simon, as usual!) is to just thread the *history* through go. This should have a
-        -- similiar effect, but prevents multiplication of mechanisms.
-        --
-        -- In my tests, the losers set approach ensured that DigitsOfE2 terminated after ~13s. Changing to the threaded
-        -- history approach, I did not observe termination :-(
-        (h'_losers, h'_winners) | sPECULATE_ON_LOSERS = (M.empty, h')
-                                | otherwise           = M.partition (\hb -> maybe False (`IS.member` losers) (heapBindingTag hb)) h'
-        
-        -- Note [Order of speculation]
-        -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        --
-        -- It is quite important that are insensitive to dependency order. For example:
-        --
-        --  let id x = x
-        --      idish = id id
-        --  in e
-        --
-        -- If we speculated idish first without any information about what id is, it will be irreducible. If we do it the other way
-        -- around (or include some information about id) then we will get a nice lambda. This is why we speculate each binding with
-        -- *the entire rest of the heap* also present.
-        
-        -- TODO: I suspect we should accumulate Losers across the boundary of speculate as well
-        -- TODO: there is a difference between losers due to termination-halting and losers because we didn't have enough
-        -- information available to complete evaluation
-        -- TODO: speculation could be more efficient if I could see the bindings that I speculated on the last invocation of the speculate function
-        (stats', deeds'', Heap h'_winners' ids'', threaded_hist', losers', speculated') = M.foldrWithKey speculate_one (stats, deeds', Heap h'_winners ids', hist, losers, speculated) h'_winners
-        speculate_one x' hb (stats, deeds, Heap h'_winners ids, threaded_hist, losers, speculated)
-          -- | not (isValue (annee (snd in_e))), traceRender ("speculate", x', depth, pPrintFullUnnormalisedState (Heap (h {- `exclude` M.keysSet base_h -}) ids, k, in_e)) False = undefined
-          | InternallyBound <- howBound hb
-          , Just (_, annedTag -> tg) <- heapBindingTerm hb
-          , x' `S.notMember` speculated
-          , let e_x' = annedTerm tg (Var x')
-          , Just deeds <- claimDeeds deeds (annedSize e_x') -- We have to pay for the syntax we use to start the speculation!! Small but subtle point that makes a big difference.
-          , let -- We're going to be a bit clever here: to speculate a heap binding, just put that variable into the focus and reduce the resulting term.
-                -- The only complication occurs when comes back with a non-empty stack, in which case we need to deal with any unreduced update frames.
-                ((threaded_hist', losers', speculated'), (stats', state'@(_, _, k, _))) = go (depth + 1) (if tHREAD_SPECULATOR_HISTORY then threaded_hist else hist) (losers, S.insert x' speculated) (normalise (deeds, Heap h'_winners ids, [], (mkIdentityRenaming [x'], e_x')))
-                -- Update frames present in the output indicate a failed speculation attempt. (Though if a var is the focus without an update frame yet that is also failure of a sort...)
-                --
-                -- Old Plan
-                -- ~~~~~~~~
-                -- I used to restore the original input bindings for variables bound by remaining update frames. We also added them to the speculated set so we don't bother looking again. Note that this might make
-                -- some heap bindings dead (because they are referred to by the overwritten terms), but we'll just live with that and have the GC clean it up later (pessimising deeds a bit, but never mind).
-                --
-                -- More seriously, one of the update frames could be for a heap binding not present in the h'_winners. If anything in the new heap h' might refer to that, we have to be careful.
-                -- One case is that that heap binding is referred to only by bindings that are made dead by the restoration - consider:
-                --
-                --  x |-> let y = ... z ...; z = unk in case z of ...
-                --
-                -- Speculating x will fail (blocked on unk) with update frames for x and z on the stack. We can't restore the z binding here, because it wasn't in the input heap, but the output
-                -- heap will contain a y binding that refers to z. This is (just barely) OK because those new unbound FVs wont ACTUALLY be reachable. When we roll back to the original x RHS the
-                -- y binding will just become dead.
-                --
-                -- However, this isn't OK:
-                --
-                --  xs |-> let ys = e in 1 : ys
-                --  foo |-> last xs
-                --
-                -- Let's speculate foo:
-                --
-                --  xs |-> 1 : ys
-                --  ys |-> e
-                --  foo |-> last ys
-                --
-                -- Let's say we stop before evalutating e further, with update frames for foo and ys present. We can restore the original foo binding, but that will leave xs with a dangling
-                -- reference to the ys binding that we couldn't restore. Argh!
-                --
-                -- What I did in this situation is to "agressively" roll back, discarding work done by the nested reduce and any things it added to the speculated set.
-                -- I hoped this case didn't hit too often so it won't slow speculation down. Unfortunately after some changes to the normaliser it hit *all* *the* *time* in e.g. SpeculationWorstCase
-                -- and made the supercompiler non-terminate.
-                --
-                -- New Plan
-                -- ~~~~~~~~
-                -- The new plan is to give up on this nonsense and just reconstruct a new heap from the output of recursive speculation. The disadvantages of this approach are:
-                --  * We might bloat output terms a bit because versions of terms that failed speculation will stick around
-                --  * We might end up spuriously reducing the same binding every time we recurse in sc because we get a chance to speculate it anew. This is deeply uncool because terms that would
-                --    normally be reduce-stopped may now get reduce-stopped once per level of sc recursion (potentially getting larger every time).
-                --    FIXME: this is serious :-(
-                (deeds', heap') = partiallyRebuildState state'
-                spec_failed_xs = S.fromList [x' | Update x' <- map tagee k]
-                spec_failed_h = h'_winners `restrict` spec_failed_xs
-          = (stats `mappend` stats', deeds', heap', threaded_hist', IS.fromList [tg | hb <- M.elems spec_failed_h, Just tg <- [heapBindingTag hb]] `IS.union` losers', spec_failed_xs `S.union` speculated')
-          | otherwise
-          = (stats, deeds, Heap h'_winners ids, threaded_hist, losers, speculated)
-
-    partiallyRebuildState :: State -> (Deeds, Heap)
-    partiallyRebuildState (deeds, Heap h ids, k, (rn, qa)) = (deeds + annedSize e', Heap (h `M.union` h_updated) ids)
-      where
-        (h_updated, (_, e')) = rebuildStack k (renameIn (renameAnnedTerm ids) (rn, fmap qaToAnnedTerm' qa))
-          
-        rebuildStack []     e' = (M.empty, promote e')
-        rebuildStack (kf:k) e' = case tagee kf of
-            Apply x'                        -> rebuildStack k (annedTerm tg (e' `App` x'))
-            Scrutinise in_alts              -> rebuildStack k (annedTerm tg (Case e' (renameIn (renameAnnedAlts ids) in_alts)))
-            PrimApply pop in_anned_vs in_es -> rebuildStack k (annedTerm tg (PrimOp pop (map (fmap Value . renameIn (renameAnnedValue ids)) in_anned_vs ++ e' : map (renameIn (renameAnnedTerm ids)) in_es)))
-            Update x'                       -> (M.insert x' (internallyBound (promote e')) h', in_e)
-              where (h', in_e) = rebuildStack k (annedTerm tg (Var x'))
-          where tg = tag kf
+    qaToValue :: In (Anned QA) -> Maybe (In (Anned AnnedValue))
+    qaToValue (rn, qa) | Answer _ <- annee qa = Just (rn, fmap (\(Answer v) -> v) qa)
+                       | otherwise            = Nothing
     
-        promote :: AnnedTerm -> In AnnedTerm
-        promote e' = (mkIdentityRenaming (S.toList (annedFreeVars e')), e')
+    -- Note [Controlling speculation]
+    -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    --
+    -- Speculation gets out of hand easily. A motivating example is DigitsOfE2: without some way to control
+    -- speculation, it blows up, and I have not observed it to terminate.
+    --
+    -- One approach is using "losers". In this approach, we prevent speculation from forcing heap-carried things
+    -- that have proved to be losers in the past, as indicated by their tags being part of an accumulated losers set.
+    -- The losers set was threaded through "go", and hence generated anew for each call to "speculate".
+    --
+    -- An attractive approach (inspired by Simon, as usual!) is to just thread the *history* through go. This *should* have a
+    -- similiar effect, but prevents multiplication of mechanisms.
+    --
+    -- However, in my tests, the losers set approach ensured that DigitsOfE2 terminated after ~13s. Changing to the threaded
+    -- history approach, I did not observe termination :-(. I think this is because the losers set is preventing an "obvious"
+    -- speculation from happening, which just coincidentally allows supercompilation to terminate.
+    --
+    -- Note [Order of speculation]
+    -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    --
+    -- It is quite important that are insensitive to dependency order. For example:
+    --
+    --  let id x = x
+    --      idish = id id
+    --  in e
+    --
+    -- If we speculated idish first without any information about what id is, it will be irreducible. If we do it the other way
+    -- around (or include some information about id) then we will get a nice lambda. This is why we speculate each binding with
+    -- *the entire rest of the heap* also present.
+    --
+    -- Note [Nested speculation]
+    -- ~~~~~~~~~~~~~~~~~~~~~~~~~
+    --
+    -- Naturally, we want to speculate the nested lets that may arise from the speculation process itself. For example, when
+    -- speculating this:
+    --
+    -- let x = let y = 1 + 1
+    --         in Just y
+    -- in \z -> ...
+    --
+    -- After we speculate to discover the Just we want to speculate the (1 + 1) computation so we can push it down into the lambda
+    -- body along with the enclosing Just.
+    --
+    -- We do this by adding new let-bindings arising from speculation to the list of pending bindings. Importantly, we add them
+    -- to the end of the pending list to implement a breadth-first search. This is important so that we tend to do more speculation
+    -- towards the root of the group of let-bindings (which seems like a reasonable heuristic).
+    --
+    -- The classic important case to think about is:
+    --
+    -- let ones = 1 : ones
+    --     xs = map (+1) ones
+    --
+    -- Speculating xs gives us:
+    --
+    -- let ones = 1 : ones
+    --     xs = x0 : xs0
+    --     x0 = 1 + 1
+    --     xs0 = map (+1) ones
+    --
+    -- We can speculate x0 easily, but speculating xs0 gives rise to a x1 and xs1 of the same form. We must avoid looping here.
+    
+    -- TODO: speculation could be more efficient if I could see the bindings that I speculated on the last invocation of the speculate function
+    -- NB: the xes_pending_set only has to be an overapproximation of the domain of xes_pending (as long as those extra names cannot be generated
+    -- from the ids, or otherwise we would lose some speculation).
+    go _    stats deeds []                     _xes_pending_set xes ids = (stats, deeds, Heap xes ids)
+    go hist stats deeds ((x', hb):xes_pending) xes_pending_set  xes ids
+         -- If the termination test says we can, try to reduce this heap binding
+        | HB InternallyBound mb_tag (Just in_e) <- hb
+        , let state = normalise (deeds, Heap (xes `M.union` M.fromList xes_pending) ids, [], in_e)
+        , Continue hist <- terminate hist state
+        , (stats', (deeds, Heap h ids, [], qaToValue -> Just in_v)) <- reduce state
+        , let (xes', h_pending') = M.partitionWithKey (\x' _ -> x' `M.member` xes) h
+              h_pending'' = M.filterWithKey (\x' _ -> not (x' `S.member` xes_pending_set)) h_pending'
+              xes_pending' = xes_pending ++ M.toList h_pending''
+        = go hist (stats `mappend` stats') deeds xes_pending' (M.keysSet h_pending') (M.insert x' (HB InternallyBound mb_tag (Just (fmap (fmap Value) in_v))) xes') ids
+         -- We MUST NOT EVER reduce in this branch or speculation will loop on e.g. infinite map
+        | otherwise
+        = go hist stats deeds xes_pending xes_pending_set (M.insert x' hb xes) ids
 
 reduce :: State -> (SCStats, State)
 reduce orig_state = go (mkHistory (extra wQO)) orig_state
