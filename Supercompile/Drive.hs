@@ -90,89 +90,54 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ second (fVedTermToTe
 --    context wouldn't get final_rned :-(
 --
 -- HOWEVER. That doesn't work properly because normalisation itself can introduce dead bindings - i.e. in order to be guaranteed to
--- catch all the junk we have to GC normalised bindings, not the pre-normalised ones that transitiveInline sees. So the new plan is to do
+-- catch all the junk we have to GC normalised bindings, not the pre-normalised ones that transitiveInline sees. So instead I did
 -- both points 1 and 2 right just before we go to the matcher.
+--
+-- HOWEVER. Simon suggested something that made me realise that actually we could do squeezing of consecutive update frames and
+-- indirection chains in the evaluator (and thus the normaliser) itself, which is even cooler. Thus all that is left to do in the
+-- GC is to make a "global" analysis that drops stuff that is definitely dead. We *still* want to run this just before the matcher because
+-- although dead heap bindings don't bother it, it would be confused by dead update frames.
 --
 -- TODO: have the garbage collector collapse (let x = True in x) to (True) -- but note that this requires onceness analysis
 gc :: State -> State
-gc _state@(deeds0, Heap h ids, k, in_e) = assertRender ("gc: free vars", stateFreeVars _state S.\\ stateFreeVars state') (stateFreeVars _state `S.isSubsetOf` stateFreeVars state')
-                                          assertRender ("gc: uncovered vars", final_rn, stateUncoveredVars state', pPrintFullState _state, pPrintFullState state') (S.null (stateUncoveredVars state'))
-                                          state'
+gc (deeds0, Heap h ids, k, in_e) = (deeds2, Heap h' ids, k', in_e)
   where
-    state' = (deeds2, Heap h' ids, k', renameInRenaming final_rn in_e)
-    
-    rn0 = emptyRenaming
-    -- We need to filter out update frames here or the lives won't include those things bound by k. This would mean that stack frames
-    -- binding stuff only used by in_e would look dead to us... (this bit me in Generalisation.core, among others)
-    live0 = stateFreeVars (deeds0, Heap M.empty ids, [kf | kf <- k, case tagee kf of Update _ -> False; _ -> True], in_e)
-    (rn1, deeds1, h', live1) = inlineLiveHeap rn0 deeds0 h live0
+    live0 = stateFreeVars (deeds0, Heap M.empty ids, k, in_e)
+    (deeds1, h', live1) = inlineLiveHeap deeds0 h live0
     -- Collecting dead update frames doesn't make any new heap bindings dead since they don't refer to anything
-    (final_rn {- NB: loop through this variable -}, deeds2, k') = pruneLiveStack rn1 deeds1 k live1
+    (deeds2, k') = pruneLiveStack deeds1 k live1
     
-    -- The threaded renamings map ORIGINAL variables to INTERMEDIATE ones. You shouldn't look at those!
-    -- The final renaming maps ORIGINAL variables to FINALISED ones
-    -- The live set tests on ORIGINAL variables only
-    
-    inlineLiveHeap :: Renaming -> Deeds -> PureHeap -> FreeVars -> (Renaming, Deeds, PureHeap, FreeVars)
-    inlineLiveHeap rn deeds h live = -- traceRender ("inlineLiveHeap", h, live, M.keysSet h_live, live')
-                                     (rn', deeds `releasePureHeapDeeds` h_dead, h_live, live')
+    inlineLiveHeap :: Deeds -> PureHeap -> FreeVars -> (Deeds, PureHeap, FreeVars)
+    inlineLiveHeap deeds h live = (deeds `releasePureHeapDeeds` h_dead, h_live, live')
       where
-        (rn', h_dead, h_live, live') = heap_worker rn h M.empty live
+        (h_dead, h_live, live') = heap_worker h M.empty live
         
         -- This is just like Split.transitiveInline, but simpler since it never has to worry about running out of deeds:
-        heap_worker :: Renaming -> PureHeap -> PureHeap -> FreeVars -> (Renaming, PureHeap, PureHeap, FreeVars)
-        heap_worker rn h_pending h_output live
+        heap_worker :: PureHeap -> PureHeap -> FreeVars -> (PureHeap, PureHeap, FreeVars)
+        heap_worker h_pending h_output live
           = if live == live'
-            then (rn', h_pending', h_output', live')
-            else heap_worker rn' h_pending' h_output' live'
+            then (h_pending', h_output', live')
+            else heap_worker h_pending' h_output' live'
           where 
-            (rn', h_pending_kvs', h_output', live') = M.foldrWithKey consider_inlining (rn, [], h_output, live) h_pending
+            (h_pending_kvs', h_output', live') = M.foldrWithKey consider_inlining ([], h_output, live) h_pending
             h_pending' = M.fromDistinctAscList h_pending_kvs'
         
-            consider_inlining x' hb (rn, h_pending_kvs, h_output, live)
-              | x' `S.member` live
-              , Nothing <- rename_maybe rn x' -- Ensure that we don't try to short out indirections twice
-              = case heapBindingTerm hb of
-                  Just (e_rn, e) | Just y <- termToVar e
-                                 , let final_y' = rename (final_rn `renameRenaming` e_rn) y
-                                       y'       = rename e_rn                             y
-                                 -- , traceRender ("gc: variable in heap", x', y') True
-                                 -> (insertRenaming x' final_y' rn, (x', hb) : h_pending_kvs,                                             h_output, S.insert y' live)
-                  _              -> (rn,                                       h_pending_kvs, M.insert x' (renameHeapBinding final_rn hb) h_output, live `S.union` heapBindingFreeVars hb)
-              | otherwise = (rn, (x', hb) : h_pending_kvs, h_output, live)
+            consider_inlining x' hb (h_pending_kvs, h_output, live)
+              | x' `S.member` live = (h_pending_kvs,            M.insert x' hb h_output, live `S.union` heapBindingFreeVars hb)
+              | otherwise          = ((x', hb) : h_pending_kvs, h_output,                live)
     
-    pruneLiveStack :: Renaming ->  Deeds -> Stack -> FreeVars -> (Renaming, Deeds, Stack)
-    pruneLiveStack rn deeds k live = (rn', deeds `releaseStackDeeds` k_dead, k_live)
-      where
-        (rn', k_dead, k_live) = stack_worker rn k
-        
-        stack_worker rn [] = (rn, [], [])
-        stack_worker rn (kf:k)
-           -- Eliminate dead stack frames
-          | Update x' <- tagee kf
-          , x' `S.notMember` live
-          = second3 (kf:) $ stack_worker rn k
-           -- Collapse nested stack frames (GHC calls this "stack squeezing")
-          | Update x' <- tagee kf
-          , (kf':k') <- k
-          , Update y' <- tagee kf'
-          -- , traceRender ("gc: update frame squeezing", x', y') True
-          -- NB: by recursing with kf at the front, we avoid a bugs that might happen if kf' was not live but
-          -- kf was, where kf would be dropped as dead (bit me in SpeculationWorstCase)
-          = second3 (kf':) $ stack_worker (insertRenaming y' (renameIfPresent final_rn x') rn) (kf:k')
-           -- Keep any other stack frames
-          | otherwise
-          = third3 (fmap (renameStackFrame final_rn) kf:) $ stack_worker rn k
+    pruneLiveStack :: Deeds -> Stack -> FreeVars -> (Deeds, Stack)
+    pruneLiveStack deeds k live = (deeds `releaseStackDeeds` k_dead, k_live)
+      where (k_live, k_dead) = partition (\kf -> case tagee kf of Update x' -> x' `S.member` live; _ -> True) k
 
 
-speculate :: (State -> (SCStats, State))
-          -> State -> (SCStats, State)
-speculate reduce _state@(deeds, Heap h ids, k, in_e) = assertRender (hang (text "speculate: deeds lost or gained:") 2 (pPrint _state $$ pPrint state'))
-                                                                    (noChange (releaseStateDeed _state) (releaseStateDeed state')) $
-                                                       (stats, state')
+speculate :: (SCStats, State) -> (SCStats, State)
+speculate (stats, _state@(deeds, Heap h ids, k, in_e)) = assertRender (hang (text "speculate: deeds lost or gained:") 2 (pPrint _state $$ pPrint state'))
+                                                                      (noChange (releaseStateDeed _state) (releaseStateDeed state')) $
+                                                         (stats `mappend` stats', state')
   where
     state' = (deeds', heap', k, in_e)
-    (stats, deeds', heap') = go (mkHistory wQO) mempty deeds (M.toList h) (M.keysSet h) M.empty ids
+    (stats', deeds', heap') = go (mkHistory wQO) mempty deeds (M.toList h) (M.keysSet h) M.empty ids
     
     qaToValue :: In (Anned QA) -> Maybe (In (Anned AnnedValue))
     qaToValue (rn, qa) | Answer _ <- annee qa = Just (rn, fmap (\(Answer v) -> v) qa)
@@ -498,7 +463,7 @@ sc' hist state = (\raise -> check raise) `catchScpM` \gen -> stop gen hist -- TO
     continue hist = do traceRenderScpM ("reduce end", pPrintFullState state')
                        addStats stats
                        split generaliseNothing (sc hist) state'
-      where (stats, state') = (if sPECULATION then speculate else id) reduce state -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
+      where (stats, state') = (if sPECULATION then speculate else id) $ reduce state -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
 
 memo :: (State -> ScpM (Deeds, Out FVedTerm))
      ->  State -> ScpM (Deeds, Out FVedTerm)

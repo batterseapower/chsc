@@ -21,9 +21,6 @@ renameFreeVars rn = S.map (rename rn)
 renameIn :: (Renaming -> a -> a) -> In a -> a
 renameIn f (rn, x) = f rn x
 
-renameInRenaming :: Renaming -> In a -> In a
-renameInRenaming rn_by (rn, x) = (renameRenaming rn_by rn, x)
-
 renameBounds :: (Var -> Var -> v) -> IdSupply -> Renaming -> [(Var, a)] -> (IdSupply, Renaming, [(v, In a)])
 renameBounds f ids rn (unzip -> (xs, es)) = (ids', rn', zipWith f xs xs' `zip` map (rn',) es)
   where (ids', rn', xs') = renameBinders ids rn xs

@@ -3,10 +3,8 @@ module Renaming (
     Renaming(..),
     emptyRenaming, mkRenaming, mkIdentityRenaming,
     insertRenaming, insertRenamings,
-    rename, rename_maybe, renameIfPresent, safeRename, unrename,
-    renameBinder, renameBinders,
-    renameRenaming,
-    foldRenaming
+    rename, rename_maybe, safeRename,
+    renameBinder, renameBinders
   ) where
 
 import Name
@@ -55,12 +53,6 @@ safeRename' mb_stk rn n | Just n' <- rename_maybe rn n = n'
 rename_maybe :: Renaming -> In Name -> Maybe (Out Name)
 rename_maybe rn n = M.lookup n (unRenaming rn)
 
-renameIfPresent :: Renaming -> In Name -> Out Name
-renameIfPresent rn n = M.findWithDefault n n (unRenaming rn)
-
-unrename :: Renaming -> Out Name -> [In Name]
-unrename rn n' = [m | (m, m') <- M.toList (unRenaming rn), m' == n']
-
 renameBinder :: IdSupply -> Renaming -> In Name -> (IdSupply, Renaming, Out Name)
 renameBinder ids rn n = (ids', insertRenaming n n' rn, n')
   where (ids', n') = freshName ids (name_string n)
@@ -69,12 +61,3 @@ renameBinders :: IdSupply -> Renaming -> [In Name] -> (IdSupply, Renaming, [Out 
 renameBinders ids rn = reassociate . mapAccumL ((associate .) . uncurry renameBinder) (ids, rn)
   where associate   (ids, rn, n)    = ((ids, rn), n)
         reassociate ((ids, rn), ns) = (ids, rn, ns)
-
--- NB: does not rename if the rn_by doesn't contain the relevant variable. This is useful for the squeezer,
--- which is in fact the only client of this code
-renameRenaming :: Renaming -> Renaming -> Renaming
-renameRenaming rn_by = Renaming . M.map (renameIfPresent rn_by) . unRenaming
-
-foldRenaming :: (In Name -> Out Name -> b -> b) -> b -> Renaming -> b
-foldRenaming f b = M.foldrWithKey f b . unRenaming
-

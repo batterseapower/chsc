@@ -170,19 +170,6 @@ stackFrameSize kf = 1 + case kf of
     Update _                -> 0
 
 
--- Used by the GC logic, so the first renaming will be partial
-renameHeapBinding :: Renaming -> HeapBinding -> HeapBinding
-renameHeapBinding rn hb = hb { heapBindingTerm = liftM (renameInRenaming rn) (heapBindingTerm hb) }
-
--- Used by the GC logic, so the first renaming will be partial
-renameStackFrame :: Renaming -> StackFrame -> StackFrame
-renameStackFrame rn kf = case kf of
-    Apply x'                  -> Apply (renameIfPresent rn x')
-    Scrutinise in_alts        -> Scrutinise (renameInRenaming rn in_alts)
-    PrimApply pop in_vs in_es -> PrimApply pop (map (renameInRenaming rn) in_vs) (map (renameInRenaming rn) in_es)
-    Update x'                 -> Update (renameIfPresent rn x')
-
-
 addStateDeeds :: Deeds -> (Deeds, Heap, Stack, In (Anned a)) -> (Deeds, Heap, Stack, In (Anned a))
 addStateDeeds extra_deeds (deeds, h, k, in_e) = (extra_deeds + deeds, h, k, in_e)
 

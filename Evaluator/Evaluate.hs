@@ -60,6 +60,8 @@ step' normalising state =
                  -> Maybe (Deeds, In AnnedValue) -- Outgoing deeds have that 1 latent deed included in them, and we have claimed deeds for the outgoing value
     prepareValue deeds x' in_v@(_, v)
       | dUPLICATE_VALUES_EVALUATOR = fmap (,in_v) $ claimDeeds (deeds + 1) (annedValueSize' v)
+       -- Avoid creating indirections to indirections: implements indirection compression
+      | Indirect _ <- v            = return (deeds, in_v)
       | otherwise                  = return (deeds, (mkIdentityRenaming [x'], Indirect x'))
 
     -- We have not yet claimed deeds for the result of this function
@@ -75,8 +77,15 @@ step' normalising state =
     force deeds (Heap h ids) k tg x'
       | Just in_v <- lookupValue (Heap h ids) x' -- NB: don't unwind *immediately* because we want that changing a Var into a Value in an empty stack is seen as a reduction 'step'
       = do { (deeds, (rn, v)) <- prepareValue deeds x' in_v; return (deeds, Heap h ids, k, (rn, annedTerm tg (Value v))) }
-      | otherwise -- NB: we MUST NOT create update frames for non-concrete bindings!! This has bitten me in the past, and it is seriously confusing.
-      = do { hb <- M.lookup x' h; guard (howBound hb == InternallyBound); in_e <- heapBindingTerm hb; return (deeds, Heap (M.delete x' h) ids, Tagged tg (Update x') : k, in_e) }
+      | otherwise = do
+        hb <- M.lookup x' h
+        -- NB: we MUST NOT create update frames for non-concrete bindings!! This has bitten me in the past, and it is seriously confusing. 
+        guard (howBound hb == InternallyBound)
+        in_e <- heapBindingTerm hb
+        return $ case k of
+             -- Avoid creating consecutive update frames: implements "stack squeezing"
+            kf : _ | Update y' <- tagee kf -> (deeds, Heap (M.insert x' (internallyBound (mkIdentityRenaming [y'], annedTerm (tag kf) (Var y'))) h) ids,                         k, in_e)
+            _                              -> (deeds, Heap (M.delete x' h)                                                                          ids, Tagged tg (Update x') : k, in_e)
 
     -- Deal with a value at the top of the stack
     unwind :: Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> Maybe UnnormalisedState
@@ -145,6 +154,8 @@ step' normalising state =
         primop _     _     _ _ _    _   _     _       _            = Nothing -- I don't think this can occur legitimately
 
         update :: Deeds -> Heap -> Stack -> Tag -> Out Var -> In AnnedValue -> Maybe UnnormalisedState
-        update deeds (Heap h ids) k tg_v x' (rn, v) = case prepareValue deeds x' in_v of
-            Nothing             -> trace (render (text "update-deeds:" <+> pPrint x')) Nothing
-            Just (deeds', in_v) ->                                                     Just (deeds', Heap (M.insert x' (internallyBound (rn, annedTerm tg_v (Value v))) h) ids, k, second (annedTerm tg_v . Value) in_v)
+        update deeds (Heap h ids) k tg_v x' in_v@(rn, v) = do
+            (deeds', prepared_in_v) <- case prepareValue deeds x' in_v of
+                Nothing                      -> trace (render (text "update-deeds:" <+> pPrint x')) Nothing
+                Just (deeds', prepared_in_v) -> Just (deeds', prepared_in_v)
+            return (deeds', Heap (M.insert x' (internallyBound (rn, annedTerm tg_v (Value v))) h) ids, k, second (annedTerm tg_v . Value) prepared_in_v)
