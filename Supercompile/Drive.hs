@@ -47,9 +47,12 @@ wQO | not tERMINATION_CHECK                        = postcomp (const generaliseN
 
 
 data SCStats = SCStats {
-    stat_reduce_stops :: Int,
-    stat_sc_stops :: Int
+    stat_reduce_stops :: !Int,
+    stat_sc_stops :: !Int
   }
+
+instance NFData SCStats where
+    rnf (SCStats a b) = rnf a `seq` rnf b
 
 instance Monoid SCStats where
     mempty = SCStats {
@@ -139,7 +142,7 @@ gc _state@(deeds0, Heap h ids, k, in_e) = assertRender ("gc", stateUncoveredVars
 speculate :: (SCStats, State) -> (SCStats, State)
 speculate (stats, _state@(deeds, Heap h ids, k, in_e)) = assertRender (hang (text "speculate: deeds lost or gained:") 2 (pPrint _state $$ pPrint state'))
                                                                       (noChange (releaseStateDeed _state) (releaseStateDeed state')) $
-                                                         (stats `mappend` stats', state')
+                                                         (,state') $!! stats `mappend` stats'
   where
     state' = (deeds', heap', k, in_e)
     (stats', deeds', heap') = go (mkHistory wQO) mempty deeds (M.toList h) (M.keysSet h) M.empty ids
@@ -212,18 +215,22 @@ speculate (stats, _state@(deeds, Heap h ids, k, in_e)) = assertRender (hang (tex
     -- TODO: speculation could be more efficient if I could see the bindings that I speculated on the last invocation of the speculate function
     -- NB: the xes_pending_set only has to be an overapproximation of the domain of xes_pending (as long as those extra names cannot be generated
     -- from the ids, or otherwise we would lose some speculation).
-    go _    stats deeds []                     _xes_pending_set xes ids = (stats, deeds, Heap xes ids)
+    go _    stats deeds []                     _xes_pending_set xes ids = (,deeds, Heap xes ids) $!! stats
     go hist stats deeds ((x', hb):xes_pending) xes_pending_set  xes ids
          -- If the termination test says we can, try to reduce this heap binding
         | HB InternallyBound mb_tag (Just in_e) <- hb
         , let state = normalise (deeds, Heap (xes `M.union` M.fromList xes_pending) ids, [], in_e)
         , Continue hist <- terminate hist state
         -- , traceRender ("speculating", x', pPrintFullState state, case snd (reduce state) of state'@(_, _, _, (_, e)) -> pPrintFullState state' $$ text (show e)) True
-        , (stats', (deeds, Heap h ids, [], qaToValue -> Just in_v)) <- reduce state
+        , (stats', (deeds', Heap h ids, [], qaToValue -> Just in_v)) <- reduce state
         , let (xes', h_pending') = M.partitionWithKey (\x' _ -> x' `M.member` xes) h
               h_pending'' = M.filterWithKey (\x' _ -> not (x' `S.member` xes_pending_set)) h_pending'
+              xes'' = M.insert x' (HB InternallyBound mb_tag (Just (fmap (fmap Value) in_v))) xes'
               xes_pending' = xes_pending ++ M.toList h_pending''
-        = go hist (stats `mappend` stats') deeds xes_pending' (M.keysSet h_pending') (M.insert x' (HB InternallyBound mb_tag (Just (fmap (fmap Value) in_v))) xes') ids
+        -- , assertRender (hang (text "speculate: deeds lost or gained:") 2 (pPrint _state $$ pPrint state'))
+        --                (noChange (releasePureHeapDeeds deeds (xes `M.union` M.insert x' hb (M.fromList xes_pending))) (releasePureHeapDeeds deeds' (xes'' `M.union` M.fromList xes_pending)))
+        --                True
+        = go hist (stats `mappend` stats') deeds' xes_pending' (M.keysSet h_pending') xes'' ids
          -- We MUST NOT EVER reduce in this branch or speculation will loop on e.g. infinite map
         | otherwise
         -- , traceRender ("not speculating", x', howBound hb, isJust (heapBindingTerm hb)) True
@@ -451,7 +458,7 @@ catchScpM f_try f_abort = ScpM $ \e s k -> unScpM (f_try (\c -> ScpM $ \e' s' _k
                          k)) e s k
 
 addStats :: SCStats -> ScpM ()
-addStats scstats = ScpM $ \_e s k -> k () (s { stats = stats s `mappend` scstats })
+addStats scstats = ScpM $ \_e s k -> k () (let scstats' = stats s `mappend` scstats in rnf scstats' `seq` s { stats = scstats' })
 
 
 type RollbackScpM = Generaliser -> ScpM (Deeds, Out FVedTerm)

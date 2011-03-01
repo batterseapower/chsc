@@ -86,6 +86,15 @@ instance Monad (Either a) where
 #endif
 
 
+hnf :: NFData a => a -> a
+hnf x = rnf x `seq` x
+
+infixr 8 $!!
+
+($!!) :: NFData a => (a -> b) -> a -> b
+f $!! x = rnf x `seq` f x
+
+
 class Show1 f where
     showsPrec1 :: Show a => Int -> f a -> ShowS
 
