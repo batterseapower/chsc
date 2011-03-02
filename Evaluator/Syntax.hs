@@ -117,9 +117,9 @@ instance NFData Heap where
 
 instance Pretty HeapBinding where
     pPrintPrec level prec (HB how _ mb_in_e) = case how of
-        InternallyBound -> maybe empty (pPrintPrec level prec) mb_in_e
-        LambdaBound     -> text "λ" <> angles (maybe empty (pPrintPrec level noPrec) mb_in_e)
-        LetBound        -> text "l" <> angles (maybe empty (pPrintPrec level noPrec) mb_in_e)
+        InternallyBound -> maybe empty (pPrintPrec level prec . renameIn (renameAnnedTerm prettyIdSupply)) mb_in_e
+        LambdaBound     -> text "λ" <> angles (maybe empty (pPrintPrec level noPrec . renameIn (renameAnnedTerm prettyIdSupply)) mb_in_e)
+        LetBound        -> text "l" <> angles (maybe empty (pPrintPrec level noPrec . renameIn (renameAnnedTerm prettyIdSupply)) mb_in_e)
 
 internallyBound :: In AnnedTerm -> HeapBinding
 internallyBound in_e@(_, e) = HB InternallyBound (Just (annedTag e)) (Just in_e)
