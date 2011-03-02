@@ -140,8 +140,8 @@ gc _state@(deeds0, Heap h ids, k, in_e) = assertRender ("gc", stateUncoveredVars
 
 
 speculate :: (SCStats, State) -> (SCStats, State)
-speculate (stats, _state@(deeds, Heap h ids, k, in_e)) = assertRender (hang (text "speculate: deeds lost or gained:") 2 (pPrint _state $$ pPrint state'))
-                                                                      (noChange (releaseStateDeed _state) (releaseStateDeed state')) $
+speculate (stats, _state@(deeds, Heap h ids, k, in_e)) = -- assertRender (hang (text "speculate: deeds lost or gained:") 2 (pPrintFullState _state $$ pPrintFullState state' $$ (case go True (mkHistory wQO) mempty deeds (M.toList h) (M.keysSet h) M.empty ids of (_, _, _) -> text "OK, fine")))
+                                                         --              (noChange (releaseStateDeed _state) (releaseStateDeed state')) $
                                                          (,state') $!! stats `mappend` stats'
   where
     state' = (deeds', heap', k, in_e)
@@ -224,12 +224,23 @@ speculate (stats, _state@(deeds, Heap h ids, k, in_e)) = assertRender (hang (tex
         -- , traceRender ("speculating", x', pPrintFullState state, case snd (reduce state) of state'@(_, _, _, (_, e)) -> pPrintFullState state' $$ text (show e)) True
         , (stats', (deeds', Heap h ids, [], qaToValue -> Just in_v)) <- reduce state
         , let (xes', h_pending') = M.partitionWithKey (\x' _ -> x' `M.member` xes) h
-              h_pending'' = M.filterWithKey (\x' _ -> not (x' `S.member` xes_pending_set)) h_pending'
               xes'' = M.insert x' (HB InternallyBound mb_tag (Just (fmap (fmap Value) in_v))) xes'
-              xes_pending' = xes_pending ++ M.toList h_pending''
-        -- , assertRender (hang (text "speculate: deeds lost or gained:") 2 (pPrint _state $$ pPrint state'))
-        --                (noChange (releasePureHeapDeeds deeds (xes `M.union` M.insert x' hb (M.fromList xes_pending))) (releasePureHeapDeeds deeds' (xes'' `M.union` M.fromList xes_pending)))
-        --                True
+              -- Split the updated pending heap into updated bindings for those things I've already added to the pending list (preserving order), and any newly pending bindings
+              xes_pending' = [(x', fromJust (M.lookup x' h_pending')) | (x', _) <- xes_pending] ++ M.toList (M.filterWithKey (\x' _ -> not (x' `S.member` xes_pending_set)) h_pending')
+        -- , not failure || 
+        --            (let everything_before = xes `M.union` M.fromList ((x', hb):xes_pending)
+        --                 everything_after = xes'' `M.union` M.fromList xes_pending'
+        --                 before = releasePureHeapDeeds deeds everything_before
+        --                 intermediate = releasePureHeapDeeds deeds' (M.insert x' (HB InternallyBound mb_tag (Just (fmap (fmap Value) in_v))) h)
+        --                 after  = releasePureHeapDeeds deeds' everything_after
+        --             in assertRender (hang (text "speculate.go: deeds lost or gained:") 2 (pPrint x' $$ pPrint (before, intermediate, after) $$
+        --                                                                                   pPrintFullState _state $$ pPrintFullState state' $$
+        --                                                                                   text "BEFORE:" $$ pPrint everything_before $$
+        --                                                                                   text "AFTER:" $$ pPrint everything_after $$
+        --                                                                                   pPrint (deeds, deeds') $$
+        --                                                                                   pPrint (M.mapMaybe id $ combineMaps (\hb_l -> Just (Just hb_l, Nothing)) (\hb_r -> Just (Nothing, Just hb_r)) (\hb_l hb_r -> guard (heapBindingSize hb_l /= heapBindingSize hb_r) >> return (Just hb_l, Just hb_r)) everything_before everything_after)))
+        --                             (noChange before after)
+        --                             True)
         = go hist (stats `mappend` stats') deeds' xes_pending' (M.keysSet h_pending') xes'' ids
          -- We MUST NOT EVER reduce in this branch or speculation will loop on e.g. infinite map
         | otherwise
