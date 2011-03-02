@@ -345,12 +345,12 @@ finishCombining l r both combining = case combining of
 combineMaps :: Ord k
             => (a -> c) -> (b -> c) -> (a -> b -> c)
             -> M.Map k a -> M.Map k b -> M.Map k c
-combineMaps l r both m1 m2 = M.map (finishCombining l r both) $ M.intersectionWith (\(LeftOnly x) (RightOnly y) -> Both x y) (M.map LeftOnly m1) (M.map RightOnly m2)
+combineMaps l r both m1 m2 = M.map (finishCombining l r both) $ M.unionWith (\(LeftOnly x) (RightOnly y) -> Both x y) (M.map LeftOnly m1) (M.map RightOnly m2)
 
 {-# INLINE combineIntMaps #-}
 combineIntMaps :: (a -> c) -> (b -> c) -> (a -> b -> c)
                -> IM.IntMap a -> IM.IntMap b -> IM.IntMap c
-combineIntMaps l r both im1 im2 = IM.map (finishCombining l r both) $ IM.intersectionWith (\(LeftOnly x) (RightOnly y) -> Both x y) (IM.map LeftOnly im1) (IM.map RightOnly im2)
+combineIntMaps l r both im1 im2 = IM.map (finishCombining l r both) $ IM.unionWith (\(LeftOnly x) (RightOnly y) -> Both x y) (IM.map LeftOnly im1) (IM.map RightOnly im2)
 
 
 {-# NOINLINE parseIdSupply #-}
