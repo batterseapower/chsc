@@ -24,8 +24,8 @@ residualisePureHeap :: IdSupply -> PureHeap -> (Out [(Var, Doc)], Out [(Var, FVe
 residualisePureHeap ids h = partitionEithers [fmapEither (x',) (x',) (residualiseHeapBinding ids hb) | (x', hb) <- M.toList h]
 
 residualiseHeapBinding :: IdSupply -> HeapBinding -> Either (Out Doc) (Out FVedTerm)
-residualiseHeapBinding ids (HB InternallyBound _ (Just in_e)) = Right (residualiseTerm ids in_e)
-residualiseHeapBinding _   hb                                 = Left (pPrint hb)
+residualiseHeapBinding ids (HB InternallyBound (Just in_e)) = Right (residualiseTerm ids in_e)
+residualiseHeapBinding _   hb                               = Left (pPrint hb)
 
 residualiseStack :: IdSupply -> Stack -> Out FVedTerm -> ((Out [(Var, Doc)], Out [(Var, FVedTerm)]), Out FVedTerm)
 residualiseStack _   []     e = (([], []), e)

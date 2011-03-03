@@ -221,20 +221,20 @@ speculate (stats, _state@(deeds, Heap h ids, k, in_e)) = -- assertRender (hang (
     go _    stats deeds []                     _xes_pending_set xes ids = (,deeds, Heap xes ids) $!! stats
     go hist stats deeds ((x', hb):xes_pending) xes_pending_set  xes ids
          -- If the termination test says we can, try to reduce this heap binding
-        | HB InternallyBound mb_tag (Just in_e) <- hb
+        | HB InternallyBound (Just in_e) <- hb
         , let state = normalise (deeds, Heap (xes `M.union` M.fromList xes_pending) ids, [], in_e)
         , Continue hist <- terminate hist state
         -- , traceRender ("speculating", x', pPrintFullState state, case snd (reduce state) of state'@(_, _, _, (_, e)) -> pPrintFullState state' $$ text (show e)) True
         , (stats', (deeds', Heap h ids, [], qaToValue -> Just in_v)) <- reduce state
         , let (xes', h_pending') = M.partitionWithKey (\x' _ -> x' `M.member` xes) h
-              xes'' = M.insert x' (HB InternallyBound mb_tag (Just (fmap (fmap Value) in_v))) xes'
+              xes'' = M.insert x' (HB InternallyBound (Just (fmap (fmap Value) in_v))) xes'
               -- Split the updated pending heap into updated bindings for those things I've already added to the pending list (preserving order), and any newly pending bindings
               xes_pending' = [(x', fromJust (M.lookup x' h_pending')) | (x', _) <- xes_pending] ++ M.toList (M.filterWithKey (\x' _ -> not (x' `S.member` xes_pending_set)) h_pending')
         -- , not failure || 
         --            (let everything_before = xes `M.union` M.fromList ((x', hb):xes_pending)
         --                 everything_after = xes'' `M.union` M.fromList xes_pending'
         --                 before = releasePureHeapDeeds deeds everything_before
-        --                 intermediate = releasePureHeapDeeds deeds' (M.insert x' (HB InternallyBound mb_tag (Just (fmap (fmap Value) in_v))) h)
+        --                 intermediate = releasePureHeapDeeds deeds' (M.insert x' (HB InternallyBound (Just (fmap (fmap Value) in_v))) h)
         --                 after  = releasePureHeapDeeds deeds' everything_after
         --             in assertRender (hang (text "speculate.go: deeds lost or gained:") 2 (pPrint x' $$ pPrint (before, intermediate, after) $$
         --                                                                                   pPrintFullState _state $$ pPrintFullState state' $$

@@ -106,30 +106,29 @@ instance Pretty HowBound where
 
 instance NFData HowBound
 
--- Invariant: no LambdaBound HeapBinding has Just tag and Nothing term, or generalisation may generalise meaningless stuff and hence build loops
-data HeapBinding = HB { howBound :: HowBound, heapBindingTag :: Maybe Tag, heapBindingTerm :: Maybe (In AnnedTerm) }
+data HeapBinding = HB { howBound :: HowBound, heapBindingTerm :: Maybe (In AnnedTerm) }
                  deriving (Show)
 
 instance NFData HeapBinding where
-    rnf (HB a b c) = rnf a `seq` rnf b `seq` rnf c
+    rnf (HB a b) = rnf a `seq` rnf b
 
 instance NFData Heap where
     rnf (Heap a b) = rnf a `seq` rnf b
 
 instance Pretty HeapBinding where
-    pPrintPrec level prec (HB how _ mb_in_e) = case how of
+    pPrintPrec level prec (HB how mb_in_e) = case how of
         InternallyBound -> maybe empty (pPrintPrec level prec . renameIn (renameAnnedTerm prettyIdSupply)) mb_in_e
         LambdaBound     -> text "λ" <> angles (maybe empty (pPrintPrec level noPrec . renameIn (renameAnnedTerm prettyIdSupply)) mb_in_e)
         LetBound        -> text "l" <> angles (maybe empty (pPrintPrec level noPrec . renameIn (renameAnnedTerm prettyIdSupply)) mb_in_e)
 
 lambdaBound :: HeapBinding
-lambdaBound = HB LambdaBound Nothing Nothing
+lambdaBound = HB LambdaBound Nothing
 
 internallyBound :: In AnnedTerm -> HeapBinding
-internallyBound in_e@(_, e) = HB InternallyBound (Just (annedTag e)) (Just in_e)
+internallyBound in_e = HB InternallyBound (Just in_e)
 
 environmentallyBound :: HeapBinding
-environmentallyBound = HB LetBound Nothing Nothing
+environmentallyBound = HB LetBound Nothing
 
 type PureHeap = M.Map (Out Var) HeapBinding
 data Heap = Heap PureHeap IdSupply
@@ -160,10 +159,13 @@ instance Pretty StackFrame where
         Update x'                 -> pPrintPrecApp level prec (text "update") x'
 
 
+heapBindingTag :: HeapBinding -> Maybe Tag
+heapBindingTag = fmap (annedTag . snd) . heapBindingTerm
+
 -- | Size of HeapBinding for Deeds purposes
 heapBindingSize :: HeapBinding -> Size
-heapBindingSize (HB InternallyBound _ (Just (_, e))) = annedSize e
-heapBindingSize _                                    = 0
+heapBindingSize (HB InternallyBound (Just (_, e))) = annedSize e
+heapBindingSize _                                  = 0
 
 -- | Size of StackFrame for Deeds purposes
 stackFrameSize :: StackFrame -> Size

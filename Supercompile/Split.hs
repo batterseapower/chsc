@@ -604,9 +604,8 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
       | InternallyBound <- howBound hb
       , Just (_, e) <- heapBindingTerm hb
       = if isCheap (annee e)
-        then hb {                                                      howBound = howToBindCheap e } -- Use binding heuristics to determine how to refer to the cheap thing
-        else hb { heapBindingTag = Nothing, heapBindingTerm = Nothing, howBound = LambdaBound }      -- GHC is unlikely to get any benefit from seeing the binding sites for non-cheap things
-               -- ^ NB: this change to heapBindingTag is VERY IMPORTANT, or we break the HeapBinding invariant that LambdaBound Nothing HBs do not have tags!
+        then hb {                            howBound = howToBindCheap e } -- Use binding heuristics to determine how to refer to the cheap thing
+        else hb { heapBindingTerm = Nothing, howBound = LambdaBound }      -- GHC is unlikely to get any benefit from seeing the binding sites for non-cheap things
        -- Inline phantom/unfolding stuff verbatim: there is no work duplication issue (the caller would not have created the bindings unless they were safe-for-duplication)
       | otherwise
       = hb
@@ -720,10 +719,10 @@ transitiveInline init_h_inlineable _state@(deeds, Heap h ids, k, in_e)
                   Nothing     -> trace (render $ text "inline-deeds:" <+> pPrint x') (deeds,  makeFreeForDeeds hb)
 
     -- Given a HeapBinding that costs some deeds, return one that costs no deeds (and so can be inlined unconditionally)
-    makeFreeForDeeds (HB InternallyBound mb_tag (Just in_e))
-      | not lOCAL_TIEBACKS     = lambdaBound     -- Without local tiebacks, we just lose information here
-      | termIsCheap (snd in_e) = HB how         mb_tag  (Just in_e) -- With local tiebacks, we can keep the RHS (perhaps we can use it in the future?) but have to make it be able to pass it in from the caller somehow
-      | otherwise              = lambdaBound     -- All non-cheap things
+    makeFreeForDeeds (HB InternallyBound (Just in_e))
+      | not lOCAL_TIEBACKS     = lambdaBound        -- Without local tiebacks, we just lose information here
+      | termIsCheap (snd in_e) = HB how (Just in_e) -- With local tiebacks, we can keep the RHS (perhaps we can use it in the future?) but have to make it be able to pass it in from the caller somehow
+      | otherwise              = lambdaBound        -- All non-cheap things
       where how | termIsValue (snd in_e) = LetBound    -- Heuristic: only refer to *values* via a free variable, as those are the ones GHC will get some benefit from. TODO: make data/function distinction here?
                 | otherwise              = LambdaBound
     makeFreeForDeeds hb = panic "howToBind: should only be needed for internally bound things with a term" (pPrint hb)
@@ -735,9 +734,9 @@ transitiveInline init_h_inlineable _state@(deeds, Heap h ids, k, in_e)
 -- I think we can only do it when the splitter is being invoked by a non-whistling invocation of sc.
 cheapifyHeap :: Deeds -> Heap -> (Deeds, Heap)
 cheapifyHeap deeds heap | not sPLITTER_CHEAPIFICATION = (deeds, heap)
-cheapifyHeap deeds (Heap h (splitIdSupply -> (ids, ids'))) = (deeds', Heap (M.fromList [(x', internallyBound in_e) | (x', in_e@(_, e)) <- floats] `M.union` h') ids')
+cheapifyHeap deeds (Heap h (splitIdSupply -> (ids, ids'))) = (deeds', Heap (M.fromList [(x', internallyBound in_e) | (x', in_e) <- floats] `M.union` h') ids')
   where
-    ((deeds', _, floats), h') = M.mapAccum (\(deeds, ids, floats0) hb -> case hb of HB InternallyBound mb_tg (Just in_e) -> (case cheapify deeds ids in_e of (deeds, ids, floats1, in_e') -> ((deeds, ids, floats0 ++ floats1), HB InternallyBound mb_tg (Just in_e'))); _ -> ((deeds, ids, floats0), hb)) (deeds, ids, []) h
+    ((deeds', _, floats), h') = M.mapAccum (\(deeds, ids, floats0) hb -> case hb of HB InternallyBound (Just in_e) -> (case cheapify deeds ids in_e of (deeds, ids, floats1, in_e') -> ((deeds, ids, floats0 ++ floats1), HB InternallyBound (Just in_e'))); _ -> ((deeds, ids, floats0), hb)) (deeds, ids, []) h
     
     -- TODO: make cheapification more powerful (i.e. deal with case bindings)
     cheapify :: Deeds -> IdSupply -> In AnnedTerm -> (Deeds, IdSupply, [(Out Var, In AnnedTerm)], In AnnedTerm)
@@ -843,7 +842,7 @@ splitStackFrame ids kf scruts bracketed_hole
             -- ===>
             --  case x of C -> let unk = C; z = C in ...
             alt_in_es = alt_rns `zip` alt_es
-            alt_hs = zipWith4 (\alt_rn alt_con alt_bvs alt_tg -> setToMap (lambdaBound) alt_bvs `M.union` M.fromList (do { Just scrut_v <- [altConToValue alt_con]; scrut_e <- [annedTerm alt_tg (Value scrut_v)]; scrut <- scruts; return (scrut, HB (howToBindCheap scrut_e) (Just alt_tg) (Just (alt_rn, scrut_e))) })) alt_rns alt_cons alt_bvss (map annedTag alt_es) -- NB: don't need to grab deeds for these just yet, due to the funny contract for transitiveInline
+            alt_hs = zipWith4 (\alt_rn alt_con alt_bvs alt_tg -> setToMap (lambdaBound) alt_bvs `M.union` M.fromList (do { Just scrut_v <- [altConToValue alt_con]; scrut_e <- [annedTerm alt_tg (Value scrut_v)]; scrut <- scruts; return (scrut, HB (howToBindCheap scrut_e) (Just (alt_rn, scrut_e))) })) alt_rns alt_cons alt_bvss (map annedTag alt_es) -- NB: don't need to grab deeds for these just yet, due to the funny contract for transitiveInline
             alt_bvss = map (\alt_con' -> fst $ altConOpenFreeVars alt_con' (S.empty, S.empty)) alt_cons'
             bracketed_alts = zipWith (\alt_h alt_in_e -> oneBracketed (Once ctxt_id, \ids -> (0, Heap alt_h ids, [], alt_in_e))) alt_hs alt_in_es
     PrimApply pop in_vs in_es -> zipBracketeds (primOp pop) S.unions (repeat id) (\_ -> Nothing) (bracketed_vs ++ bracketed_hole : bracketed_es)
