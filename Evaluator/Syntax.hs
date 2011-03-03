@@ -106,6 +106,7 @@ instance Pretty HowBound where
 
 instance NFData HowBound
 
+-- Invariant: no LambdaBound HeapBinding has Just tag and Nothing term, or generalisation may generalise meaningless stuff and hence build loops
 data HeapBinding = HB { howBound :: HowBound, heapBindingTag :: Maybe Tag, heapBindingTerm :: Maybe (In AnnedTerm) }
                  deriving (Show)
 
@@ -120,6 +121,9 @@ instance Pretty HeapBinding where
         InternallyBound -> maybe empty (pPrintPrec level prec . renameIn (renameAnnedTerm prettyIdSupply)) mb_in_e
         LambdaBound     -> text "λ" <> angles (maybe empty (pPrintPrec level noPrec . renameIn (renameAnnedTerm prettyIdSupply)) mb_in_e)
         LetBound        -> text "l" <> angles (maybe empty (pPrintPrec level noPrec . renameIn (renameAnnedTerm prettyIdSupply)) mb_in_e)
+
+lambdaBound :: HeapBinding
+lambdaBound = HB LambdaBound Nothing Nothing
 
 internallyBound :: In AnnedTerm -> HeapBinding
 internallyBound in_e@(_, e) = HB InternallyBound (Just (annedTag e)) (Just in_e)

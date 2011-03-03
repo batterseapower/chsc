@@ -149,9 +149,9 @@ simplify gen init_state
       where named_k = [0..] `zip` k
     
     seekAdmissable :: PureHeap -> NamedStack -> Maybe (IS.IntSet, S.Set (Out Var))
-    seekAdmissable h named_k = {- traceRender ("gen_kfs", gen_kfs, "gen_xs'", gen_xs') $ -} guard (gENERALISATION && (not (IS.null gen_kfs) || not (S.null gen_xs'))) >> Just (traceRender ("seekAdmissable", gen_kfs, gen_xs') (gen_kfs, gen_xs'))
+    seekAdmissable h named_k = traceRender ("gen_kfs", gen_kfs, "gen_xs'", gen_xs') $ guard (gENERALISATION && (not (IS.null gen_kfs) || not (S.null gen_xs'))) >> Just (traceRender ("seekAdmissable", gen_kfs, gen_xs') (gen_kfs, gen_xs'))
       where gen_kfs = IS.fromList [i  | (i, kf) <- named_k, generaliseStackFrame gen kf]
-            gen_xs' = S.fromList  [x' | (x', hb) <- M.toList h, generaliseHeapBinding gen x' hb]
+            gen_xs' = S.fromList  [x' | (x', hb) <- M.toList h, generaliseHeapBinding gen x' hb, assertRender ("Bad generalisation", x', hb, heapBindingTag hb) (not (howBound hb == LambdaBound && isNothing (heapBindingTerm hb))) True]
 
 
 -- Discard dead bindings:
@@ -525,8 +525,8 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
         -- like to push down *some* version of it, hence the h_cheap full of indirections. And even if a concrete term is residualised we'd like a phantom version of it.
         --
         -- Basically the idea of this heap is "stuff we want to make available to push down"
-        h_updated_phantoms = M.fromDistinctAscList [(x', HB LambdaBound Nothing Nothing) | x' <- M.keys bracketeds_updated] -- TODO: move this into h_cheap_and_phantoms?
-        h_inlineable = setToMap (HB LambdaBound Nothing Nothing) gen_xs `M.union` -- The exclusion just makes sure we don't inline explicitly generalised bindings (even phantom ones)
+        h_updated_phantoms = M.fromDistinctAscList [(x', lambdaBound) | x' <- M.keys bracketeds_updated] -- TODO: move this into h_cheap_and_phantoms?
+        h_inlineable = setToMap (lambdaBound) gen_xs `M.union` -- The exclusion just makes sure we don't inline explicitly generalised bindings (even phantom ones)
                        (h_not_residualised `M.union`                              -- Take any non-residualised bindings from the input heap/stack...
                         h_cheap_and_phantom `M.union`                             -- ...failing which, take concrete definitions for cheap heap bindings (even if they are also residualised) or phantom definitions for expensive ones...
                         h_updated_phantoms)                                       -- ...failing which, take phantoms for things bound by update frames (if supercompilation couldn't turn these into values, GHC is unlikely to get anything good from seeing defs)
@@ -604,8 +604,9 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
       | InternallyBound <- howBound hb
       , Just (_, e) <- heapBindingTerm hb
       = if isCheap (annee e)
-        then hb {                            howBound = howToBindCheap e } -- Use binding heuristics to determine how to refer to the cheap thing
-        else hb { heapBindingTerm = Nothing, howBound = LambdaBound }      -- GHC is unlikely to get any benefit from seeing the binding sites for non-cheap things
+        then hb {                                                      howBound = howToBindCheap e } -- Use binding heuristics to determine how to refer to the cheap thing
+        else hb { heapBindingTag = Nothing, heapBindingTerm = Nothing, howBound = LambdaBound }      -- GHC is unlikely to get any benefit from seeing the binding sites for non-cheap things
+               -- ^ NB: this change to heapBindingTag is VERY IMPORTANT, or we break the HeapBinding invariant that LambdaBound Nothing HBs do not have tags!
        -- Inline phantom/unfolding stuff verbatim: there is no work duplication issue (the caller would not have created the bindings unless they were safe-for-duplication)
       | otherwise
       = hb
@@ -720,9 +721,9 @@ transitiveInline init_h_inlineable _state@(deeds, Heap h ids, k, in_e)
 
     -- Given a HeapBinding that costs some deeds, return one that costs no deeds (and so can be inlined unconditionally)
     makeFreeForDeeds (HB InternallyBound mb_tag (Just in_e))
-      | not lOCAL_TIEBACKS     = HB LambdaBound Nothing Nothing     -- Without local tiebacks, we just lose information here
+      | not lOCAL_TIEBACKS     = lambdaBound     -- Without local tiebacks, we just lose information here
       | termIsCheap (snd in_e) = HB how         mb_tag  (Just in_e) -- With local tiebacks, we can keep the RHS (perhaps we can use it in the future?) but have to make it be able to pass it in from the caller somehow
-      | otherwise              = HB LambdaBound Nothing Nothing     -- All non-cheap things
+      | otherwise              = lambdaBound     -- All non-cheap things
       where how | termIsValue (snd in_e) = LetBound    -- Heuristic: only refer to *values* via a free variable, as those are the ones GHC will get some benefit from. TODO: make data/function distinction here?
                 | otherwise              = LambdaBound
     makeFreeForDeeds hb = panic "howToBind: should only be needed for internally bound things with a term" (pPrint hb)
@@ -734,7 +735,7 @@ transitiveInline init_h_inlineable _state@(deeds, Heap h ids, k, in_e)
 -- I think we can only do it when the splitter is being invoked by a non-whistling invocation of sc.
 cheapifyHeap :: Deeds -> Heap -> (Deeds, Heap)
 cheapifyHeap deeds heap | not sPLITTER_CHEAPIFICATION = (deeds, heap)
-cheapifyHeap deeds (Heap h (splitIdSupply -> (ids, ids'))) = (deeds', Heap (M.fromList [(x', HB InternallyBound (Just (annedTag e)) (Just in_e)) | (x', in_e@(_, e)) <- floats] `M.union` h') ids')
+cheapifyHeap deeds (Heap h (splitIdSupply -> (ids, ids'))) = (deeds', Heap (M.fromList [(x', internallyBound in_e) | (x', in_e@(_, e)) <- floats] `M.union` h') ids')
   where
     ((deeds', _, floats), h') = M.mapAccum (\(deeds, ids, floats0) hb -> case hb of HB InternallyBound mb_tg (Just in_e) -> (case cheapify deeds ids in_e of (deeds, ids, floats1, in_e') -> ((deeds, ids, floats0 ++ floats1), HB InternallyBound mb_tg (Just in_e'))); _ -> ((deeds, ids, floats0), hb)) (deeds, ids, []) h
     
@@ -842,7 +843,7 @@ splitStackFrame ids kf scruts bracketed_hole
             -- ===>
             --  case x of C -> let unk = C; z = C in ...
             alt_in_es = alt_rns `zip` alt_es
-            alt_hs = zipWith4 (\alt_rn alt_con alt_bvs alt_tg -> setToMap (HB LambdaBound Nothing Nothing) alt_bvs `M.union` M.fromList (do { Just scrut_v <- [altConToValue alt_con]; scrut_e <- [annedTerm alt_tg (Value scrut_v)]; scrut <- scruts; return (scrut, HB (howToBindCheap scrut_e) (Just alt_tg) (Just (alt_rn, scrut_e))) })) alt_rns alt_cons alt_bvss (map annedTag alt_es) -- NB: don't need to grab deeds for these just yet, due to the funny contract for transitiveInline
+            alt_hs = zipWith4 (\alt_rn alt_con alt_bvs alt_tg -> setToMap (lambdaBound) alt_bvs `M.union` M.fromList (do { Just scrut_v <- [altConToValue alt_con]; scrut_e <- [annedTerm alt_tg (Value scrut_v)]; scrut <- scruts; return (scrut, HB (howToBindCheap scrut_e) (Just alt_tg) (Just (alt_rn, scrut_e))) })) alt_rns alt_cons alt_bvss (map annedTag alt_es) -- NB: don't need to grab deeds for these just yet, due to the funny contract for transitiveInline
             alt_bvss = map (\alt_con' -> fst $ altConOpenFreeVars alt_con' (S.empty, S.empty)) alt_cons'
             bracketed_alts = zipWith (\alt_h alt_in_e -> oneBracketed (Once ctxt_id, \ids -> (0, Heap alt_h ids, [], alt_in_e))) alt_hs alt_in_es
     PrimApply pop in_vs in_es -> zipBracketeds (primOp pop) S.unions (repeat id) (\_ -> Nothing) (bracketed_vs ++ bracketed_hole : bracketed_es)
@@ -873,7 +874,7 @@ splitUpdate tg_kf scruts x' bracketed_hole = (x' : scruts, M.singleton x' bracke
     ctxt_id = fromJust (name_id x')
 
 splitValue :: IdSupply -> In AnnedValue -> Bracketed (Entered, IdSupply -> UnnormalisedState)
-splitValue ids (rn, Lambda x e) = zipBracketeds (\[e'] -> lambda x' e') (\[fvs'] -> fvs') [S.insert x'] (\_ -> Nothing) [oneBracketed (Many, \ids -> (0, Heap (M.singleton x' (HB LambdaBound Nothing Nothing)) ids, [], (rn', e)))]
+splitValue ids (rn, Lambda x e) = zipBracketeds (\[e'] -> lambda x' e') (\[fvs'] -> fvs') [S.insert x'] (\_ -> Nothing) [oneBracketed (Many, \ids -> (0, Heap (M.singleton x' (lambdaBound)) ids, [], (rn', e)))]
   where (_ids', rn', x') = renameBinder ids rn x
 splitValue ids in_v             = noneBracketed (value v') (inFreeVars annedValueFreeVars' in_v)
   where v' = detagAnnedValue' $ renameIn (renameAnnedValue' ids) in_v

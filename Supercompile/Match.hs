@@ -139,7 +139,7 @@ safeMkRenaming eqs = guard (all (\(x_l, x_r) -> safeRename "safeMkRenaming" rn x
 
 
 matchLetRecs :: IdSupply -> [(Var, Var)] -> [(Var, In AnnedTerm)] -> [(Var, In AnnedTerm)] -> Maybe [(Var, Var)]
-matchLetRecs ids'' eqs xes_l' xes_r' = matchEnvironmentExact ids'' [] eqs (M.fromList [(x', (HB InternallyBound Nothing (Just in_e))) | (x', in_e) <- xes_l']) (M.fromList [(x', (HB InternallyBound Nothing (Just in_e))) | (x', in_e) <- xes_r'])
+matchLetRecs ids'' eqs xes_l' xes_r' = matchEnvironmentExact ids'' [] eqs (M.fromList [(x', internallyBound in_e) | (x', in_e) <- xes_l']) (M.fromList [(x', internallyBound in_e) | (x', in_e) <- xes_r'])
 
 matchEnvironmentExact :: IdSupply -> [(Var, Var)] -> [(Var, Var)] -> PureHeap -> PureHeap -> Maybe [(Var, Var)]
 matchEnvironmentExact ids bound_eqs free_eqs init_h_l init_h_r = do
