@@ -143,7 +143,7 @@ step' normalising state =
           | (_, Literal (Int l1)) <- dereference h (rn_v1, annee anned_v1)
           , (_, Literal (Int l2)) <- dereference h (rn_v2, v2)
           , Just v <- f pop l1 l2
-          , traceRender ("primop", length k, tagOccurrences tg_kf + tagOccurrences tg_v2 + tagOccurrences (annedTag anned_v1)) $ True
+          -- , traceRender ("primop", length k, tagOccurrences tg_kf + tagOccurrences tg_v2 + tagOccurrences (annedTag anned_v1)) $ True
           , let e' = annedTerm (tg_kf { tagOccurrences = tagOccurrences tg_kf + tagOccurrences tg_v2 + tagOccurrences (annedTag anned_v1) }) (Value v)
           , Just deeds <- claimDeeds (deeds + annedSize anned_v1 + annedValueSize' v2 + 1) (annedSize e') -- I don't think this can ever fail
           = Just (deeds, h, k, (emptyRenaming, e'))
