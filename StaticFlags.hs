@@ -20,6 +20,14 @@ rUN_IDENTIFIER = intercalate " " [filter (/= '-') arg | '-':'-':arg <- unsafePer
 tIMEOUT_SECONDS :: Int
 tIMEOUT_SECONDS = 120
 
+{-# NOINLINE tICKY #-}
+tICKY :: Bool
+tICKY = "--ticky" `elem` unsafePerformIO getArgs
+
+{-# NOINLINE nO_OPTIMISATIONS #-}
+nO_OPTIMISATIONS :: Bool
+nO_OPTIMISATIONS = "-O0" `elem` unsafePerformIO getArgs
+
 
 {-# NOINLINE aSSERTIONS #-}
 aSSERTIONS :: Bool

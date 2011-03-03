@@ -99,12 +99,12 @@ runCompiled wrapper e test_e = withTempFile "Main" $ \(exe_file, exe_h) -> do
         hPutStr hs_h haskell
         hClose hs_h
         ghc_ver <- ghcVersion
-        time $ readProcessWithExitCode "ghc" (["--make", "-O2", hs_file, "-fforce-recomp", "-o", exe_file] ++ ["-ddump-simpl" | not qUIET] ++ ["-rtsopts" | ghc_ver >= [7]]) ""
+        time $ readProcessWithExitCode "ghc" (["--make", hs_file, "-fforce-recomp", "-o", exe_file] ++ ["-O2" | not nO_OPTIMISATIONS] ++ ["-ddump-simpl" | not qUIET] ++ ["-ticky" | tICKY] ++ ["-rtsopts" | ghc_ver >= [7]]) ""
     compiled_size <- fileSize exe_file
     case ec of
       ExitFailure _ -> hPutStrLn stderr haskell >> return (haskell, Left compile_err)
       ExitSuccess   -> do
-          (ec, run_out, run_err) <- readProcessWithExitCode exe_file ["+RTS", "-t"] ""
+          (ec, run_out, run_err) <- readProcessWithExitCode exe_file ["+RTS", "-t", "-rstderr"] ""
           case ec of
             ExitFailure _ -> hPutStrLn stderr haskell >> return (haskell, Left (unlines [compile_out, run_err]))
             ExitSuccess -> do
@@ -112,7 +112,7 @@ runCompiled wrapper e test_e = withTempFile "Main" $ \(exe_file, exe_h) -> do
               let [t_str] = lines run_out
                   [gc_stats] = (filter ("<<ghc" `isPrefixOf`) . lines) run_err
                   total_bytes_allocated = read (words gc_stats !! 1)
-              return (haskell, Right (compiled_size, compile_t, total_bytes_allocated, read t_str))
+              return (haskell ++ unlines ["", "{-", run_err, "-}"], Right (compiled_size, compile_t, total_bytes_allocated, read t_str))
 
 withTempFile :: String -> ((FilePath, Handle) -> IO b) -> IO b
 withTempFile name action = do
