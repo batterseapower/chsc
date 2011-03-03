@@ -2,12 +2,20 @@
 
 from utilities import *
 
+def float_maybe(x):
+    try:
+        return float(x)
+    except ValueError, e:
+        return None # Typically happens because one of the source values is unavailable
+
 def summarised(self):
     def lift_string(f, xs):
-        try:
-            return show_round(f([float(x) for x in xs]), 2)
-        except ValueError, e:
-            return "" # Typically happens because one of the source values is unavailable
+        ys = [float_maybe(x) for x in xs]
+        zs = [y for y in ys if y != None]
+        if len(zs) == 0:
+            return ""
+        else:
+            return show_round(f(zs), 2) # + ((len(zs) != len(ys)) and "*" or "")
 
     columns = self.columns()
     summary_rows = [(summary, dict([(header, lift_string(summarise, columns[header])) for header in self.headers])) for summary, summarise in [("Maximum", max), ("Minimum", min), ("Average", mean)]]
