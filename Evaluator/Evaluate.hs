@@ -75,6 +75,7 @@ step' normalising state =
     -- Deal with a variable at the top of the stack
     -- Might have to claim deeds if inlining a non-value non-internally-bound thing here
     force deeds (Heap h ids) k tg x'
+      -- FIXME: this is non-normalising if dUPLICATE_VALUES_EVALUATOR is on!
       | Just in_v <- lookupValue (Heap h ids) x' -- NB: don't unwind *immediately* because we want that changing a Var into a Value in an empty stack is seen as a reduction 'step'
       = do { (deeds, (rn, v)) <- prepareValue deeds x' in_v; return (deeds, Heap h ids, k, (rn, annedTerm tg (Value v))) }
       | otherwise = do
