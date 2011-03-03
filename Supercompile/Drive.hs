@@ -253,7 +253,7 @@ speculate (stats, _state@(deeds, Heap h ids, k, in_e)) = -- assertRender (hang (
 reduce :: State -> (SCStats, State)
 reduce orig_state = go (mkHistory (extra rEDUCE_WQO)) orig_state
   where
-    go hist state = traceRender ("reduce:step", pPrintFullState state) $
+    go hist state = -- traceRender ("reduce:step", pPrintFullState state) $
                     case step state of
         Nothing -> (mempty, state)
         Just state' -> case terminate hist (state', state') of
@@ -487,7 +487,7 @@ sc' hist state = (\raise -> check raise) `catchScpM` \gen -> stop gen hist -- TO
                       Stop (gen, rb) -> maybe (stop gen hist) ($ gen) $ guard sC_ROLLBACK >> Just rb
     stop gen hist = do addStats $ mempty { stat_sc_stops = 1 }
                        trace "sc-stop" $ split gen (sc hist) state -- Keep the trace exactly here or it gets floated out by GHC
-    continue hist = do traceRenderScpM ("reduce end", pPrintFullState state')
+    continue hist = do traceRenderScpM ("reduce end (continue)", pPrintFullState state')
                        addStats stats
                        split generaliseNothing (sc hist) state'
       where (stats, state') = (if sPECULATION then speculate else id) $ reduce state -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
