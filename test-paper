@@ -15,13 +15,12 @@ BEST_OPTS="raw --no-deeds"
 ./test-all $BEST_OPTS --discard-fulfilments-on-rollback > results-discard-fulfilments-on-rollback.tex # Stack
 ./test-all $BEST_OPTS --duplicate-values-evaluator > results-duplicate-values-evaluator.tex # Stack
 ./test-all $BEST_OPTS --no-refine-fulfilment-fvs > results-no-refine-fulfilment-fvs.tex     # Stack
-./test-all ${BEST_OPTS/--speculate-on-losers --thread-speculator-history/} > results-losers.tex # OK
 
 ./test-all $BEST_OPTS --tag-collection=sets > results-sets.tex     # Stack?
 ./test-all $BEST_OPTS --tag-collection=graphs > results-graphs.tex
 
 ./test-all $BEST_OPTS --no-local-tiebacks > results-no-local-tiebacks.tex
-./test-all $BEST_OPTS --duplicate-values-splitter > results-duplicate-values-splitter
+./test-all $BEST_OPTS --duplicate-values-splitter > results-duplicate-values-splitter.tex
 
 for bloat in 1 10 20 30 40 50; do
   ./test-all ${BEST_OPTS/--no-deeds/--deeds-policy=fcfs --bloat=$bloat} | tee results-deeds-fcfs+bloat-$bloat.tex
