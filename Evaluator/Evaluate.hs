@@ -138,6 +138,8 @@ step' normalising state =
 
         primop :: Deeds -> Tag -> Heap -> Stack -> Tag -> PrimOp -> [In (Anned AnnedValue)] -> In AnnedValue -> [In AnnedTerm] -> Maybe UnnormalisedState
         primop deeds tg_kf h k _tg_v2 pop [(rn_v1, anned_v1)] (rn_v2, v2) []
+          | not eVALUATE_PRIMOPS
+          = Nothing
           | (_, Literal (Int l1)) <- dereference h (rn_v1, annee anned_v1)
           , (_, Literal (Int l2)) <- dereference h (rn_v2, v2)
           , Just v <- f pop l1 l2
