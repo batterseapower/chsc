@@ -156,3 +156,7 @@ dUPLICATE_VALUES_SPLITTER = "--duplicate-values-splitter" `elem` unsafePerformIO
 {-# NOINLINE rEFINE_FULFILMENT_FVS #-}
 rEFINE_FULFILMENT_FVS :: Bool
 rEFINE_FULFILMENT_FVS = not $ "--no-refine-fulfilment-fvs" `elem` unsafePerformIO getArgs
+
+{-# NOINLINE oCCURRENCE_GENERALISATION #-}
+oCCURRENCE_GENERALISATION :: Bool
+oCCURRENCE_GENERALISATION = not $ "--no-occurrence-generalisation" `elem` unsafePerformIO getArgs
