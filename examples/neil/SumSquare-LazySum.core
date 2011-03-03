@@ -1,0 +1,13 @@
+#include "../Prelude.core"
+
+--lazySum :: [Int] -> Int
+lazySum = foldl (+) 0
+
+--f :: Int -> Int
+f n = lazySum [ k * m | k <- enumFromTo'Int 1 n, m <- enumFromTo'Int 1 k ]
+
+root x = f x
+
+tests = [
+    (root 10000, 1400446540)
+  ]
