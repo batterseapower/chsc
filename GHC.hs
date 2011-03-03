@@ -104,7 +104,7 @@ runCompiled wrapper e test_e = withTempFile "Main" $ \(exe_file, exe_h) -> do
     case ec of
       ExitFailure _ -> hPutStrLn stderr haskell >> return (haskell, Left compile_err)
       ExitSuccess   -> do
-          (ec, run_out, run_err) <- readProcessWithExitCode exe_file ["+RTS", "-t", "-rstderr"] ""
+          (ec, run_out, run_err) <- readProcessWithExitCode exe_file (["+RTS", "-t"] ++ ["-rstderr" | tICKY]) ""
           case ec of
             ExitFailure _ -> hPutStrLn stderr haskell >> return (haskell, Left (unlines [compile_out, run_err]))
             ExitSuccess -> do
