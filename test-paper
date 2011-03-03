@@ -3,7 +3,7 @@
 
 ./test-all ghc > results-ghc.tex
 
-BEST_OPTS="raw --no-deeds --speculate-on-losers --thread-speculator-history"
+BEST_OPTS="raw --no-deeds"
 
 # Straightforward single-flag tests
 ./test-all $BEST_OPTS > results-best.tex                                    # Stack
