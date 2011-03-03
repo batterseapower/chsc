@@ -149,7 +149,7 @@ simplify gen init_state
       where named_k = [0..] `zip` k
     
     seekAdmissable :: PureHeap -> NamedStack -> Maybe (IS.IntSet, S.Set (Out Var))
-    seekAdmissable h named_k = {- traceRender ("gen_kfs", gen_kfs, "gen_xs'", gen_xs') $ -} guard (gENERALISATION && not (IS.null gen_kfs) || not (S.null gen_xs')) >> Just (traceRender ("seekAdmissable", gen_kfs, gen_xs') (gen_kfs, gen_xs'))
+    seekAdmissable h named_k = {- traceRender ("gen_kfs", gen_kfs, "gen_xs'", gen_xs') $ -} guard (gENERALISATION && (not (IS.null gen_kfs) || not (S.null gen_xs'))) >> Just (traceRender ("seekAdmissable", gen_kfs, gen_xs') (gen_kfs, gen_xs'))
       where gen_kfs = IS.fromList [i  | (i, kf) <- named_k, generaliseStackFrame gen kf]
             gen_xs' = S.fromList  [x' | (x', hb) <- M.toList h, generaliseHeapBinding gen x' hb]
 
