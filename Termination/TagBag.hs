@@ -17,7 +17,7 @@ import qualified Data.IntMap as IM
 import qualified Data.Map as M
 
 
-type TagBag = TagMap Nat
+type TagBag = FinMap Nat
 
 embedWithTagBags, embedWithTagBagsStrong :: WQO State Generaliser
 embedWithTagBags = embedWithTagBags' natsWeak
@@ -27,7 +27,9 @@ embedWithTagBags' :: (forall f. (Foldable.Foldable f, Traversable.Traversable f,
                   -> WQO State Generaliser
 embedWithTagBags' nats = precomp stateTags $ postcomp generaliserFromGrowing $ refineCollection (\discard -> postcomp discard nats)
   where
+    stateTags :: State -> TagBag
     stateTags (_, Heap h _, k, (_, qa)) = -- traceRender ("stateTags (TagBag)", M.map heapBindingTagBag h, map stackFrameTag' k, qaTag' qa) $
+                                          traceRender ("stateTags:heap (TagBag)", M.map heapBindingTag h) $
                                           pureHeapTagBag h `plusTagBag` stackTagBag k `plusTagBag` tagTagBag (qaTag' qa)
       where
         heapBindingTagBag :: HeapBinding -> TagBag
@@ -43,7 +45,7 @@ embedWithTagBags' nats = precomp stateTags $ postcomp generaliserFromGrowing $ r
         tagTagBag = mkTagBag . return
         
         mkTagBag :: [Tag] -> TagBag
-        mkTagBag = plusTagBags . map (\t -> IM.singleton t 1)
+        mkTagBag = plusTagBags . map (\(TG i occs) -> IM.singleton (unFin i) occs)
         
         plusTagBag :: TagBag -> TagBag -> TagBag
         plusTagBag = IM.unionWith (+)
@@ -51,12 +53,12 @@ embedWithTagBags' nats = precomp stateTags $ postcomp generaliserFromGrowing $ r
         plusTagBags :: [TagBag] -> TagBag
         plusTagBags = foldr plusTagBag IM.empty
     
-    generaliserFromGrowing :: TagMap Bool -> Generaliser
+    generaliserFromGrowing :: FinMap Bool -> Generaliser
     generaliserFromGrowing growing = Generaliser {
           generaliseStackFrame  = \kf   -> strictly_growing (stackFrameTag' kf),
           generaliseHeapBinding = \_ hb -> maybe False (strictly_growing . pureHeapBindingTag') $ heapBindingTag hb
         }
-      where strictly_growing tg = IM.findWithDefault False tg growing
+      where strictly_growing tg = IM.findWithDefault False (unFin (tagFin tg)) growing
 
 
 pureHeapBindingTag' :: Tag -> Tag

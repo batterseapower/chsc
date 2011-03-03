@@ -13,9 +13,12 @@ import qualified Data.IntSet as IS
 import qualified Data.Map as M
 
 
+type TagSet = FinSet
+
 embedWithTagSets :: WQO State Generaliser
 embedWithTagSets = precomp stateTags $ postcomp (const generaliseNothing) equal
   where
+    stateTags :: State -> TagSet
     stateTags (_, Heap h _, k, (_, e)) = -- traceRender ("stateTags (TagSet)", M.map heapBindingTagSet h, map stackFrameTag' k, qaTag' e) $
                                          pureHeapTagSet h `IS.union` stackTagSet k `IS.union` tagTagSet (qaTag' e)
       where
@@ -26,10 +29,10 @@ embedWithTagSets = precomp stateTags $ postcomp (const generaliseNothing) equal
         pureHeapTagSet = IS.unions . map heapBindingTagSet . M.elems
     
         stackTagSet :: Stack -> IS.IntSet
-        stackTagSet = IS.fromList . map stackFrameTag'
+        stackTagSet = IS.fromList . map (unFin . tagFin . stackFrameTag')
     
         tagTagSet :: Tag -> IS.IntSet
-        tagTagSet = IS.singleton
+        tagTagSet = IS.singleton . unFin . tagFin
 
 
 pureHeapBindingTag' :: Tag -> Tag

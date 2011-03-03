@@ -19,9 +19,9 @@ import Unsafe.Coerce
 -- | Predicate that states that there exists a finite number of values distinguishable by (==) for the given type
 class Eq a => Finite a where
 
-instance Finite Tag
-instance Finite TagSet
-instance Finite v => Finite (TagMap v)
+instance Finite Fin
+instance Finite FinSet
+instance Finite v => Finite (FinMap v)
 
 instance Finite v => Finite (S.Set v)
 instance (Finite k, Finite v) => Finite (M.Map k v)
@@ -108,9 +108,6 @@ unsafeNever = WQO (const ()) $ \_ _ -> Nothing
 {-# INLINE equal #-}
 equal :: Finite a => WQO a ()
 equal = WQO id $ \x y -> guard (x == y) >> return ()
-
--- | Natural numbers on the cheap (for efficiency reasons)
-type Nat = Int
 
 -- | Embedding on natural numbers: the 'why' information records whether we were strictly growing (True) or just equal (False).
 --

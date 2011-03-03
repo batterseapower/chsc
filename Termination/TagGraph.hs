@@ -21,7 +21,7 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 
 
-type TagGraph = TagMap (TagSet, Nat)
+type TagGraph = FinMap (FinSet, Nat)
 
 
 embedWithTagGraphs :: WQO State Generaliser
@@ -30,11 +30,12 @@ embedWithTagGraphs = precomp stateTags $ postcomp generaliserFromGrowing $ refin
     -- consolidate :: (Functor f, Foldable.Foldable f) => f (TagSet, Nat) -> (TagSet, f Nat)
     --     consolidate (fmap fst &&& fmap snd -> (ims, counts)) = (Foldable.foldr (IM.unionWith (\() () -> ())) IM.empty ims, counts)
     
+    stateTags :: State -> TagGraph
     stateTags (_, Heap h _, k, in_qa@(_, qa)) = -- traceRender ("stateTags (TagGraph)", graph) $
                                              graph
       where
         graph = pureHeapTagGraph h  
-                 `plusTagGraph` stackTagGraph (qaTag' qa) k
+                 `plusTagGraph` stackTagGraph (tagFin (qaTag' qa)) k
                  `plusTagGraph` mkQATagGraph (qaTag' qa) in_qa
         
         heapBindingTagGraph :: HeapBinding -> TagGraph
@@ -43,36 +44,36 @@ embedWithTagGraphs = precomp stateTags $ postcomp generaliserFromGrowing $ refin
         pureHeapTagGraph :: PureHeap -> TagGraph
         pureHeapTagGraph h = plusTagGraphs $ map heapBindingTagGraph (M.elems h)
         
-        stackTagGraph :: Tag -> Stack -> TagGraph
+        stackTagGraph :: Fin -> Stack -> TagGraph
         stackTagGraph _        []     = emptyTagGraph
-        stackTagGraph focus_tg (kf:k) = IM.singleton kf_tg (IS.singleton focus_tg, 0)                        -- Binding structure of the stack itself (outer frames refer to inner ones)
-                                            `plusTagGraph` mkTagGraph kf_tg (stackFrameBoundVars (tagee kf)) -- Binding structure of the stack referring to bound names
-                                            `plusTagGraph` stackTagGraph kf_tg k                             -- Recurse to deal with rest of the stack
+        stackTagGraph focus_i (kf:k) = IM.singleton (unFin (tagFin kf_tg)) (IS.singleton (unFin focus_i), 0)  -- Binding structure of the stack itself (outer frames refer to inner ones)
+                                          `plusTagGraph` mkTagGraph kf_tg (stackFrameBoundVars (tagee kf))    -- Binding structure of the stack referring to bound names
+                                          `plusTagGraph` stackTagGraph (tagFin kf_tg) k                       -- Recurse to deal with rest of the stack
           where kf_tg = stackFrameTag' kf
         
         -- Stores the tags associated with any bound name
-        referants :: M.Map (Out Var) TagSet
-        referants = M.map (maybe IS.empty (IS.singleton . pureHeapBindingTag') . heapBindingTag) h `M.union` M.fromList [(x', IS.singleton (stackFrameTag' kf)) | kf@(tagee -> Update x') <- k]
+        referants :: M.Map (Out Var) FinSet
+        referants = M.map (maybe IS.empty (\hb -> IS.singleton (unFin (tagFin (pureHeapBindingTag' hb)))) . heapBindingTag) h `M.union` M.fromList [(x', IS.singleton (unFin (tagFin (stackFrameTag' kf)))) | kf@(tagee -> Update x') <- k]
         
         -- Find the *tags* referred to from the *names* referred to
-        referrerEdges :: Tag -> FreeVars -> TagGraph
-        referrerEdges referrer_tg fvs = M.foldrWithKey go IM.empty referants
+        referrerEdges :: Fin -> FreeVars -> TagGraph
+        referrerEdges referrer_i fvs = M.foldrWithKey go IM.empty referants
           where go x referant_tgs edges
                   | x `S.notMember` fvs = edges
-                  | otherwise           = IM.singleton referrer_tg (referant_tgs, 0) `plusTagGraph` edges
+                  | otherwise           = IM.singleton (unFin referrer_i) (referant_tgs, 0) `plusTagGraph` edges
         
         mkQATagGraph :: Tag -> In (Anned QA) -> TagGraph
         mkQATagGraph qa_tg in_qa = mkTagGraph qa_tg (inFreeVars annedFreeVars in_qa)
         
         mkTagGraph :: Tag -> FreeVars -> TagGraph
-        mkTagGraph e_tg fvs = IM.singleton e_tg (IS.empty, 1) `plusTagGraph` referrerEdges e_tg fvs
+        mkTagGraph (TG e_i e_occs) fvs = IM.singleton (unFin e_i) (IS.empty, e_occs) `plusTagGraph` referrerEdges e_i fvs
     
-    generaliserFromGrowing :: TagMap Bool -> Generaliser
+    generaliserFromGrowing :: FinMap Bool -> Generaliser
     generaliserFromGrowing growing = Generaliser {
           generaliseStackFrame  = \kf   -> strictly_growing (stackFrameTag' kf),
           generaliseHeapBinding = \_ hb -> maybe False (strictly_growing . pureHeapBindingTag') (heapBindingTag hb)
         }  
-      where strictly_growing tg = IM.findWithDefault False tg growing
+      where strictly_growing tg = IM.findWithDefault False (unFin (tagFin tg)) growing
 
 
 pureHeapBindingTag' :: Tag -> Tag

@@ -137,13 +137,14 @@ step' normalising state =
           where (rn_v_deref, v_deref) = dereference (Heap h ids) (rn_v, v)
 
         primop :: Deeds -> Tag -> Heap -> Stack -> Tag -> PrimOp -> [In (Anned AnnedValue)] -> In AnnedValue -> [In AnnedTerm] -> Maybe UnnormalisedState
-        primop deeds tg_kf h k _tg_v2 pop [(rn_v1, anned_v1)] (rn_v2, v2) []
+        primop deeds tg_kf h k tg_v2 pop [(rn_v1, anned_v1)] (rn_v2, v2) []
           | not eVALUATE_PRIMOPS
           = Nothing
           | (_, Literal (Int l1)) <- dereference h (rn_v1, annee anned_v1)
           , (_, Literal (Int l2)) <- dereference h (rn_v2, v2)
           , Just v <- f pop l1 l2
-          , let e' = annedTerm tg_kf (Value v)
+          , traceRender ("primop", length k, tagOccurrences tg_kf + tagOccurrences tg_v2 + tagOccurrences (annedTag anned_v1)) $ True
+          , let e' = annedTerm (tg_kf { tagOccurrences = tagOccurrences tg_kf + tagOccurrences tg_v2 + tagOccurrences (annedTag anned_v1) }) (Value v)
           , Just deeds <- claimDeeds (deeds + annedSize anned_v1 + annedValueSize' v2 + 1) (annedSize e') -- I don't think this can ever fail
           = Just (deeds, h, k, (emptyRenaming, e'))
           | otherwise

@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections, PatternGuards, ExistentialQuantification, DeriveFunctor, DeriveFoldable, DeriveTraversable,
+{-# LANGUAGE TupleSections, PatternGuards, ExistentialQuantification, DeriveFunctor, DeriveFoldable, DeriveTraversable, GeneralizedNewtypeDeriving,
              TypeSynonymInstances, FlexibleInstances, IncoherentInstances, OverlappingInstances, TypeOperators, CPP #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Utilities (
@@ -190,21 +190,34 @@ instance (Traversable.Traversable f, Traversable.Traversable g) => Traversable.T
     traverse f = fmap Comp . Traversable.traverse (Traversable.traverse f) . unComp
 
 
-newtype Down a = Down { unDown :: a }
-
-instance Eq a => Eq (Down a) where
-    Down a == Down b = a == b
+newtype Down a = Down { unDown :: a } deriving (Eq)
 
 instance Ord a => Ord (Down a) where
     Down a `compare` Down b = b `compare` a
 
 
-type Tag = Int
-type TagSet = IS.IntSet
-type TagMap = IM.IntMap
+-- | Natural numbers on the cheap (for efficiency reasons)
+type Nat = Int
+
+
+newtype Fin = Fin { unFin :: Int } deriving (Eq, Ord, Show, NFData, Pretty)
+type FinSet = IS.IntSet
+type FinMap = IM.IntMap
+
+
+data Tag = TG { tagFin :: Fin, tagOccurrences :: Nat } deriving (Eq, Ord, Show)
+
+instance NFData Tag where
+    rnf (TG a b) = rnf a `seq` rnf b
+
+instance Pretty Tag where
+    pPrint (TG i occs) = pPrint i <> brackets (pPrint occs)
+
+mkTag :: Int -> Tag
+mkTag i = TG (Fin i) 1
 
 injectTag :: Int -> Tag -> Tag
-injectTag cls tg = cls * tg
+injectTag cls (TG (Fin i) occs) = TG (Fin (cls * i)) occs
 
 data Tagged a = Tagged { tag :: !Tag, tagee :: !a }
               deriving (Functor, Foldable.Foldable, Traversable.Traversable)

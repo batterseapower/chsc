@@ -9,16 +9,16 @@ import Core.Syntax
 
 
 tagTerm :: Term -> TaggedTerm
-tagTerm = mkTag (\i f (I e) -> Tagged (hashedId i) (f e))
+tagTerm = mkTagger (\i f (I e) -> Tagged (mkTag (hashedId i)) (f e))
 
 tagFVedTerm :: SizedFVedTerm -> TaggedSizedFVedTerm
-tagFVedTerm = mkTag (\i f e -> Comp (Tagged (hashedId i) (fmap f e)))
+tagFVedTerm = mkTagger (\i f e -> Comp (Tagged (mkTag (hashedId i)) (fmap f e)))
 
 
-{-# INLINE mkTag #-}
-mkTag :: (forall a b. Id -> (a -> b) -> ann a -> ann' b)
-      -> ann (TermF ann) -> ann' (TermF ann')
-mkTag rec = term tagIdSupply
+{-# INLINE mkTagger #-}
+mkTagger :: (forall a b. Id -> (a -> b) -> ann a -> ann' b)
+         -> ann (TermF ann) -> ann' (TermF ann')
+mkTagger rec = term tagIdSupply
   where
     term ids = rec i (term' ids')
       where (ids', i) = stepIdSupply ids
