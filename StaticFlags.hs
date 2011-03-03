@@ -37,9 +37,9 @@ aSSERTIONS = not $ "--no-assertions" `elem` unsafePerformIO getArgs
 qUIET :: Bool
 qUIET = "-v0" `elem` unsafePerformIO getArgs
 
-{-# NOINLINE tERMINATION_CHECK #-}
-tERMINATION_CHECK :: Bool
-tERMINATION_CHECK = not $ "--no-termination" `elem` unsafePerformIO getArgs
+{-# NOINLINE rEDUCE_TERMINATION_CHECK #-}
+rEDUCE_TERMINATION_CHECK :: Bool
+rEDUCE_TERMINATION_CHECK = not $ "--no-reduce-termination" `elem` unsafePerformIO getArgs
 
 {-# NOINLINE eVALUATE_PRIMOPS #-}
 eVALUATE_PRIMOPS :: Bool

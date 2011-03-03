@@ -38,12 +38,15 @@ import qualified Data.Set as S
 -- The termination argument is a but subtler due to HowBounds but I think it still basically works.
 -- Key to the modified argument is that tieback cannot be prevented by any HeapBinding with HowBound /= LambdaBound:
 -- so we have to be careful to record tags on those guys.
+rEDUCE_WQO :: WQO State Generaliser
+rEDUCE_WQO | not rEDUCE_TERMINATION_CHECK = postcomp (const generaliseNothing) unsafeNever
+           | otherwise                    = wQO
+
 wQO :: WQO State Generaliser
-wQO | not tERMINATION_CHECK                        = postcomp (const generaliseNothing) unsafeNever
-    | otherwise = case tAG_COLLECTION of TagBag       -> embedWithTagBags
-                                         TagBagStrong -> embedWithTagBagsStrong
-                                         TagGraph     -> embedWithTagGraphs
-                                         TagSet       -> embedWithTagSets
+wQO = case tAG_COLLECTION of TagBag       -> embedWithTagBags
+                             TagBagStrong -> embedWithTagBagsStrong
+                             TagGraph     -> embedWithTagGraphs
+                             TagSet       -> embedWithTagSets
 
 
 data SCStats = SCStats {
@@ -248,9 +251,10 @@ speculate (stats, _state@(deeds, Heap h ids, k, in_e)) = -- assertRender (hang (
         = go hist stats deeds xes_pending xes_pending_set (M.insert x' hb xes) ids
 
 reduce :: State -> (SCStats, State)
-reduce orig_state = go (mkHistory (extra wQO)) orig_state
+reduce orig_state = go (mkHistory (extra rEDUCE_WQO)) orig_state
   where
-    go hist state = case step state of
+    go hist state = traceRender ("reduce:step", pPrintFullState state) $
+                    case step state of
         Nothing -> (mempty, state)
         Just state' -> case terminate hist (state', state') of
           Continue hist'         -> go hist' state'
