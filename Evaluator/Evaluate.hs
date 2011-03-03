@@ -65,19 +65,19 @@ step' normalising state =
       | otherwise                  = return (deeds, (mkIdentityRenaming [x'], Indirect x'))
 
     -- We have not yet claimed deeds for the result of this function
-    lookupValue :: Heap -> Out Var -> Maybe (In AnnedValue)
+    lookupValue :: Heap -> Out Var -> Maybe (In (Anned AnnedValue))
     lookupValue (Heap h _) x' = do
         hb <- M.lookup x' h
         case heapBindingTerm hb of
-          Just  (rn, anned_e) -> fmap ((rn,) . annee) $ termToValue anned_e -- FIXME: it would be cooler if we could exploit cheap non-values in unfoldings as well..
+          Just  (rn, anned_e) -> fmap (rn,) $ termToValue anned_e -- FIXME: it would be cooler if we could exploit cheap non-values in unfoldings as well..
           Nothing             -> Nothing
     
     -- Deal with a variable at the top of the stack
     -- Might have to claim deeds if inlining a non-value non-internally-bound thing here
     force deeds (Heap h ids) k tg x'
       -- FIXME: this is non-normalising if dUPLICATE_VALUES_EVALUATOR is on!
-      | Just in_v <- lookupValue (Heap h ids) x' -- NB: don't unwind *immediately* because we want that changing a Var into a Value in an empty stack is seen as a reduction 'step'
-      = do { (deeds, (rn, v)) <- prepareValue deeds x' in_v; return (deeds, Heap h ids, k, (rn, annedTerm tg (Value v))) }
+      | Just (rn, anned_v) <- lookupValue (Heap h ids) x' -- NB: don't unwind *immediately* because we want that changing a Var into a Value in an empty stack is seen as a reduction 'step'
+      = do { (deeds, (rn, v)) <- prepareValue deeds x' (rn, annee anned_v); return (deeds, Heap h ids, k, (rn, annedTerm (annedTag anned_v) (Value v))) }
       | otherwise = do
         hb <- M.lookup x' h
         -- NB: we MUST NOT create update frames for non-concrete bindings!! This has bitten me in the past, and it is seriously confusing. 
@@ -109,7 +109,7 @@ step' normalising state =
         -- of the dereferenced thing - in this case we have to be sure to claim some deeds for that subcomponent. For example, if we
         -- dereference to get a lambda in our function application we had better claim deeds for the body.
         dereference :: Heap -> In AnnedValue -> In AnnedValue
-        dereference h (rn, Indirect x) | Just (rn', anned_v') <- lookupValue h (safeRename "dereference" rn x) = dereference h (rn', anned_v')
+        dereference h (rn, Indirect x) | Just (rn', anned_v') <- lookupValue h (safeRename "dereference" rn x) = dereference h (rn', annee anned_v')
         dereference _ in_v = in_v
     
         apply :: Deeds -> Heap -> Stack -> In AnnedValue -> Out Var -> Maybe UnnormalisedState
