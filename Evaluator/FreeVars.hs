@@ -2,7 +2,7 @@
 module Evaluator.FreeVars (
     inFreeVars,
     heapBindingFreeVars,
-    pureHeapBoundVars, stackBoundVars, stackFrameBoundVars,
+    pureHeapBoundVars, stackBoundVars, stackFrameBoundVars, stackFrameFreeVars,
     pureHeapVars, stateFreeVars, stateAllFreeVars, stateLetBounders, stateLambdaBounders, stateInternalBounders, stateUncoveredVars
   ) where
 
@@ -35,6 +35,9 @@ stackBoundVars = S.unions . map (stackFrameBoundVars . tagee)
 
 stackFrameBoundVars :: StackFrame -> BoundVars
 stackFrameBoundVars = fst . stackFrameOpenFreeVars
+
+stackFrameFreeVars :: StackFrame -> FreeVars
+stackFrameFreeVars = snd . stackFrameOpenFreeVars
 
 stackFrameOpenFreeVars :: StackFrame -> (BoundVars, FreeVars)
 stackFrameOpenFreeVars kf = case kf of
