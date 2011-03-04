@@ -30,6 +30,7 @@ embedWithTagBags' nats = precomp stateTags $ postcomp generaliserFromGrowing $ r
     stateTags :: State -> TagBag
     stateTags (_, Heap h _, k, (_, qa)) = -- traceRender ("stateTags (TagBag)", M.map heapBindingTagBag h, map stackFrameTag' k, qaTag' qa) $
                                           -- traceRender ("stateTags:heap (TagBag)", M.map heapBindingTag h) $
+                                          (\res -> traceRender ("stateTags (TagBag)", res) res) $
                                           pureHeapTagBag h `plusTagBag` stackTagBag k `plusTagBag` tagTagBag (qaTag' qa)
       where
         heapBindingTagBag :: HeapBinding -> TagBag
