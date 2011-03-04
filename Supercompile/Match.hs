@@ -206,6 +206,15 @@ matchEnvironment ids bound_eqs free_eqs h_l h_r = matchLoop bound_eqs free_eqs S
               ((InternallyBound, Just in_e_l), (_how_r, mb_in_e_r)) -> case mb_in_e_r of
                   Just in_e_r | x_l `S.notMember` used_l, x_r `S.notMember` used_r -> matchInTerm ids in_e_l in_e_r >>= \extra_free_eqs -> go extra_free_eqs (markUsed x_l in_e_l used_l) (markUsed x_r in_e_r used_r)
                   _ -> Nothing
+               -- If the template has no information but exposes a lambda, we can rename to tie back.
+               -- If there is a corresponding binding in the matchable we can't tieback because we have more info this time.
+              ((LambdaBound, Nothing), (_how_r, mb_in_e_r)) -> case mb_in_e_r of
+                  Nothing -> go [] used_l used_r
+                  Just _ -> Nothing
+               -- If the template has an unfolding, we must do lookthrough
+              ((LambdaBound, Just in_e_l), (_how_r, mb_in_e_r)) -> case mb_in_e_r of
+                  Just in_e_r | x_l `S.notMember` used_l, x_r `S.notMember` used_r -> matchInTerm ids in_e_l in_e_r >>= \extra_free_eqs -> go extra_free_eqs (markUsed x_l in_e_l used_l) (markUsed x_r in_e_r used_r)
+                  _ -> Nothing
                -- We assume no-shadowing, so if two names are the same they must refer to the same thing
                -- NB: because I include this case, we may not include a renaming for some lambda-bound variables in the final knowns
                --
@@ -226,22 +235,14 @@ matchEnvironment ids bound_eqs free_eqs h_l h_r = matchLoop bound_eqs free_eqs S
                --     in in (h0, D[let x = e2 in x])
                --
                -- We better not tieback the second tuple component to h0 on the basis that the two x binders match!
-               -- They are only guaranteed to match if the are Lambda/Let bound, because in that case those binders must have been
+               -- They are only guaranteed to match if the are **Let bound**, because in that case those binders must have been
                -- created by a common ancestor and hence we can just match the uniques to determine whether the binders are the "same".
+               -- It is NOT safe to do this is both/either sides are LambdaBound, because we have no guarantee of a common ancestor in that case.
               ((_how_l, mb_in_e_l), (_how_r, mb_in_e_r)) | x_l == x_r -> case (mb_in_e_l, mb_in_e_r) of
                   (Nothing,     Nothing)     -> go [] used_l used_r
                   (Just in_e_l, Just in_e_r) -> assertRender ("match", x_l, _how_l, in_e_l, x_r, _how_r, in_e_r) (inFreeVars annedTermFreeVars in_e_r `S.isSubsetOf` inFreeVars annedTermFreeVars in_e_l) $
                                                 go [(x, x) | x <- S.toList (inFreeVars annedTermFreeVars in_e_l)] (markUsed x_l in_e_l used_l) (markUsed x_r in_e_r used_r)
                   _                          -> Nothing
-               -- If the template has no information but exposes a lambda, we can rename to tie back.
-               -- If there is a corresponding binding in the matchable we can't tieback because we have more info this time.
-              ((LambdaBound, Nothing), (_how_r, mb_in_e_r)) -> case mb_in_e_r of
-                  Nothing -> go [] used_l used_r
-                  Just _ -> Nothing
-               -- If the template has an unfolding, we must do lookthrough
-              ((LambdaBound, Just in_e_l), (_how_r, mb_in_e_r)) -> case mb_in_e_r of
-                  Just in_e_r | x_l `S.notMember` used_l, x_r `S.notMember` used_r -> matchInTerm ids in_e_l in_e_r >>= \extra_free_eqs -> go extra_free_eqs (markUsed x_l in_e_l used_l) (markUsed x_r in_e_r used_r)
-                  _ -> Nothing
                -- If the template doesn't lambda abstract, we can't rename. Only tieback if we have an exact *name* match.
                --
                -- You might think that we could do better than this if both the LHS and RHS had unfoldings, by matching them.
