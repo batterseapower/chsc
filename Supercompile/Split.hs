@@ -526,10 +526,10 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
         --
         -- Basically the idea of this heap is "stuff we want to make available to push down"
         h_updated_phantoms = M.fromDistinctAscList [(x', lambdaBound) | x' <- M.keys bracketeds_updated] -- TODO: move this into h_cheap_and_phantoms?
-        h_inlineable = setToMap (lambdaBound) gen_xs `M.union` -- The exclusion just makes sure we don't inline explicitly generalised bindings (even phantom ones)
-                       (h_not_residualised `M.union`                              -- Take any non-residualised bindings from the input heap/stack...
-                        h_cheap_and_phantom `M.union`                             -- ...failing which, take concrete definitions for cheap heap bindings (even if they are also residualised) or phantom definitions for expensive ones...
-                        h_updated_phantoms)                                       -- ...failing which, take phantoms for things bound by update frames (if supercompilation couldn't turn these into values, GHC is unlikely to get anything good from seeing defs)
+        h_inlineable = setToMap lambdaBound gen_xs `M.union` -- The exclusion just makes sure we don't inline explicitly generalised bindings (even phantom ones)
+                       (h_not_residualised `M.union`         -- Take any non-residualised bindings from the input heap/stack...
+                        h_cheap_and_phantom `M.union`        -- ...failing which, take concrete definitions for cheap heap bindings (even if they are also residualised) or phantom definitions for expensive ones...
+                        h_updated_phantoms)                  -- ...failing which, take phantoms for things bound by update frames (if supercompilation couldn't turn these into values, GHC is unlikely to get anything good from seeing defs)
         
         -- Generalising the final proposed floats may cause some bindings that we *thought* were going to be inlined to instead be
         -- residualised. We need to account for this in the Entered information (for work-duplication purposes), and in that we will
