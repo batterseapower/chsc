@@ -18,6 +18,7 @@ BEST_OPTS="raw --no-deeds"
 ./test-all $BEST_OPTS --no-refine-fulfilment-fvs > results-no-refine-fulfilment-fvs.tex     # Stack
 
 ./test-all $BEST_OPTS --tag-collection=sets > results-sets.tex     # Stack?
+./test-all $BEST_OPTS --tag-collection=bags-strongest > results-bags-strongest.tex
 ./test-all $BEST_OPTS --tag-collection=graphs > results-graphs.tex
 
 ./test-all $BEST_OPTS --no-local-tiebacks > results-no-local-tiebacks.tex
