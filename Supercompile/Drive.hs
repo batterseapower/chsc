@@ -70,7 +70,7 @@ instance Monoid SCStats where
 
 
 supercompile :: Term -> (SCStats, Term)
-supercompile e = traceRender ("all input FVs", input_fvs) $ second (fVedTermToTerm . if pRETTIFY then prettify else id) $ runScpM $ liftM snd $ sc (mkHistory (extra wQO)) state
+supercompile e = traceRender ("all input FVs", input_fvs) $ second (fVedTermToTerm . if pRETTIFY then prettify else id) $ runScpM $ liftM snd $ sc (mkHistory (extra wQO)) S.empty state
   where input_fvs = annedTermFreeVars anned_e
         state = normalise ((bLOAT_FACTOR - 1) * annedSize anned_e, Heap (setToMap environmentallyBound input_fvs) reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, anned_e))
         anned_e = toAnnedTerm e
@@ -143,13 +143,15 @@ gc _state@(deeds0, Heap h ids, k, in_e) = assertRender ("gc", stateUncoveredVars
       where (k_live, k_dead) = partition (\kf -> case tagee kf of Update x' -> x' `S.member` live; _ -> True) k
 
 
-speculate :: (SCStats, State) -> (SCStats, State)
-speculate (stats, _state@(deeds, Heap h ids, k, in_e)) = -- assertRender (hang (text "speculate: deeds lost or gained:") 2 (pPrintFullState _state $$ pPrintFullState state' $$ (case go True (mkHistory wQO) mempty deeds (M.toList h) (M.keysSet h) M.empty ids of (_, _, _) -> text "OK, fine")))
-                                                         --              (noChange (releaseStateDeed _state) (releaseStateDeed state')) $
-                                                         (,state') $!! stats `mappend` stats'
+type AlreadySpeculated = S.Set Var
+
+speculate :: AlreadySpeculated -> (SCStats, State) -> (AlreadySpeculated, (SCStats, State))
+speculate speculated (stats, _state@(deeds, Heap h ids, k, in_e)) = -- assertRender (hang (text "speculate: deeds lost or gained:") 2 (pPrintFullState _state $$ pPrintFullState state' $$ (case go True (mkHistory wQO) mempty deeds (M.toList h) (M.keysSet h) M.empty ids of (_, _, _) -> text "OK, fine")))
+                                                                     --              (noChange (releaseStateDeed _state) (releaseStateDeed state')) $
+                                                                     (M.keysSet h',) $ (,state') $!! stats `mappend` stats'
   where
     state' = (deeds', heap', k, in_e)
-    (stats', deeds', heap') = go (mkHistory wQO) mempty deeds (M.toList h) (M.keysSet h) M.empty ids
+    (stats', deeds', heap'@(Heap h' _)) = go (mkHistory wQO) mempty deeds (M.toList h) (M.keysSet h) M.empty ids
     
     qaToValue :: In (Anned QA) -> Maybe (In (Anned AnnedValue))
     qaToValue (rn, qa) | Answer _ <- annee qa = Just (rn, fmap (\(Answer v) -> v) qa)
@@ -223,6 +225,7 @@ speculate (stats, _state@(deeds, Heap h ids, k, in_e)) = -- assertRender (hang (
     go hist stats deeds ((x', hb):xes_pending) xes_pending_set  xes ids
          -- If the termination test says we can, try to reduce this heap binding
         | HB InternallyBound (Just in_e) <- hb
+        , not (x' `S.member` speculated)
         , let state = normalise (deeds, Heap (xes `M.union` M.fromList xes_pending) ids, [], in_e)
         , Continue hist <- terminate hist state
         -- , traceRender ("speculating", x', pPrintFullState state, case snd (reduce state) of state'@(_, _, _, (_, e)) -> pPrintFullState state' $$ text (show e)) True
@@ -479,19 +482,19 @@ addStats scstats = ScpM $ \_e s k -> k () (let scstats' = stats s `mappend` scst
 
 type RollbackScpM = Generaliser -> ScpM (Deeds, Out FVedTerm)
 
-sc, sc' :: History (State, RollbackScpM) (Generaliser, RollbackScpM) -> State -> ScpM (Deeds, Out FVedTerm)
-sc  hist = memo (sc' hist) . gc
-sc' hist state = (\raise -> check raise) `catchScpM` \gen -> stop gen hist -- TODO: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
+sc, sc' :: History (State, RollbackScpM) (Generaliser, RollbackScpM) -> AlreadySpeculated -> State -> ScpM (Deeds, Out FVedTerm)
+sc  hist speculated = memo (sc' hist speculated) . gc
+sc' hist speculated state = (\raise -> check raise) `catchScpM` \gen -> stop gen hist -- TODO: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
   where
     check this_rb = case terminate hist (state, this_rb) of
                       Continue hist' -> continue hist'
                       Stop (gen, rb) -> maybe (stop gen hist) ($ gen) $ guard sC_ROLLBACK >> Just rb
     stop gen hist = do addStats $ mempty { stat_sc_stops = 1 }
-                       trace "sc-stop" $ split gen (sc hist) state -- Keep the trace exactly here or it gets floated out by GHC
+                       trace "sc-stop" $ split gen (sc hist speculated) state -- Keep the trace exactly here or it gets floated out by GHC
     continue hist = do traceRenderScpM ("reduce end (continue)", pPrintFullState state')
                        addStats stats
-                       split generaliseNothing (sc hist) state'
-      where (stats, state') = (if sPECULATION then speculate else id) $ reduce state -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
+                       split generaliseNothing (sc hist speculated') state'
+      where (speculated', (stats, state')) = (if sPECULATION then speculate speculated else (speculated,)) $ reduce state -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
 
 memo :: (State -> ScpM (Deeds, Out FVedTerm))
      ->  State -> ScpM (Deeds, Out FVedTerm)
