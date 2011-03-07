@@ -350,6 +350,18 @@ transformWholeList f xs yss = (xs', yss')
         (ys', [])  = splitBy ys zs1
         yss' = splitManyBy yss ys'
 
+-- TODO: when driving a residual binding:
+--   let x = D[e]
+--   in ..
+--
+-- Arjan Boeijink suggested driving the following instead of D[e]:
+--   D[< | e | update x>]
+--
+-- This can help propagate more positive information, e.g. if e contains an occurrence of x itself
+--
+-- I'm not doing this right now because I'm wary about the termination issues. We should also be careful that we
+-- don't create loops as a result...
+
 optimiseSplit :: MonadStatics m
               => (State -> m (Deeds, Out FVedTerm))
               -> Deeds
