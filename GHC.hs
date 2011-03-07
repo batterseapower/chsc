@@ -14,6 +14,10 @@ import System.IO
 import System.Process
 
 
+gHC :: FilePath
+gHC = "/Users/mbolingbroke/Programming/Checkouts/ghc.head/inplace/bin/ghc-stage2"
+
+
 termToHaskell :: Term -> String
 termToHaskell = show . pPrintPrec haskellLevel 0
 
@@ -29,9 +33,37 @@ testingModule :: String -> Term -> Term -> String
 testingModule wrapper e test_e = unlines $
     languageLine :
     "module Main(main) where" :
-    "import Control.DeepSeq" :
     "import Data.Time.Clock.POSIX (getPOSIXTime)" :
     [wrapper] ++
+    "" :
+    "-- | A class of types that can be fully evaluated." :
+    "class NFData a where" :
+    "    rnf :: a -> ()" :
+    "    rnf a = a `seq` ()" :
+    "" :
+    "instance NFData Int " :
+    "instance NFData Integer" :
+    "instance NFData Float" :
+    "instance NFData Double" :
+    "" :
+    "instance NFData Char" :
+    "instance NFData Bool" :
+    "instance NFData ()" :
+    "" :
+    "instance NFData a => NFData (Maybe a) where" :
+    "    rnf Nothing  = ()" :
+    "    rnf (Just x) = rnf x" :
+    "" :
+    "instance (NFData a, NFData b) => NFData (Either a b) where" :
+    "    rnf (Left x)  = rnf x" :
+    "    rnf (Right y) = rnf y" :
+    "" :
+    "instance NFData a => NFData [a] where" :
+    "    rnf [] = ()" :
+    "    rnf (x:xs) = rnf x `seq` rnf xs" :
+    "" :
+    "instance (NFData a, NFData b) => NFData (a,b) where" :
+    "  rnf (x,y) = rnf x `seq` rnf y" :
     "" :
     "time_ :: IO a -> IO Double" :
     "time_ act = do { start <- getTime; act; end <- getTime; return $! (Prelude.-) end start }" :
@@ -66,7 +98,7 @@ typechecks wrapper term = do
     (ec, _out, err) <- withTempFile "Main.hs" $ \(file, h) -> do
         hPutStr h haskell
         hClose h
-        readProcessWithExitCode "ghc" ["-c", file, "-fforce-recomp"] ""
+        readProcessWithExitCode gHC ["-c", file, "-fforce-recomp"] ""
     case ec of
       ExitSuccess -> return True
       _ -> do
@@ -81,14 +113,14 @@ normalise wrapper term = do
     (ec, out, err) <- withTempFile "Main.hs" $ \(file, h) -> do
         hPutStr h haskell
         hClose h
-        readProcessWithExitCode "ghc" ["--make", "-O2", file, "-ddump-simpl", "-fforce-recomp"] ""
+        readProcessWithExitCode gHC ["--make", "-O2", file, "-ddump-simpl", "-fforce-recomp"] ""
     case ec of
       ExitSuccess   -> return (Right out)
       ExitFailure _ -> hPutStrLn stderr haskell >> return (Left err)
 
 ghcVersion :: IO [Int]
 ghcVersion = do
-    (ExitSuccess, compile_out, "") <- readProcessWithExitCode "ghc" ["--version"] ""
+    (ExitSuccess, compile_out, "") <- readProcessWithExitCode gHC ["--version"] ""
     return $ map read . seperate '.' . last . words $ compile_out
 
 runCompiled :: String -> Term -> Term -> IO (String, Either String (Bytes, Seconds, Bytes, Seconds))
@@ -99,7 +131,7 @@ runCompiled wrapper e test_e = withTempFile "Main" $ \(exe_file, exe_h) -> do
         hPutStr hs_h haskell
         hClose hs_h
         ghc_ver <- ghcVersion
-        time $ readProcessWithExitCode "ghc" (["--make", hs_file, "-fforce-recomp", "-o", exe_file] ++ ["-O2" | not nO_OPTIMISATIONS] ++ ["-ddump-simpl" | not qUIET] ++ ["-ticky" | tICKY] ++ ["-rtsopts" | ghc_ver >= [7]]) ""
+        time $ readProcessWithExitCode gHC (["--make", hs_file, "-fforce-recomp", "-o", exe_file] ++ [if nO_OPTIMISATIONS then "-O0" else "-O2"] ++ gHC_OPTIONS ++ ["-ddump-simpl" | not qUIET] ++ ["-ticky" | tICKY] ++ ["-rtsopts" | ghc_ver >= [7]]) ""
     compiled_size <- fileSize exe_file
     case ec of
       ExitFailure _ -> hPutStrLn stderr haskell >> return (haskell, Left compile_err)

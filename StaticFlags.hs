@@ -28,6 +28,10 @@ tICKY = "--ticky" `elem` unsafePerformIO getArgs
 nO_OPTIMISATIONS :: Bool
 nO_OPTIMISATIONS = "-O0" `elem` unsafePerformIO getArgs
 
+{-# NOINLINE gHC_OPTIONS #-}
+gHC_OPTIONS :: [String]
+gHC_OPTIONS = [opt | arg <- unsafePerformIO getArgs, Just ('=':opt) <- [stripPrefix "--ghc-option" arg]]
+
 
 {-# NOINLINE aSSERTIONS #-}
 aSSERTIONS :: Bool
