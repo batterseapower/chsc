@@ -1,4 +1,4 @@
-import Complex
+import Data.Complex
 
 #include "../Prelude.hs"
 

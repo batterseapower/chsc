@@ -1,10 +1,10 @@
-import Ratio
+import Data.Ratio
 
 #include "../Prelude.hs"
 
 lit0'Rational = 0 :: Rational
 
-rational = (Ratio.%) :: Integer -> Integer -> Rational
+rational = (Data.Ratio.%) :: Integer -> Integer -> Rational
 
 show'Rational = show :: Rational -> String
 
