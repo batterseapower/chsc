@@ -1,7 +1,7 @@
 {-# LANGUAGE PatternGuards, ViewPatterns, TupleSections, DeriveFunctor, DeriveFoldable, DeriveTraversable,
              MultiParamTypeClasses, FlexibleInstances, GeneralizedNewtypeDeriving #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
-module Supercompile.Split (MonadStatics(..), split) where
+module Supercompile.Split (MonadStatics(..), split, generalise) where
 
 import Core.FreeVars
 import Core.Renaming
@@ -122,37 +122,38 @@ mkEnteredEnv = setToMap
 
 {-# INLINE split #-}
 split :: MonadStatics m
-      => Generaliser
+      => State
       -> (State -> m (Deeds, Out FVedTerm))
-      -> State
       -> m (Deeds, Out FVedTerm)
-split gen opt state = optimiseSplit opt deeds' bracketeds_heap bracketed_focus
-  where (deeds', bracketeds_heap, bracketed_focus) = simplify gen state
+split (deeds, Heap h ids, k, (rn, qa)) opt
+  = generaliseSplit opt bottom deeds (Heap h ids1, [0..] `zip` k, (case annee qa of Question x -> [rename rn x]; Answer _ -> [], splitQA ids2 (rn, annee qa)))
+  where (ids1, ids2) = splitIdSupply ids
 
-{-# INLINE simplify #-}
-simplify :: Generaliser
-         -> State
-         -> (Deeds, M.Map (Out Var) (Bracketed State), Bracketed State)
-simplify gen init_state
-  = (\res@(deeds', bracketed_heap, bracketed) -> assertRender (text "simplify: deeds lost or gained") (noGain (releaseStateDeed init_state) (sumMap (releaseBracketedDeeds releaseStateDeed) bracketed_heap + releaseBracketedDeeds releaseStateDeed bracketed + deeds')) res) $ -- TODO: fix deeds checks (tagged stack frames bugger us)
-    go init_state
-  where
-    go :: State -> (Deeds, M.Map (Out Var) (Bracketed State), Bracketed State)
-    go (deeds, Heap h ids, k, (rn, qa))
-         -- If we can find some fraction of the stack or heap to drop that looks like it will be admissable, just residualise those parts and continue
-        | Just split_from <- seekAdmissable h named_k
-        , (ids', ctxt_id) <- stepIdSupply ids
-        = splitt split_from deeds (Heap h ids', named_k, ([],                                                           oneBracketed (Once ctxt_id, \ids -> (0, Heap M.empty ids, [], (rn, fmap qaToAnnedTerm' qa)))))
-         -- We can't step past a variable or value, because if we do so I can't prove that simplify terminates and the sc recursion has finite depth
-        | (ids1, ids2) <- splitIdSupply ids
-        = splitt bottom     deeds (Heap h ids1, named_k, (case annee qa of Question x -> [rename rn x]; Answer _ -> [], splitQA ids2 (rn, annee qa)))
-      where named_k = [0..] `zip` k
+{-# INLINE generalise #-}
+generalise :: MonadStatics m
+           => Generaliser
+           -> State
+           -> Maybe ((State -> m (Deeds, Out FVedTerm)) -> m (Deeds, Out FVedTerm))
+generalise gen (deeds, Heap h ids, k, (rn, qa)) = do
+    -- If we can find some fraction of the stack or heap to drop that looks like it will be admissable, just residualise those parts and continue
+    let named_k = [0..] `zip` k
+        gen_kfs = IS.fromList [i  | (i, kf) <- named_k, generaliseStackFrame gen kf]
+        gen_xs' = S.fromList  [x' | (x', hb) <- M.toList h, generaliseHeapBinding gen x' hb, assertRender ("Bad generalisation", x', hb, heapBindingTag hb) (not (howBound hb == LambdaBound && isNothing (heapBindingTerm hb))) True]
+    --traceRender ("gen_kfs", gen_kfs, "gen_xs'", gen_xs') $ return ()
+    guard (gENERALISATION && (not (IS.null gen_kfs) || not (S.null gen_xs')))
     
-    seekAdmissable :: PureHeap -> NamedStack -> Maybe (IS.IntSet, S.Set (Out Var))
-    seekAdmissable h named_k = traceRender ("gen_kfs", gen_kfs, "gen_xs'", gen_xs') $ guard (gENERALISATION && (not (IS.null gen_kfs) || not (S.null gen_xs'))) >> Just (traceRender ("seekAdmissable", gen_kfs, gen_xs') (gen_kfs, gen_xs'))
-      where gen_kfs = IS.fromList [i  | (i, kf) <- named_k, generaliseStackFrame gen kf]
-            gen_xs' = S.fromList  [x' | (x', hb) <- M.toList h, generaliseHeapBinding gen x' hb, assertRender ("Bad generalisation", x', hb, heapBindingTag hb) (not (howBound hb == LambdaBound && isNothing (heapBindingTerm hb))) True]
+    let (ids', ctxt_id) = stepIdSupply ids
+    return $ \opt -> generaliseSplit opt (gen_kfs, gen_xs') deeds (Heap h ids', named_k, ([], oneBracketed (Once ctxt_id, \ids -> (0, Heap M.empty ids, [], (rn, fmap qaToAnnedTerm' qa)))))
 
+{-# INLINE generaliseSplit #-}
+generaliseSplit :: MonadStatics m
+                => (State -> m (Deeds, Out FVedTerm))
+                -> (IS.IntSet, S.Set (Out Var))
+                -> Deeds
+                -> (Heap, NamedStack, ([Out Var], Bracketed (Entered, IdSupply -> UnnormalisedState)))
+                -> m (Deeds, Out FVedTerm)
+generaliseSplit opt split_from deeds prepared_state = optimiseSplit opt deeds' bracketeds_heap bracketed_focus
+  where (deeds', bracketeds_heap, bracketed_focus) = splitt split_from deeds prepared_state
 
 -- Discard dead bindings:
 --  let x = ...
