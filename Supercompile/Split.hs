@@ -405,7 +405,7 @@ optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
     go hes extra_statics leftover_deeds bracketeds_deeded_heap xes fvs = do
         let extra_statics' = extra_statics `S.union` S.fromList (map fst hes) -- NB: the statics already include all the binders from bracketeds_deeded_heap, so no need to add xes stuff
         (hes', (leftover_deeds, bracketeds_deeded_heap, fvs, xes')) <- bindCapturedFloats extra_statics' $ optimiseLetBinds opt leftover_deeds bracketeds_deeded_heap (fvs `S.union` S.unions (map (fvedTermFreeVars . snd) hes)) -- TODO: no need to get FVs in this way (they are in Promise)
-        (if null hes' then (\a b c d -> return (a,b,c,d)) else go hes' extra_statics') leftover_deeds bracketeds_deeded_heap (xes ++ hes ++ xes') fvs
+        (if null hes' then (\a b c d -> return (a,b,c,d)) else go hes' extra_statics') leftover_deeds bracketeds_deeded_heap (xes ++ [(x', e') | (x', e') <- hes, x' `S.member` fvs] ++ xes') fvs
 
 
 -- We only want to drive (and residualise) as much as we actually refer to. This loop does this: it starts
