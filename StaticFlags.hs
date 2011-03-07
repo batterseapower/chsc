@@ -71,9 +71,11 @@ data TagCollectionType = TagBag | TagBagStrong | TagBagStrongest | TagGraph | Ta
 tAG_COLLECTION :: TagCollectionType
 tAG_COLLECTION = parseEnum "--tag-collection" TagBag [("bags", TagBag), ("bags-strong", TagBagStrong), ("bags-strongest", TagBagStrongest), ("graphs", TagGraph), ("sets", TagSet)]
 
+data GeneralisationType = NoGeneralisation | AllEligible | FirstReachable
+
 {-# NOINLINE gENERALISATION #-}
-gENERALISATION :: Bool
-gENERALISATION = not $ "--no-generalisation" `elem` unsafePerformIO getArgs
+gENERALISATION :: GeneralisationType
+gENERALISATION = parseEnum "--generalisation" FirstReachable [("none", NoGeneralisation), ("all-eligible", AllEligible), ("first-reachable", FirstReachable)]
 
 {-# NOINLINE bLOAT_FACTOR #-}
 bLOAT_FACTOR :: Int
