@@ -8,7 +8,8 @@ BEST_OPTS="raw --no-deeds"
 # Straightforward single-flag tests
 ./test-all $BEST_OPTS > results-best.tex                                    # Stack
 ./test-all $BEST_OPTS --no-primops > results-no-primops.tex
-./test-all $BEST_OPTS --no-generalisation > results-no-generalisation.tex   # Stack
+./test-all $BEST_OPTS --generalisation=none > results-no-generalisation.tex
+./test-all $BEST_OPTS --generalisation=all-eligible > results-all-eligible-generalisation.tex
 ./test-all $BEST_OPTS --no-occurrence-generalisation > results-no-occurrence-generalisation.tex
 ./test-all $BEST_OPTS --no-speculation > results-no-speculation.tex         # OK
 ./test-all $BEST_OPTS --no-reduce-rollback > results-no-reduce-rollback.tex # OK
