@@ -1,6 +1,6 @@
 flip t = case t of
     (Leaf x) -> Leaf x
-    (Branch l r) -> Branch (flip l) (flip r)
+    (Branch l r) -> Branch (flip r) (flip l)
 
 sumtr t = case t of
     Leaf x -> x
