@@ -62,7 +62,7 @@ embedWithTagBags tbt = wqo2
     stateSubGraphs ((s1, s2), growing_generaliser) = fromMaybe growing_generaliser mb_subgraph_generaliser
       where
         stateToGraph :: State -> G.Graph NodeIdentity Color
-        stateToGraph (_, Heap h _, k, in_qa@(_, qa)) = G.fromList $ heap_fragment ++ stack_fragment ++ qa_fragment
+        stateToGraph (_, Heap h _, k, in_qa@(_, qa)) = G.fromListLenient $ heap_fragment ++ stack_fragment ++ qa_fragment
           where
             named_k = [0..] `zip` k
             
