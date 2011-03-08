@@ -1,0 +1,8 @@
+foldl c n xs = case xs of [] -> n; (x:xs) -> foldl c (c n x) xs
+length xs = foldl (\len _ -> S len) Z xs
+
+root = length
+
+tests = [
+    (root "Hello", S (S (S (S (S Z)))))
+  ]
