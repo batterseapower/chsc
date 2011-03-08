@@ -75,9 +75,9 @@ embedWithTagBags tbt = wqo2
             lookupVarNodes :: FreeVars -> [NodeIdentity]
             lookupVarNodes = mapMaybe lookupVarNode . S.toList
             
-            heap_fragment = [(HeapNode x', tagInt (annedTag e), lookupVarNodes (inFreeVars annedTermFreeVars in_e)) | (x', hb) <- M.toList h, Just in_e@(_, e) <- [heapBindingTerm hb]]
-            stack_fragment = snd $ mapAccumL (\inner_node (i, kf) -> (StackNode i, (StackNode i, tagInt (tag kf), inner_node : lookupVarNodes (stackFrameFreeVars (tagee kf))))) QANode named_k
-            qa_fragment = [(QANode, tagInt (annedTag qa), lookupVarNodes (inFreeVars annedFreeVars in_qa))]
+            heap_fragment = [(HeapNode x', tagInt (pureHeapBindingTag' (annedTag e)), lookupVarNodes (inFreeVars annedTermFreeVars in_e)) | (x', hb) <- M.toList h, Just in_e@(_, e) <- [heapBindingTerm hb]]
+            stack_fragment = snd $ mapAccumL (\inner_node (i, kf) -> (StackNode i, (StackNode i, tagInt (stackFrameTag' kf), inner_node : lookupVarNodes (stackFrameFreeVars (tagee kf))))) QANode named_k
+            qa_fragment = [(QANode, tagInt (qaTag' qa), lookupVarNodes (inFreeVars annedFreeVars in_qa))]
         
         mb_subgraph_generaliser = do
             let g1 = stateToGraph s1
@@ -87,12 +87,14 @@ embedWithTagBags tbt = wqo2
             -- In fact, we only want to generalise the *first* such thing we come across (in a dependency sense) or we will residualise too much,
             -- but let the splitter worry about that!
             let retained_nodes2 = S.fromList (M.elems subiso)
-                dropped_colors = [color | (node, color, _adjacent) <- G.toList g2, not (node `S.member` retained_nodes2)]
-            guard (not (null dropped_colors)) -- FIXME: not great because it might still lead to a trivial generaliser at the split stage.. use a list of generalisers instead?
-            trace "subgraph-generaliser" $ return $ generaliserFromFinSet (IS.fromList dropped_colors)
+                dropped_colors = IS.fromList [color | (node, color, _adjacent) <- G.toList g2, not (node `S.member` retained_nodes2)]
+            guard (not (IS.null dropped_colors)) -- FIXME: not great because it might still lead to a trivial generaliser at the split stage.. use a list of generalisers instead?
+            -- FIXME: I should check that the proposed dropped tags are in the original state. Reason: with rollback we will generalise the original state, and it would be sad
+            -- if none of the tags helped me to generalise that guy...
+            trace ("subgraph-generaliser " ++ show (dropped_colors, subiso, G.toList g1, G.toList g2)) $ return $ generaliserFromFinSet dropped_colors
 
 data NodeIdentity = QANode | HeapNode (Out Var) | StackNode Int
-                  deriving (Eq, Ord)
+                  deriving (Eq, Ord, Show)
 
 embedWithTagBags' :: (forall f. (Foldable.Foldable f, Traversable.Traversable f, Zippable f) => WQO (f Nat) (f Bool))
                   -> WQO State Generaliser

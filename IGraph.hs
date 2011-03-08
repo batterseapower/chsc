@@ -50,7 +50,7 @@ subgraphIsomorphisms' g_smaller g_larger
                            let callback mapping_ptr = do
                                   mapping <- peekArray (genericLength g_smaller) mapping_ptr
                                   --trace (show mapping) $ return ()
-                                  modifyIORef isos (map (round :: CDouble -> Int) mapping :)
+                                  modifyIORef isos (map (\x -> round (x :: CDouble) - 1) mapping :)
                                   return 1
                            bracket (mkCallback callback) freeHaskellFunPtr $ \callback ->
                               find_graph_subisomorphisms (genericLength g_smaller) smaller_colors (genericLength (concatMap snd g_smaller)) smaller_edges

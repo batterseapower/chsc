@@ -1,12 +1,12 @@
 #include <igraph.h>
 
 static igraph_bool_t find_callback(const igraph_vector_t *map12 /* large to small */, const igraph_vector_t *map21 /* small to large */, int (*callback)(double*)) {
-    return (0 != callback(VECTOR(*map12))); // Defies explanation, but I think this is the right map.. it contains indexes appropriate for the larger one
+    return (0 != callback(VECTOR(*map21)));
 }
 
 void find_graph_subisomorphisms(int smaller_nodes_count, int *smaller_colors, int smaller_edges_count, double *smaller_edges, // Who knows why they use double (igraph_real_t) for edge indexes...
                                 int larger_nodes_count, int *larger_colors, int larger_edges_count, double *larger_edges,
-                                int (*callback)(double *isomorphism /* One element per node in smaller graph, return non-zero to continue search */)) {
+                                int (*callback)(double *isomorphism /* Input array contains one element per node in smaller graph. Node indexes are 1-based (so 0 can be used as a bad element in map12). Return non-zero to continue search */)) {
     // Initialise "vectors" containing node edges
     igraph_vector_t larger_edges_vector, smaller_edges_vector;
     igraph_vector_view(&larger_edges_vector, larger_edges, larger_edges_count * 2);
