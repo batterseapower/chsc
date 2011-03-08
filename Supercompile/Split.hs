@@ -143,18 +143,22 @@ generalise gen (deeds, Heap h ids, k, (rn, qa)) = do
           where gen_kfs = IS.fromList [i  | (i, kf) <- named_k, generaliseStackFrame gen kf]
                 gen_xs' = S.fromList  [x' | (x', hb) <- M.toList h, generaliseHeapBinding gen x' hb, assertRender ("Bad generalisation", x', hb, heapBindingTag hb) (not (howBound hb == LambdaBound && isNothing (heapBindingTerm hb))) True]
         DependencyOrder want_first -> listToMaybe ((if want_first then id else reverse) possibilities)
-          where possibilities = findGeneralisable (annedFreeVars qa) named_k h
+          where -- We consider possibilities starting from the root of the term -- i.e. the bottom of the stack.
+                -- This is motivated by how the interaction with subgraph generalisation for TreeFlip/TreeSum.
+                -- FIXME: explain in more detail if this turns out to be sane.
+                possibilities = findGeneralisable False S.empty (reverse named_k) h
                 
-                findGeneralisable :: FreeVars -> NamedStack -> PureHeap -> [(IS.IntSet, S.Set (Out Var))]
-                findGeneralisable pending_xs' unreached_kfs unreached_hbs
-                   | null pending_kfs && M.null pending_hbs
+                findGeneralisable :: Bool -> FreeVars -> NamedStack -> PureHeap -> [(IS.IntSet, S.Set (Out Var))]
+                findGeneralisable done_qa pending_xs' unreached_kfs unreached_hbs
+                   | done_qa && null pending_kfs && M.null pending_hbs
                    = []
                    | otherwise
                    = [(gen_kf_is, gen_xs') | not (IS.null gen_kf_is) || not (S.null gen_xs')] ++
-                     findGeneralisable reached_xs' unreached_kfs' unreached_hbs'
+                     findGeneralisable done_qa' reached_xs' unreached_kfs' unreached_hbs'
                   where
+                    (done_qa', extra_pending_xs') = if done_qa || not (null unreached_kfs) then (done_qa, S.empty) else (True, inFreeVars annedFreeVars (rn, qa))
                     (pending_kfs, unreached_kfs') = splitAt 1 unreached_kfs
-                    (pending_hbs, unreached_hbs') = M.partitionWithKey (\x' _hb -> x' `S.member` pending_xs') unreached_hbs
+                    (pending_hbs, unreached_hbs') = M.partitionWithKey (\x' _hb -> x' `S.member` (pending_xs' `S.union` extra_pending_xs')) unreached_hbs
                     
                     gen_kf_is = IS.fromList [i  | (i, kf) <- pending_kfs, generaliseStackFrame gen kf]
                     gen_xs' = S.fromList  [x' | (x', hb) <- M.toList pending_hbs, generaliseHeapBinding gen x' hb, assertRender ("Bad generalisation", x', hb, heapBindingTag hb) (not (howBound hb == LambdaBound && isNothing (heapBindingTerm hb))) True]

@@ -82,19 +82,30 @@ embedWithTagBags tbt = wqo2
         mb_subgraph_generaliser = do
             let g1 = stateToGraph s1
                 g2 = stateToGraph s2
+            traceRender (text "subgraph-generaliser: try" $$ hang (text "g1") 2 (vcat $ map pPrint (G.toList g1)) $$ hang (text "g2") 2 (vcat $ map pPrint (G.toList g2))) $ return ()
+            
             subiso <- listToMaybe (subgraphIsomorphisms g1 g2)
             -- The idea is that we should drop stuff that is tagged like the part of the graph that we dropped to get the subgraph isomorphism
             -- In fact, we only want to generalise the *first* such thing we come across (in a dependency sense) or we will residualise too much,
-            -- but let the splitter worry about that!
+            -- but let the splitter worry about that! FIXME: not sufficient
             let retained_nodes2 = S.fromList (M.elems subiso)
-                dropped_colors = IS.fromList [color | (node, color, _adjacent) <- G.toList g2, not (node `S.member` retained_nodes2)]
+                --retained_point_to = S.fromList [adjacent | (node, color, adjacents) <- G.toList g2, node `S.member` retained_nodes2, adjacent <- adjacents] -- Try to trim exactly those tags that are on the boundary between retained and unretained
+                dropped_colors = IS.fromList [color | (node, color, adjacents) <- G.toList g2, not (node `S.member` retained_nodes2){- , node `S.member` retained_point_to || any (`S.member` retained_nodes2) adjacents -}]
+            
+            traceRender (hang (text "subgraph-generaliser: has subiso") 2 $ pPrint dropped_colors $$ pPrint subiso) $ return ()
+            
             guard (not (IS.null dropped_colors)) -- FIXME: not great because it might still lead to a trivial generaliser at the split stage.. use a list of generalisers instead?
             -- FIXME: I should check that the proposed dropped tags are in the original state. Reason: with rollback we will generalise the original state, and it would be sad
             -- if none of the tags helped me to generalise that guy...
-            trace ("subgraph-generaliser " ++ show (dropped_colors, subiso, G.toList g1, G.toList g2)) $ return $ generaliserFromFinSet dropped_colors
+            return $ generaliserFromFinSet dropped_colors
 
 data NodeIdentity = QANode | HeapNode (Out Var) | StackNode Int
                   deriving (Eq, Ord, Show)
+
+instance Pretty NodeIdentity where
+    pPrintPrec _prec _level QANode        = text "<qa>"
+    pPrintPrec prec  level  (HeapNode x') = pPrintPrec prec level x'
+    pPrintPrec prec  level  (StackNode i) = pPrint i
 
 embedWithTagBags' :: (forall f. (Foldable.Foldable f, Traversable.Traversable f, Zippable f) => WQO (f Nat) (f Bool))
                   -> WQO State Generaliser
