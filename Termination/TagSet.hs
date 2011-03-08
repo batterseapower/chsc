@@ -29,17 +29,7 @@ embedWithTagSets = precomp stateTags $ postcomp (const generaliseNothing) equal
         pureHeapTagSet = IS.unions . map heapBindingTagSet . M.elems
     
         stackTagSet :: Stack -> IS.IntSet
-        stackTagSet = IS.fromList . map (unFin . tagFin . stackFrameTag')
+        stackTagSet = IS.fromList . map (tagInt . stackFrameTag')
     
         tagTagSet :: Tag -> IS.IntSet
-        tagTagSet = IS.singleton . unFin . tagFin
-
-
-pureHeapBindingTag' :: Tag -> Tag
-pureHeapBindingTag' = injectTag 5
-
-stackFrameTag' :: Tagged StackFrame -> Tag
-stackFrameTag' = injectTag 3 . tag
-
-qaTag' :: Anned QA -> Tag
-qaTag' = injectTag 2 . annedTag
+        tagTagSet = IS.singleton . tagInt

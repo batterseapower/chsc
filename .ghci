@@ -1,2 +1,2 @@
-:set -Wall -fno-warn-missing-signatures -fno-warn-name-shadowing
+:set -Wall -fno-warn-missing-signatures -fno-warn-name-shadowing -stubdir dist/build/supercompile/supercompile-tmp/
 :l Main.hs

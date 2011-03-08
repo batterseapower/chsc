@@ -35,7 +35,7 @@ embedWithTagGraphs = precomp stateTags $ postcomp generaliserFromGrowing $ refin
                                              graph
       where
         graph = pureHeapTagGraph h  
-                 `plusTagGraph` stackTagGraph (tagFin (qaTag' qa)) k
+                 `plusTagGraph` stackTagGraph (tagInt (qaTag' qa)) k
                  `plusTagGraph` mkQATagGraph (qaTag' qa) in_qa
         
         heapBindingTagGraph :: HeapBinding -> TagGraph
@@ -44,16 +44,16 @@ embedWithTagGraphs = precomp stateTags $ postcomp generaliserFromGrowing $ refin
         pureHeapTagGraph :: PureHeap -> TagGraph
         pureHeapTagGraph h = plusTagGraphs $ map heapBindingTagGraph (M.elems h)
         
-        stackTagGraph :: Fin -> Stack -> TagGraph
+        stackTagGraph :: Int -> Stack -> TagGraph
         stackTagGraph _        []     = emptyTagGraph
-        stackTagGraph focus_i (kf:k) = IM.singleton (unFin (tagFin kf_tg)) (IS.singleton (unFin focus_i), 0)  -- Binding structure of the stack itself (outer frames refer to inner ones)
+        stackTagGraph focus_i (kf:k) = IM.singleton (tagInt kf_tg) (IS.singleton focus_i, 0)  -- Binding structure of the stack itself (outer frames refer to inner ones)
                                           `plusTagGraph` mkTagGraph kf_tg (stackFrameBoundVars (tagee kf))    -- Binding structure of the stack referring to bound names
-                                          `plusTagGraph` stackTagGraph (tagFin kf_tg) k                       -- Recurse to deal with rest of the stack
+                                          `plusTagGraph` stackTagGraph (tagInt kf_tg) k                       -- Recurse to deal with rest of the stack
           where kf_tg = stackFrameTag' kf
         
         -- Stores the tags associated with any bound name
         referants :: M.Map (Out Var) FinSet
-        referants = M.map (maybe IS.empty (\hb -> IS.singleton (unFin (tagFin (pureHeapBindingTag' hb)))) . heapBindingTag) h `M.union` M.fromList [(x', IS.singleton (unFin (tagFin (stackFrameTag' kf)))) | kf@(tagee -> Update x') <- k]
+        referants = M.map (maybe IS.empty (\hb -> IS.singleton (tagInt (pureHeapBindingTag' hb))) . heapBindingTag) h `M.union` M.fromList [(x', IS.singleton (tagInt (stackFrameTag' kf))) | kf@(tagee -> Update x') <- k]
         
         -- Find the *tags* referred to from the *names* referred to
         referrerEdges :: Fin -> FreeVars -> TagGraph
@@ -67,23 +67,6 @@ embedWithTagGraphs = precomp stateTags $ postcomp generaliserFromGrowing $ refin
         
         mkTagGraph :: Tag -> FreeVars -> TagGraph
         mkTagGraph (TG e_i e_occs) fvs = IM.singleton (unFin e_i) (IS.empty, e_occs) `plusTagGraph` referrerEdges e_i fvs
-    
-    generaliserFromGrowing :: FinMap Bool -> Generaliser
-    generaliserFromGrowing growing = Generaliser {
-          generaliseStackFrame  = \kf   -> strictly_growing (stackFrameTag' kf),
-          generaliseHeapBinding = \_ hb -> maybe False (strictly_growing . pureHeapBindingTag') (heapBindingTag hb)
-        }  
-      where strictly_growing tg = IM.findWithDefault False (unFin (tagFin tg)) growing
-
-
-pureHeapBindingTag' :: Tag -> Tag
-pureHeapBindingTag' = injectTag 5
-
-stackFrameTag' :: Tagged StackFrame -> Tag
-stackFrameTag' = injectTag 3 . tag
-
-qaTag' :: Anned QA -> Tag
-qaTag' = injectTag 2 . annedTag
 
 
 emptyTagGraph :: TagGraph

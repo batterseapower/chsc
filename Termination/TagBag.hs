@@ -1,21 +1,26 @@
 {-# LANGUAGE Rank2Types #-}
 module Termination.TagBag (
-        embedWithTagBags,
-        embedWithTagBagsStrong,
-        embedWithTagBagsStrongest
+        embedWithTagBags
     ) where
 
 import Termination.Terminate
 import Termination.Generaliser
 
+import Core.FreeVars (FreeVars)
+import Core.Renaming (Out)
+import Core.Syntax (Var)
+
 import Evaluator.FreeVars
 import Evaluator.Syntax
 
+import IGraph
 import Utilities
+import StaticFlags (TagBagType(..))
 
 import qualified Data.Foldable as Foldable
 import qualified Data.Traversable as Traversable
 import qualified Data.IntMap as IM
+import qualified Data.IntSet as IS
 import qualified Data.Map as M
 import qualified Data.Set as S
 import qualified Data.Graph.Wrapper as G
@@ -23,18 +28,23 @@ import qualified Data.Graph.Wrapper as G
 
 type TagBag = FinMap Nat
 
-embedWithTagBags, embedWithTagBagsStrong, embedWithTagBagsStrongest :: WQO State Generaliser
-embedWithTagBags = embedWithTagBags' natsWeak
-embedWithTagBagsStrong = embedWithTagBags' (zippable nat)
-embedWithTagBagsStrongest = precomp (id &&& statePartitioning) $ postcomp fst $ prod (embedWithTagBags' (zippable nat)) equal
+embedWithTagBags :: TagBagType -> WQO State Generaliser
+embedWithTagBags tbt = wqo2
   where
+    wqo0 | tagBagPairwiseGrowth tbt = embedWithTagBags' (zippable nat)
+         | otherwise                = embedWithTagBags' natsWeak
+    wqo1 | tagBagPartitionedRefinement tbt = precomp (id &&& statePartitioning) $ postcomp fst $ prod wqo0 equal
+         | otherwise                       = wqo0
+    wqo2 | tagBagSubGraph tbt = postcomp stateSubGraphs (what wqo1)
+         | otherwise          = wqo1
+    
     statePartitioning :: State -> S.Set (S.Set Fin)
     statePartitioning (_, Heap h _, k, (_, qa)) = result
       where
         -- All of the variables referenced by a particular tag
-        tag_references = IM.unionsWith S.union $ [IM.singleton (unFin (tagFin (annedTag e))) (inFreeVars annedTermFreeVars in_e) | hb <- M.elems h, Just in_e@(_, e) <- [heapBindingTerm hb]] ++
-                                                 [IM.singleton (unFin (tagFin (tag kf))) (stackFrameFreeVars (tagee kf)) | kf <- k] ++
-                                                 [IM.singleton (unFin (tagFin (annedTag qa))) (annedTermFreeVars' (qaToAnnedTerm' (annee qa)))]
+        tag_references = IM.unionsWith S.union $ [IM.singleton (tagInt (annedTag e)) (inFreeVars annedTermFreeVars in_e) | hb <- M.elems h, Just in_e@(_, e) <- [heapBindingTerm hb]] ++
+                                                 [IM.singleton (tagInt (tag kf)) (stackFrameFreeVars (tagee kf)) | kf <- k] ++
+                                                 [IM.singleton (tagInt (annedTag qa)) (annedTermFreeVars' (qaToAnnedTerm' (annee qa)))]
         
         -- Inverting the above mapping, all the tags that reference a particular variable
         referencing_tags = M.unionsWith S.union [M.singleton x (S.singleton i) | (i, xs) <- IM.toList tag_references, x <- S.toList xs]
@@ -48,7 +58,41 @@ embedWithTagBagsStrongest = precomp (id &&& statePartitioning) $ postcomp fst $ 
         -- Turn those SCCs into simple sets
         result = S.fromList [S.fromList (Foldable.toList scc) | scc <- sccs]
     
-    
+    stateSubGraphs :: ((State, State), Generaliser) -> Generaliser
+    stateSubGraphs ((s1, s2), growing_generaliser) = fromMaybe growing_generaliser mb_subgraph_generaliser
+      where
+        stateToGraph :: State -> G.Graph NodeIdentity Color
+        stateToGraph (_, Heap h _, k, in_qa@(_, qa)) = G.fromList $ heap_fragment ++ stack_fragment ++ qa_fragment
+          where
+            named_k = [0..] `zip` k
+            
+            lookupVarNode :: Out Var -> Maybe NodeIdentity
+            lookupVarNode = \x' -> M.lookup x' mapping
+              where
+                mapping = M.fromList $ [(x', StackNode i) | (i, kf) <- named_k, Update x' <- [tagee kf]] ++
+                                       [(x', HeapNode x') | x' <- M.keys h]
+            
+            lookupVarNodes :: FreeVars -> [NodeIdentity]
+            lookupVarNodes = mapMaybe lookupVarNode . S.toList
+            
+            heap_fragment = [(HeapNode x', tagInt (annedTag e), lookupVarNodes (inFreeVars annedTermFreeVars in_e)) | (x', hb) <- M.toList h, Just in_e@(_, e) <- [heapBindingTerm hb]]
+            stack_fragment = snd $ mapAccumL (\inner_node (i, kf) -> (StackNode i, (StackNode i, tagInt (tag kf), inner_node : lookupVarNodes (stackFrameFreeVars (tagee kf))))) QANode named_k
+            qa_fragment = [(QANode, tagInt (annedTag qa), lookupVarNodes (inFreeVars annedFreeVars in_qa))]
+        
+        mb_subgraph_generaliser = do
+            let g1 = stateToGraph s1
+                g2 = stateToGraph s2
+            subiso <- listToMaybe (subgraphIsomorphisms g1 g2)
+            -- The idea is that we should drop stuff that is tagged like the part of the graph that we dropped to get the subgraph isomorphism
+            -- In fact, we only want to generalise the *first* such thing we come across (in a dependency sense) or we will residualise too much,
+            -- but let the splitter worry about that!
+            let retained_nodes2 = S.fromList (M.elems subiso)
+                dropped_colors = [color | (node, color, _adjacent) <- G.toList g2, not (node `S.member` retained_nodes2)]
+            guard (not (null dropped_colors)) -- FIXME: not great because it might still lead to a trivial generaliser at the split stage.. use a list of generalisers instead?
+            trace "subgraph-generaliser" $ return $ generaliserFromFinSet (IS.fromList dropped_colors)
+
+data NodeIdentity = QANode | HeapNode (Out Var) | StackNode Int
+                  deriving (Eq, Ord)
 
 embedWithTagBags' :: (forall f. (Foldable.Foldable f, Traversable.Traversable f, Zippable f) => WQO (f Nat) (f Bool))
                   -> WQO State Generaliser
@@ -80,20 +124,3 @@ embedWithTagBags' nats = precomp stateTags $ postcomp generaliserFromGrowing $ r
         
         plusTagBags :: [TagBag] -> TagBag
         plusTagBags = foldr plusTagBag IM.empty
-    
-    generaliserFromGrowing :: FinMap Bool -> Generaliser
-    generaliserFromGrowing growing = Generaliser {
-          generaliseStackFrame  = \kf   -> strictly_growing (stackFrameTag' kf),
-          generaliseHeapBinding = \_ hb -> maybe False (strictly_growing . pureHeapBindingTag') $ heapBindingTag hb
-        }
-      where strictly_growing tg = IM.findWithDefault False (unFin (tagFin tg)) growing
-
-
-pureHeapBindingTag' :: Tag -> Tag
-pureHeapBindingTag' = injectTag 5
-
-stackFrameTag' :: Tagged StackFrame -> Tag
-stackFrameTag' = injectTag 3 . tag
-
-qaTag' :: Anned QA -> Tag
-qaTag' = injectTag 2 . annedTag

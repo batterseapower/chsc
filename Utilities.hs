@@ -219,6 +219,9 @@ mkTag i = TG (Fin i) 1
 injectTag :: Int -> Tag -> Tag
 injectTag cls (TG (Fin i) occs) = TG (Fin (cls * i)) occs
 
+tagInt :: Tag -> Int
+tagInt = unFin . tagFin
+
 data Tagged a = Tagged { tag :: !Tag, tagee :: !a }
               deriving (Functor, Foldable.Foldable, Traversable.Traversable)
 
@@ -649,6 +652,9 @@ zipWithEqualM_ :: Monad m => (a -> b -> m ()) -> [a] -> [b] -> m ()
 zipWithEqualM_ _ []     []     = return ()
 zipWithEqualM_ f (x:xs) (y:ys) = f x y >> zipWithEqualM_ f xs ys
 zipWithEqualM_ _ _ _ = fail "zipWithEqualM_"
+
+zipEqual :: [a] -> [b] -> Maybe [(a, b)]
+zipEqual = zipWithEqual (,)
 
 zipWithEqual :: (a -> b -> c) -> [a] -> [b] -> Maybe [c]
 zipWithEqual _ []     []     = Just []

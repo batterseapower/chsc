@@ -43,11 +43,9 @@ rEDUCE_WQO | not rEDUCE_TERMINATION_CHECK = postcomp (const generaliseNothing) u
            | otherwise                    = wQO
 
 wQO :: WQO State Generaliser
-wQO = case tAG_COLLECTION of TagBag          -> embedWithTagBags
-                             TagBagStrong    -> embedWithTagBagsStrong
-                             TagBagStrongest -> embedWithTagBagsStrongest
-                             TagGraph        -> embedWithTagGraphs
-                             TagSet          -> embedWithTagSets
+wQO = case tAG_COLLECTION of TagBag tbt -> embedWithTagBags tbt
+                             TagGraph   -> embedWithTagGraphs
+                             TagSet     -> embedWithTagSets
 
 
 data SCStats = SCStats {

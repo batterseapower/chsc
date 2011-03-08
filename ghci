@@ -1,0 +1,2 @@
+#!/bin/sh
+ghci dist/build/supercompile/supercompile-tmp/cbits/igraph.o -ligraph

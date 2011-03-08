@@ -142,14 +142,16 @@ generalise gen (deeds, Heap h ids, k, (rn, qa)) = do
         AllEligible -> guard (not (IS.null gen_kfs) || not (S.null gen_xs')) >> return (gen_kfs, gen_xs')
           where gen_kfs = IS.fromList [i  | (i, kf) <- named_k, generaliseStackFrame gen kf]
                 gen_xs' = S.fromList  [x' | (x', hb) <- M.toList h, generaliseHeapBinding gen x' hb, assertRender ("Bad generalisation", x', hb, heapBindingTag hb) (not (howBound hb == LambdaBound && isNothing (heapBindingTerm hb))) True]
-        FirstReachable -> findGeneralisable (annedFreeVars qa) named_k h
-          where findGeneralisable :: FreeVars -> NamedStack -> PureHeap -> Maybe (IS.IntSet, S.Set (Out Var))
+        DependencyOrder want_first -> listToMaybe ((if want_first then id else reverse) possibilities)
+          where possibilities = findGeneralisable (annedFreeVars qa) named_k h
+                
+                findGeneralisable :: FreeVars -> NamedStack -> PureHeap -> [(IS.IntSet, S.Set (Out Var))]
                 findGeneralisable pending_xs' unreached_kfs unreached_hbs
-                   | not (IS.null gen_kf_is) ||
-                     not (S.null gen_xs')
-                   = Just (gen_kf_is, gen_xs')
+                   | null pending_kfs && M.null pending_hbs
+                   = []
                    | otherwise
-                   = findGeneralisable reached_xs' unreached_kfs' unreached_hbs'
+                   = [(gen_kf_is, gen_xs') | not (IS.null gen_kf_is) || not (S.null gen_xs')] ++
+                     findGeneralisable reached_xs' unreached_kfs' unreached_hbs'
                   where
                     (pending_kfs, unreached_kfs') = splitAt 1 unreached_kfs
                     (pending_hbs, unreached_hbs') = M.partitionWithKey (\x' _hb -> x' `S.member` pending_xs') unreached_hbs

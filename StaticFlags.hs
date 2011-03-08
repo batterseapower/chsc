@@ -64,18 +64,20 @@ data DeedsPolicy = FCFS | Proportional
 dEEDS_POLICY :: DeedsPolicy
 dEEDS_POLICY = parseEnum "--deeds-policy" Proportional [("fcfs", FCFS), ("proportional", Proportional)]
 
-data TagCollectionType = TagBag | TagBagStrong | TagBagStrongest | TagGraph | TagSet
+data TagBagType = TBT { tagBagPairwiseGrowth :: Bool, tagBagPartitionedRefinement :: Bool, tagBagSubGraph :: Bool }
+                deriving (Show)
+data TagCollectionType = TagBag TagBagType | TagGraph | TagSet
                    deriving (Show)
 
 {-# NOINLINE tAG_COLLECTION #-}
 tAG_COLLECTION :: TagCollectionType
-tAG_COLLECTION = parseEnum "--tag-collection" TagBag [("bags", TagBag), ("bags-strong", TagBagStrong), ("bags-strongest", TagBagStrongest), ("graphs", TagGraph), ("sets", TagSet)]
+tAG_COLLECTION = parseEnum "--tag-collection" (TagBag (TBT False False False)) [("bags", TagBag (TBT False False False)), ("bags-strong", TagBag (TBT True False False)), ("bags-strongest", TagBag (TBT True True False)), ("bags-subgraph", TagBag (TBT False False True)), ("graphs", TagGraph), ("sets", TagSet)]
 
-data GeneralisationType = NoGeneralisation | AllEligible | FirstReachable
+data GeneralisationType = NoGeneralisation | AllEligible | DependencyOrder Bool
 
 {-# NOINLINE gENERALISATION #-}
 gENERALISATION :: GeneralisationType
-gENERALISATION = parseEnum "--generalisation" FirstReachable [("none", NoGeneralisation), ("all-eligible", AllEligible), ("first-reachable", FirstReachable)]
+gENERALISATION = parseEnum "--generalisation" (DependencyOrder False) [("none", NoGeneralisation), ("all-eligible", AllEligible), ("first-reachable", DependencyOrder True), ("last-reachable", DependencyOrder False)]
 
 {-# NOINLINE bLOAT_FACTOR #-}
 bLOAT_FACTOR :: Int
