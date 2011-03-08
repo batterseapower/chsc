@@ -1,7 +1,7 @@
 #include <igraph.h>
 
 static igraph_bool_t find_callback(const igraph_vector_t *map12 /* large to small */, const igraph_vector_t *map21 /* small to large */, int (*callback)(double*)) {
-    return (0 != callback(VECTOR(*map21)));
+    return (0 != callback(VECTOR(*map12))); // Defies explanation, but I think this is the right map.. it contains indexes appropriate for the larger one
 }
 
 void find_graph_subisomorphisms(int smaller_nodes_count, int *smaller_colors, int smaller_edges_count, double *smaller_edges, // Who knows why they use double (igraph_real_t) for edge indexes...

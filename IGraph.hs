@@ -49,6 +49,7 @@ subgraphIsomorphisms' g_smaller g_larger
                            isos <- newIORef []
                            let callback mapping_ptr = do
                                   mapping <- peekArray (genericLength g_smaller) mapping_ptr
+                                  --trace (show mapping) $ return ()
                                   modifyIORef isos (map (round :: CDouble -> Int) mapping :)
                                   return 1
                            bracket (mkCallback callback) freeHaskellFunPtr $ \callback ->
