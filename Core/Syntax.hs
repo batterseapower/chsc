@@ -58,18 +58,15 @@ data Literal = Int Integer | Char Char
 
 type Term = Identity (TermF Identity)
 type TaggedTerm = Tagged (TermF Tagged)
-type CountedTerm = Counted (TermF Counted)
 data TermF ann = Var Var | Value (ValueF ann) | App (ann (TermF ann)) Var | PrimOp PrimOp [ann (TermF ann)] | Case (ann (TermF ann)) [AltF ann] | LetRec [(Var, ann (TermF ann))] (ann (TermF ann))
                deriving (Eq, Show)
 
 type Alt = AltF Identity
 type TaggedAlt = AltF Tagged
-type CountedAlt = AltF Counted
 type AltF ann = (AltCon, ann (TermF ann))
 
 type Value = ValueF Identity
 type TaggedValue = ValueF Tagged
-type CountedValue = ValueF Counted
 data ValueF ann = Indirect Var | Lambda Var (ann (TermF ann)) | Data DataCon [Var] | Literal Literal -- TODO: add PAPs as well? Would avoid duplicating function bodies too eagerly.
                 deriving (Eq, Show)
 
