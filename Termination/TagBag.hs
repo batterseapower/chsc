@@ -90,7 +90,7 @@ embedWithTagBags tbt = wqo2
             -- but let the splitter worry about that! FIXME: not sufficient
             let retained_nodes2 = S.fromList (M.elems subiso)
                 --retained_point_to = S.fromList [adjacent | (node, color, adjacents) <- G.toList g2, node `S.member` retained_nodes2, adjacent <- adjacents] -- Try to trim exactly those tags that are on the boundary between retained and unretained
-                dropped_colors = IS.fromList [color | (node, color, adjacents) <- G.toList g2, not (node `S.member` retained_nodes2){- , node `S.member` retained_point_to || any (`S.member` retained_nodes2) adjacents -}]
+                dropped_colors = IS.fromList [color | (node, color, _adjacents) <- G.toList g2, not (node `S.member` retained_nodes2){- , node `S.member` retained_point_to || any (`S.member` retained_nodes2) adjacents -}]
             
             traceRender (hang (text "subgraph-generaliser: has subiso") 2 $ pPrint dropped_colors $$ pPrint subiso) $ return ()
             
@@ -105,7 +105,7 @@ data NodeIdentity = QANode | HeapNode (Out Var) | StackNode Int
 instance Pretty NodeIdentity where
     pPrintPrec _prec _level QANode        = text "<qa>"
     pPrintPrec prec  level  (HeapNode x') = pPrintPrec prec level x'
-    pPrintPrec prec  level  (StackNode i) = pPrint i
+    pPrintPrec prec  level  (StackNode i) = pPrintPrec prec level i
 
 embedWithTagBags' :: (forall f. (Foldable.Foldable f, Traversable.Traversable f, Zippable f) => WQO (f Nat) (f Bool))
                   -> WQO State Generaliser
