@@ -255,12 +255,13 @@ speculate speculated (stats, _state@(deeds, Heap h ids, k, in_e)) = -- assertRen
 reduce :: State -> (SCStats, State)
 reduce orig_state = go (mkHistory (extra rEDUCE_WQO)) orig_state
   where
+    -- NB: it is important that we ensure that reduce is idempotent if we have rollback on. I use this property to improve memoisation.
     go hist state = -- traceRender ("reduce:step", pPrintFullState state) $
                     case step state of
         Nothing -> (mempty, state)
-        Just state' -> case terminate hist (state', state') of
+        Just state' -> case terminate hist (state, state) of
           Continue hist'         -> go hist' state'
-          Stop (_gen, old_state) -> trace "reduce-stop" $ (mempty { stat_reduce_stops = 1 }, if rEDUCE_ROLLBACK then old_state else state) -- TODO: generalise?
+          Stop (_gen, old_state) -> trace "reduce-stop" $ (mempty { stat_reduce_stops = 1 }, if rEDUCE_ROLLBACK then old_state else state') -- TODO: generalise?
 
 
 --
