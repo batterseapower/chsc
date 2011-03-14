@@ -68,8 +68,8 @@ annedValue :: Tag -> ValueF Anned -> Anned AnnedValue
 annedValue tg v = Comp (Tagged tg (Comp (Sized (annedValueSize' v) (FVed (annedValueFreeVars' v) v))))
 
 
-toAnnedTerm :: Term -> AnnedTerm
-toAnnedTerm = tagFVedTerm . reflect
+toAnnedTerm :: IdSupply -> Term -> AnnedTerm
+toAnnedTerm tag_ids = tagFVedTerm tag_ids . reflect
 
 
 data QA = Question Var
@@ -106,7 +106,7 @@ instance Pretty HowBound where
 
 instance NFData HowBound
 
-data HeapBinding = HB { howBound :: HowBound, heapBindingTerm :: Maybe (In AnnedTerm) }
+data HeapBinding = HB { howBound :: HowBound, heapBindingMeaning :: Either (Maybe Tag) (In AnnedTerm) }
                  deriving (Show)
 
 instance NFData HeapBinding where
@@ -117,18 +117,18 @@ instance NFData Heap where
 
 instance Pretty HeapBinding where
     pPrintPrec level prec (HB how mb_in_e) = case how of
-        InternallyBound -> maybe empty (pPrintPrec level prec . renameIn (renameAnnedTerm prettyIdSupply)) mb_in_e
-        LambdaBound     -> text "λ" <> angles (maybe empty (pPrintPrec level noPrec . renameIn (renameAnnedTerm prettyIdSupply)) mb_in_e)
-        LetBound        -> text "l" <> angles (maybe empty (pPrintPrec level noPrec . renameIn (renameAnnedTerm prettyIdSupply)) mb_in_e)
+        InternallyBound -> either (const empty) (pPrintPrec level prec . renameIn (renameAnnedTerm prettyIdSupply)) mb_in_e
+        LambdaBound     -> text "λ" <> angles (either (const empty) (pPrintPrec level noPrec . renameIn (renameAnnedTerm prettyIdSupply)) mb_in_e)
+        LetBound        -> text "l" <> angles (either (const empty) (pPrintPrec level noPrec . renameIn (renameAnnedTerm prettyIdSupply)) mb_in_e)
 
 lambdaBound :: HeapBinding
-lambdaBound = HB LambdaBound Nothing
+lambdaBound = HB LambdaBound (Left Nothing)
 
 internallyBound :: In AnnedTerm -> HeapBinding
-internallyBound in_e = HB InternallyBound (Just in_e)
+internallyBound in_e = HB InternallyBound (Right in_e)
 
-environmentallyBound :: HeapBinding
-environmentallyBound = HB LetBound Nothing
+environmentallyBound :: Tag -> HeapBinding
+environmentallyBound tg = HB LetBound (Left (Just tg))
 
 type PureHeap = M.Map (Out Var) HeapBinding
 data Heap = Heap PureHeap IdSupply
@@ -159,13 +159,16 @@ instance Pretty StackFrame where
         Update x'                 -> pPrintPrecApp level prec (text "update") x'
 
 
+heapBindingTerm :: HeapBinding -> Maybe (In AnnedTerm)
+heapBindingTerm = either (const Nothing) Just . heapBindingMeaning
+
 heapBindingTag :: HeapBinding -> Maybe Tag
-heapBindingTag = fmap (annedTag . snd) . heapBindingTerm
+heapBindingTag = either id (Just . annedTag . snd) . heapBindingMeaning
 
 -- | Size of HeapBinding for Deeds purposes
 heapBindingSize :: HeapBinding -> Size
-heapBindingSize (HB InternallyBound (Just (_, e))) = annedSize e
-heapBindingSize _                                  = 0
+heapBindingSize (HB InternallyBound (Right (_, e))) = annedSize e
+heapBindingSize _                                   = 0
 
 -- | Size of StackFrame for Deeds purposes
 stackFrameSize :: StackFrame -> Size

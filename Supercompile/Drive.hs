@@ -70,8 +70,10 @@ instance Monoid SCStats where
 supercompile :: Term -> (SCStats, Term)
 supercompile e = traceRender ("all input FVs", input_fvs) $ second (fVedTermToTerm . if pRETTIFY then prettify else id) $ runScpM $ liftM snd $ sc (mkHistory (extra wQO)) S.empty state
   where input_fvs = annedTermFreeVars anned_e
-        state = normalise ((bLOAT_FACTOR - 1) * annedSize anned_e, Heap (setToMap environmentallyBound input_fvs) reduceIdSupply, [], (mkIdentityRenaming $ S.toList input_fvs, anned_e))
-        anned_e = toAnnedTerm e
+        state = normalise ((bLOAT_FACTOR - 1) * annedSize anned_e, Heap (M.fromDistinctAscList anned_h_kvs) reduceIdSupply, [], (mkIdentityRenaming $ S.toAscList input_fvs, anned_e))
+        
+        (tag_ids, anned_h_kvs) = mapAccumL (\tag_ids x' -> let (tag_ids', i) = stepIdSupply tag_ids in (tag_ids', (x', environmentallyBound (mkTag (hashedId i))))) tagIdSupply (S.toList input_fvs)
+        anned_e = toAnnedTerm tag_ids e
 
 --
 -- == Bounded multi-step reduction ==
@@ -222,14 +224,14 @@ speculate speculated (stats, _state@(deeds, Heap h ids, k, in_e)) = -- assertRen
     go _    stats deeds []                     _xes_pending_set xes ids = (,deeds, Heap xes ids) $!! stats
     go hist stats deeds ((x', hb):xes_pending) xes_pending_set  xes ids
          -- If the termination test says we can, try to reduce this heap binding
-        | HB InternallyBound (Just in_e) <- hb
+        | HB InternallyBound (Right in_e) <- hb
         , not (x' `S.member` speculated)
         , let state = normalise (deeds, Heap (xes `M.union` M.fromList xes_pending) ids, [], in_e)
         , Continue hist <- terminate hist state
         -- , traceRender ("speculating", x', pPrintFullState state, case snd (reduce state) of state'@(_, _, _, (_, e)) -> pPrintFullState state' $$ text (show e)) True
         , (stats', (deeds', Heap h ids, [], qaToValue -> Just in_v)) <- reduce state
         , let (xes', h_pending') = M.partitionWithKey (\x' _ -> x' `M.member` xes) h
-              xes'' = M.insert x' (HB InternallyBound (Just (fmap (fmap Value) in_v))) xes'
+              xes'' = M.insert x' (HB InternallyBound (Right (fmap (fmap Value) in_v))) xes'
               -- Split the updated pending heap into updated bindings for those things I've already added to the pending list (preserving order), and any newly pending bindings
               xes_pending' = [(x', fromJust (M.lookup x' h_pending')) | (x', _) <- xes_pending] ++ M.toList (M.filterWithKey (\x' _ -> not (x' `S.member` xes_pending_set)) h_pending')
         -- , not failure || 

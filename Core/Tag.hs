@@ -8,17 +8,17 @@ import Core.Size
 import Core.Syntax
 
 
-tagTerm :: Term -> TaggedTerm
+tagTerm :: IdSupply -> Term -> TaggedTerm
 tagTerm = mkTagger (\i f (I e) -> Tagged (mkTag (hashedId i)) (f e))
 
-tagFVedTerm :: SizedFVedTerm -> TaggedSizedFVedTerm
+tagFVedTerm :: IdSupply -> SizedFVedTerm -> TaggedSizedFVedTerm
 tagFVedTerm = mkTagger (\i f e -> Comp (Tagged (mkTag (hashedId i)) (fmap f e)))
 
 
 {-# INLINE mkTagger #-}
 mkTagger :: (forall a b. Id -> (a -> b) -> ann a -> ann' b)
-         -> ann (TermF ann) -> ann' (TermF ann')
-mkTagger rec = term tagIdSupply
+         -> IdSupply -> ann (TermF ann) -> ann' (TermF ann')
+mkTagger rec = term
   where
     term ids = rec i (term' ids')
       where (ids', i) = stepIdSupply ids
