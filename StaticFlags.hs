@@ -71,13 +71,13 @@ data TagCollectionType = TagBag TagBagType | TagGraph | TagSet
 
 {-# NOINLINE tAG_COLLECTION #-}
 tAG_COLLECTION :: TagCollectionType
-tAG_COLLECTION = parseEnum "--tag-collection" (TagBag (TBT False False False)) [("bags", TagBag (TBT False False False)), ("bags-strong", TagBag (TBT True False False)), ("bags-strongest", TagBag (TBT True True False)), ("bags-subgraph", TagBag (TBT False False True)), ("graphs", TagGraph), ("sets", TagSet)]
+tAG_COLLECTION = parseEnum "--tag-collection" (TagBag (TBT False False True)) [("bags", TagBag (TBT False False False)), ("bags-strong", TagBag (TBT True False False)), ("bags-strongest", TagBag (TBT True True False)), ("bags-subgraph", TagBag (TBT False False True)), ("graphs", TagGraph), ("sets", TagSet)]
 
 data GeneralisationType = NoGeneralisation | AllEligible | DependencyOrder Bool
 
 {-# NOINLINE gENERALISATION #-}
 gENERALISATION :: GeneralisationType
-gENERALISATION = parseEnum "--generalisation" (DependencyOrder False) [("none", NoGeneralisation), ("all-eligible", AllEligible), ("first-reachable", DependencyOrder True), ("last-reachable", DependencyOrder False)]
+gENERALISATION = parseEnum "--generalisation" (DependencyOrder True) [("none", NoGeneralisation), ("all-eligible", AllEligible), ("first-reachable", DependencyOrder True), ("last-reachable", DependencyOrder False)]
 
 {-# NOINLINE bLOAT_FACTOR #-}
 bLOAT_FACTOR :: Int
@@ -171,4 +171,8 @@ oCCURRENCE_GENERALISATION = not $ "--no-occurrence-generalisation" `elem` unsafe
 
 {-# NOINLINE mATCH_REDUCED #-}
 mATCH_REDUCED :: Bool
-mATCH_REDUCED = "--match-reduced" `elem` unsafePerformIO getArgs
+mATCH_REDUCED = not $ "--no-match-reduced" `elem` unsafePerformIO getArgs
+
+{-# NOINLINE mATCH_SPECULATION #-}
+mATCH_SPECULATION :: Bool
+mATCH_SPECULATION = not $ "--no-match-speculation" `elem` unsafePerformIO getArgs

@@ -485,7 +485,7 @@ addStats scstats = ScpM $ \_e s k -> k () (let scstats' = stats s `mappend` scst
 type RollbackScpM = Generaliser -> ScpM (Deeds, Out FVedTerm)
 
 sc, sc' :: History (State, RollbackScpM) (Generaliser, RollbackScpM) -> AlreadySpeculated -> State -> ScpM (Deeds, Out FVedTerm)
-sc  hist speculated = memo (sc' hist speculated)
+sc  hist = memo (sc' hist)
 sc' hist speculated state = (\raise -> check raise) `catchScpM` \gen -> stop gen hist -- TODO: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
   where
     check this_rb = case terminate hist (state, this_rb) of
@@ -498,11 +498,11 @@ sc' hist speculated state = (\raise -> check raise) `catchScpM` \gen -> stop gen
                        split state' (sc hist speculated')
       where (speculated', (stats, state')) = (if sPECULATION then speculate speculated else (speculated,)) $ reduce state -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
 
-memo :: (State -> ScpM (Deeds, Out FVedTerm))
-     ->  State -> ScpM (Deeds, Out FVedTerm)
-memo opt state0 = do
+memo :: (AlreadySpeculated -> State -> ScpM (Deeds, Out FVedTerm))
+     ->  AlreadySpeculated -> State -> ScpM (Deeds, Out FVedTerm)
+memo opt speculated state0 = do
     let (_, state1) = gc state0 -- Necessary because normalisation might have made some stuff dead
-        (_, state2) = reduce state1 -- FIXME: speculate as well? FIXME: work sharing with sc'
+        (_, (_, state2)) = (if mATCH_SPECULATION then speculate speculated else (speculated,)) $ reduce state1 -- FIXME: work sharing with sc'
         (h_dead_promoted, state3) | mATCH_REDUCED = first (M.mapMaybe (\hb -> guard (howBound hb /= InternallyBound) >> return (hb { howBound = InternallyBound }))) $ gc state2
                                   | otherwise     = (M.empty, state1)
     
@@ -538,7 +538,7 @@ memo opt state0 = do
             -- Note that since the reducer only looks into non-internal *value* bindings doing this does not cause work duplication, only value duplication
             --
             -- FIXME: I'm not acquiring deeds for these....
-            res <- opt $ case state0 of (deeds, Heap h ids, k, in_qa) -> (deeds, Heap (h_dead_promoted `M.union` h) ids, k, in_qa)
+            res <- opt speculated $ case state0 of (deeds, Heap h ids, k, in_qa) -> (deeds, Heap (h_dead_promoted `M.union` h) ids, k, in_qa)
             traceRenderScpM ("<sc", x, pPrintFullState state3, res)
             return res
 
