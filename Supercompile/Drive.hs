@@ -106,21 +106,22 @@ supercompile e = traceRender ("all input FVs", input_fvs) $ second (fVedTermToTe
 -- although dead heap bindings don't bother it, it would be confused by dead update frames.
 --
 -- TODO: have the garbage collector collapse (let x = True in x) to (True) -- but note that this requires onceness analysis
-gc :: State -> State
+gc :: State -> (PureHeap, State)
 gc _state@(deeds0, Heap h ids, k, in_e) = assertRender ("gc", stateUncoveredVars state', pPrintFullState _state, pPrintFullState state') (S.null (stateUncoveredVars state'))
-                                          state'
+                                          (h_dead, state')
   where
     state' = (deeds2, Heap h' ids, k', in_e)
     
     -- We have to use stateAllFreeVars here rather than stateFreeVars because in order to safely prune the live stack we need
     -- variables bound by k to be part of the live set if they occur within in_e or the rest of the k
     live0 = stateAllFreeVars (deeds0, Heap M.empty ids, k, in_e)
-    (deeds1, h', live1) = inlineLiveHeap deeds0 h live0
+    (deeds1, h_dead, h', live1) = inlineLiveHeap deeds0 h live0
     -- Collecting dead update frames doesn't make any new heap bindings dead since they don't refer to anything
-    (deeds2, k') = pruneLiveStack deeds1 k live1
+    (deeds2, k') | False     = pruneLiveStack deeds1 k live1 -- FIXME: Can't deal with this any longer in the Brave New World of using reduction+GC to prove deadness
+                 | otherwise = (deeds1, k)
     
-    inlineLiveHeap :: Deeds -> PureHeap -> FreeVars -> (Deeds, PureHeap, FreeVars)
-    inlineLiveHeap deeds h live = (deeds `releasePureHeapDeeds` h_dead, h_live, live')
+    inlineLiveHeap :: Deeds -> PureHeap -> FreeVars -> (Deeds, PureHeap, PureHeap, FreeVars)
+    inlineLiveHeap deeds h live = (deeds `releasePureHeapDeeds` h_dead, h_dead, h_live, live')
       where
         (h_dead, h_live, live') = heap_worker h M.empty live
         
@@ -484,7 +485,7 @@ addStats scstats = ScpM $ \_e s k -> k () (let scstats' = stats s `mappend` scst
 type RollbackScpM = Generaliser -> ScpM (Deeds, Out FVedTerm)
 
 sc, sc' :: History (State, RollbackScpM) (Generaliser, RollbackScpM) -> AlreadySpeculated -> State -> ScpM (Deeds, Out FVedTerm)
-sc  hist speculated = memo (sc' hist speculated) . gc
+sc  hist speculated = memo (sc' hist speculated)
 sc' hist speculated state = (\raise -> check raise) `catchScpM` \gen -> stop gen hist -- TODO: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
   where
     check this_rb = case terminate hist (state, this_rb) of
@@ -499,30 +500,46 @@ sc' hist speculated state = (\raise -> check raise) `catchScpM` \gen -> stop gen
 
 memo :: (State -> ScpM (Deeds, Out FVedTerm))
      ->  State -> ScpM (Deeds, Out FVedTerm)
-memo opt state = do
+memo opt state0 = do
+    let (_, state1) = gc state0 -- Necessary because normalisation might have made some stuff dead
+        (_, state2) = reduce state1 -- FIXME: speculate as well? FIXME: work sharing with sc'
+        (h_dead_promoted, state3) | mATCH_REDUCED = first (M.mapMaybe (\hb -> guard (howBound hb /= InternallyBound) >> return (hb { howBound = InternallyBound }))) $ gc state2
+                                  | otherwise     = (M.empty, state1)
+    
     ps <- getPromises
-    case [ (p, (releaseStateDeed state, fun p `varApps` tb_dynamic_vs))
+    case [ (p, (releaseStateDeed state0, fun p `varApps` tb_dynamic_vs))
          | p <- ps
          , Just rn_lr <- [-- (\res -> if isNothing res then traceRender ("no match:", fun p) res else res) $
-                           match (unI (meaning p)) state]
+                           match (unI (meaning p)) state3]
           -- NB: because I can trim reduce the set of things abstracted over above, it's OK if the renaming derived from the meanings renames vars that aren't in the abstracted list, but NOT vice-versa
-         , let bad_renames = S.fromList (abstracted p) S.\\ M.keysSet (unRenaming rn_lr) in assertRender (text "Renaming was inexhaustive:" <+> pPrint bad_renames $$ pPrint (fun p) $$ pPrintFullState (unI (meaning p)) $$ pPrint rn_lr $$ pPrintFullState state) (S.null bad_renames) True
-         , let rn_fvs = map (safeRename ("tieback: FVs for " ++ render (pPrint (fun p) $$ text "Us:" $$ pPrint state $$ text "Them:" $$ pPrint (meaning p)))
+         , let bad_renames = S.fromList (abstracted p) S.\\ M.keysSet (unRenaming rn_lr) in assertRender (text "Renaming was inexhaustive:" <+> pPrint bad_renames $$ pPrint (fun p) $$ pPrintFullState (unI (meaning p)) $$ pPrint rn_lr $$ pPrintFullState state3) (S.null bad_renames) True
+         , let rn_fvs = map (safeRename ("tieback: FVs for " ++ render (pPrint (fun p) $$ text "Us:" $$ pPrint state3 $$ text "Them:" $$ pPrint (meaning p)))
                                         rn_lr) -- NB: If tb contains a dead PureHeap binding (hopefully impossible) then it may have a free variable that I can't rename, so "rename" will cause an error. Not observed in practice yet.
                tb_dynamic_vs = rn_fvs (abstracted p)
          ] of
-      (_p, res):_ -> {- traceRender ("tieback", pPrintFullState state, fst res) $ -} do
-        traceRenderScpM ("=sc", fun _p, pPrintFullState state, res)
+      (_p, res):_ -> {- traceRender ("tieback", pPrintFullState state3, fst res) $ -} do
+        traceRenderScpM ("=sc", fun _p, pPrintFullState state3, res)
         return res
-      [] -> {- traceRender ("new drive", pPrintFullState state) $ -} do
-        let vs = stateLambdaBounders state
+      [] -> {- traceRender ("new drive", pPrintFullState state3) $ -} do
+        let vs = stateLambdaBounders state3
         
         -- NB: promises are lexically scoped because they may refer to FVs
         x <- freshHName
-        promise P { fun = x, abstracted = S.toList vs, meaning = I state } $ do
-            traceRenderScpM (">sc", x, pPrintFullState state)
-            res <- opt state
-            traceRenderScpM ("<sc", x, pPrintFullState state, res)
+        promise P { fun = x, abstracted = S.toList vs, meaning = I state3 } $
+          (if M.null h_dead_promoted then id else traceRender ("promoting", M.keysSet h_dead_promoted)) $
+          do
+            traceRenderScpM (">sc", x, pPrintFullState state3)
+            -- FIXME: this is the site of the Dreadful Hack that makes it safe to match on reduced terms yet *drive* unreduced ones
+            -- I only add non-internally bound junk to the input heap because:
+            --  a) Thats the only stuff I *need* to add to make sure the FVs etc match up properly
+            --  b) New InternallyBound stuff might be created by reduction and then swiftly become dead, and I don't want to push that down
+            --     gratutiously. Furthermore, the Ids for that stuff might clash with those still-to-be-allocated in the state0 IdSupply.
+            --
+            -- Note that since the reducer only looks into non-internal *value* bindings doing this does not cause work duplication, only value duplication
+            --
+            -- FIXME: I'm not acquiring deeds for these....
+            res <- opt $ case state0 of (deeds, Heap h ids, k, in_qa) -> (deeds, Heap (h_dead_promoted `M.union` h) ids, k, in_qa)
+            traceRenderScpM ("<sc", x, pPrintFullState state3, res)
             return res
 
 traceRenderScpM :: Pretty a => a -> ScpM ()

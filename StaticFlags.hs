@@ -168,3 +168,7 @@ rEFINE_FULFILMENT_FVS = not $ "--no-refine-fulfilment-fvs" `elem` unsafePerformI
 {-# NOINLINE oCCURRENCE_GENERALISATION #-}
 oCCURRENCE_GENERALISATION :: Bool
 oCCURRENCE_GENERALISATION = not $ "--no-occurrence-generalisation" `elem` unsafePerformIO getArgs
+
+{-# NOINLINE mATCH_REDUCED #-}
+mATCH_REDUCED :: Bool
+mATCH_REDUCED = "--match-reduced" `elem` unsafePerformIO getArgs

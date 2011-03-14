@@ -286,10 +286,10 @@ data Bracketed a = Bracketed {
 instance Accumulatable Bracketed where
     mapAccumTM f acc b = liftM (\(acc', fillers') -> (acc', b { fillers = fillers' })) $ mapAccumTM f acc (fillers b)
 
-noneBracketed :: Out FVedTerm -> FreeVars -> Bracketed a
-noneBracketed a b = Bracketed {
+noneBracketed :: Out FVedTerm -> Bracketed a
+noneBracketed a = Bracketed {
     rebuild  = \[] -> a,
-    extraFvs = b,
+    extraFvs = freeVars a,
     extraBvs = [],
     fillers  = [],
     tails    = Nothing
@@ -529,7 +529,7 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
         -- 2) Build a splitting for those elements of the heap we propose to residualise not in not_resid_xs
         -- TODO: I should residualise those Unfoldings whose free variables have become interesting due to intervening scrutinisation
         (h_not_residualised, h_residualised) = M.partitionWithKey (\x' _ -> x' `S.member` not_resid_xs) h
-        bracketeds_nonupdated = M.mapMaybeWithKey (\x' hb -> do { guard (howBound hb == InternallyBound); in_e <- heapBindingTerm hb; return (fill_ids $ oneBracketed (Once (fromJust (name_id x')), \ids -> (0, Heap M.empty ids, [], in_e))) }) h_residualised
+        bracketeds_nonupdated = M.mapMaybeWithKey (\x' hb -> do { guard (howBound hb == InternallyBound); return $ case heapBindingTerm hb of Nothing -> noneBracketed (fvedTerm (Var (name "undefined"))); Just in_e -> fill_ids $ oneBracketed (Once (fromJust (name_id x')), \ids -> (0, Heap M.empty ids, [], in_e)) }) h_residualised
         -- For every heap binding we ever need to deal with, contains a version of that heap binding as a concrete Bracketed thing
         bracketeds_heap = bracketeds_updated `M.union` bracketeds_nonupdated
         
@@ -916,10 +916,8 @@ splitUpdate tg_kf scruts x' bracketed_hole = (x' : scruts, M.singleton x' bracke
 splitValue :: IdSupply -> In AnnedValue -> Bracketed (Entered, IdSupply -> UnnormalisedState)
 splitValue ids (rn, Lambda x e) = zipBracketeds (\[e'] -> lambda x' e') (\[fvs'] -> fvs') [S.insert x'] (\_ -> Nothing) [oneBracketed (Many, \ids -> (0, Heap (M.singleton x' lambdaBound) ids, [], (rn', e)))]
   where (_ids', rn', x') = renameBinder ids rn x
-splitValue ids in_v             = noneBracketed (value v') (inFreeVars annedValueFreeVars' in_v)
-  where v' = detagAnnedValue' $ renameIn (renameAnnedValue' ids) in_v
+splitValue ids in_v             = noneBracketed (value (detagAnnedValue' $ renameIn (renameAnnedValue' ids) in_v))
 
 splitQA :: IdSupply -> In QA -> Bracketed (Entered, IdSupply -> UnnormalisedState)
-splitQA _   (rn, Question x) = noneBracketed (var x') (S.singleton x')
-  where x' = rename rn x
+splitQA _   (rn, Question x) = noneBracketed (var (rename rn x))
 splitQA ids (rn, Answer v)   = splitValue ids (rn, v)
