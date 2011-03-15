@@ -484,11 +484,12 @@ addStats scstats = ScpM $ \_e s k -> k () (let scstats' = stats s `mappend` scst
 
 type RollbackScpM = Generaliser -> ScpM (Deeds, Out FVedTerm)
 
-sc, sc' :: History (State, RollbackScpM) (Generaliser, RollbackScpM) -> AlreadySpeculated -> State -> ScpM (Deeds, Out FVedTerm)
+sc :: History (State, RollbackScpM) (Generaliser, RollbackScpM) -> AlreadySpeculated -> State -> ScpM (Deeds, Out FVedTerm)
+sc' :: History (State, RollbackScpM) (Generaliser, RollbackScpM) -> AlreadySpeculated -> State -> State -> ScpM (Deeds, Out FVedTerm)
 sc  hist = memo (sc' hist)
-sc' hist speculated state = (\raise -> check raise) `catchScpM` \gen -> stop gen hist -- TODO: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
+sc' hist speculated state state' = (\raise -> check raise) `catchScpM` \gen -> stop gen hist -- TODO: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
   where
-    check this_rb = case terminate hist (state, this_rb) of
+    check this_rb = case terminate hist (if False && sPECULATION then state' else state {- FIXME: good idea? flag control? -}, this_rb) of
                       Continue hist' -> continue hist'
                       Stop (gen, rb) -> maybe (stop gen hist) ($ gen) $ guard sC_ROLLBACK >> Just rb
     stop gen hist = do addStats $ mempty { stat_sc_stops = 1 }
@@ -498,18 +499,22 @@ sc' hist speculated state = (\raise -> check raise) `catchScpM` \gen -> stop gen
                        split state' (sc hist speculated')
       where (speculated', (stats, state')) = (if sPECULATION then speculate speculated else (speculated,)) $ reduce state -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
 
-memo :: (AlreadySpeculated -> State -> ScpM (Deeds, Out FVedTerm))
+memo :: (AlreadySpeculated -> State -> State -> ScpM (Deeds, Out FVedTerm))
      ->  AlreadySpeculated -> State -> ScpM (Deeds, Out FVedTerm)
 memo opt speculated state0 = do
     let (_, state1) = gc state0 -- Necessary because normalisation might have made some stuff dead
         (_, (_, state2)) = (if mATCH_SPECULATION then speculate speculated else (speculated,)) $ reduce state1 -- FIXME: work sharing with sc'
-        (h_dead_promoted, state3) | mATCH_REDUCED = first (M.mapMaybe (\hb -> guard (howBound hb /= InternallyBound) >> return (hb { howBound = InternallyBound }))) $ gc state2
-                                  | otherwise     = (M.empty, state1)
+        (h_dead_promoted, state3, state4) = case gc state2 of
+            _ | not mATCH_REDUCED -> (M.empty, state1, state1)
+            (h_junk, state2')     -> (if M.null h_dead_promoted then id else traceRender ("promoting", M.keysSet h_dead_promoted)) $
+                                     (h_dead_promoted, state2', state4)
+              where h_dead_promoted = M.mapMaybe (\hb -> guard (howBound hb /= InternallyBound) >> return (hb { howBound = InternallyBound })) h_junk
+                    state4 = case state0 of (deeds, Heap h ids, k, in_qa) -> (deeds, Heap (h_dead_promoted `M.union` h) ids, k, in_qa)
     
     ps <- getPromises
     case [ (p, (releaseStateDeed state0, fun p `varApps` tb_dynamic_vs))
          | p <- ps
-         , Just rn_lr <- [-- (\res -> if isNothing res then traceRender ("no match:", fun p) res else res) $
+         , Just rn_lr <- [(\res -> if isNothing res then traceRender ("no match:", fun p) res else res) $
                            match (unI (meaning p)) state3]
           -- NB: because I can trim reduce the set of things abstracted over above, it's OK if the renaming derived from the meanings renames vars that aren't in the abstracted list, but NOT vice-versa
          , let bad_renames = S.fromList (abstracted p) S.\\ M.keysSet (unRenaming rn_lr) in assertRender (text "Renaming was inexhaustive:" <+> pPrint bad_renames $$ pPrint (fun p) $$ pPrintFullState (unI (meaning p)) $$ pPrint rn_lr $$ pPrintFullState state3) (S.null bad_renames) True
@@ -526,9 +531,8 @@ memo opt speculated state0 = do
         -- NB: promises are lexically scoped because they may refer to FVs
         x <- freshHName
         promise P { fun = x, abstracted = S.toList vs, meaning = I state3 } $
-          (if M.null h_dead_promoted then id else traceRender ("promoting", M.keysSet h_dead_promoted)) $
           do
-            traceRenderScpM (">sc", x, pPrintFullState state3)
+            traceRenderScpM (">sc", x, pPrintFullState state4)
             -- FIXME: this is the site of the Dreadful Hack that makes it safe to match on reduced terms yet *drive* unreduced ones
             -- I only add non-internally bound junk to the input heap because:
             --  a) Thats the only stuff I *need* to add to make sure the FVs etc match up properly
@@ -538,8 +542,8 @@ memo opt speculated state0 = do
             -- Note that since the reducer only looks into non-internal *value* bindings doing this does not cause work duplication, only value duplication
             --
             -- FIXME: I'm not acquiring deeds for these....
-            res <- opt speculated $ case state0 of (deeds, Heap h ids, k, in_qa) -> (deeds, Heap (h_dead_promoted `M.union` h) ids, k, in_qa)
-            traceRenderScpM ("<sc", x, pPrintFullState state3, res)
+            res <- opt speculated state4 state2
+            traceRenderScpM ("<sc", x, pPrintFullState state4, res)
             return res
 
 traceRenderScpM :: Pretty a => a -> ScpM ()
