@@ -31,6 +31,9 @@ import qualified Data.IntSet as IS
 
 class Monad m => MonadStatics m where
     bindCapturedFloats :: FreeVars -> m a -> m (Out [(Var, FVedTerm)], a)
+    bindCapturedFloats fvs mx = bindCapturedFloats' fvs mx (\hes x -> return (hes, x))
+    
+    bindCapturedFloats' :: FreeVars -> m a -> (Out [(Var, FVedTerm)] -> a -> m r) -> m r
 
 
 --
@@ -426,26 +429,26 @@ optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
     
     -- 1) Recursively drive the focus itself
     let extra_statics = M.keysSet bracketeds_heap
-    (hes, (leftover_deeds, e_focus)) <- bindCapturedFloats extra_statics $ optimiseBracketed opt (deeds_initial, bracketed_deeded_focus)
+    bindCapturedFloats' extra_statics (optimiseBracketed opt (deeds_initial, bracketed_deeded_focus)) $ \hes (leftover_deeds, e_focus) -> do    
+        -- 2) We now need to think about how we are going to residualise the letrec. In fact, we need to loop adding
+        -- stuff to the letrec because it might be the case that:
+        --  * One of the hes from above refers to some heap binding that is not referred to by the let body
+        --  * So after we do withStatics above we need to drive some element of the bracketeds_heap
+        --  * And after driving that we find in our new hes a new h function referring to a new free variable
+        --    that refers to some binding that is as yet unbound...
+        (leftover_deeds, bracketeds_deeded_heap, xes, _fvs) <- go hes extra_statics leftover_deeds bracketeds_deeded_heap [] (fvedTermFreeVars e_focus)
     
-    -- 2) We now need to think about how we are going to residualise the letrec. In fact, we need to loop adding
-    -- stuff to the letrec because it might be the case that:
-    --  * One of the hes from above refers to some heap binding that is not referred to by the let body
-    --  * So after we do withStatics above we need to drive some element of the bracketeds_heap
-    --  * And after driving that we find in our new hes a new h function referring to a new free variable
-    --    that refers to some binding that is as yet unbound...
-    (leftover_deeds, bracketeds_deeded_heap, xes, _fvs) <- go hes extra_statics leftover_deeds bracketeds_deeded_heap [] (fvedTermFreeVars e_focus)
-    
-    -- 3) Combine the residualised let bindings with the let body
-    return (sumMap (releaseBracketedDeeds releaseStateDeed) bracketeds_deeded_heap + leftover_deeds,
-            letRecSmart xes e_focus)
+        -- 3) Combine the residualised let bindings with the let body
+        return (sumMap (releaseBracketedDeeds releaseStateDeed) bracketeds_deeded_heap + leftover_deeds,
+                letRecSmart xes e_focus)
   where
     -- TODO: clean up this incomprehensible loop
     -- TODO: investigate the possibility of just fusing in the optimiseLetBinds loop with this one
     go hes extra_statics leftover_deeds bracketeds_deeded_heap xes fvs = do
         let extra_statics' = extra_statics `S.union` S.fromList (map fst hes) -- NB: the statics already include all the binders from bracketeds_deeded_heap, so no need to add xes stuff
-        (hes', (leftover_deeds, bracketeds_deeded_heap, fvs, xes')) <- bindCapturedFloats extra_statics' $ optimiseLetBinds opt leftover_deeds bracketeds_deeded_heap (fvs `S.union` S.unions (map (fvedTermFreeVars . snd) hes)) -- TODO: no need to get FVs in this way (they are in Promise)
-        (if null hes' then (\a b c d -> return (a,b,c,d)) else go hes' extra_statics') leftover_deeds bracketeds_deeded_heap (xes ++ [(x', e') | (x', e') <- hes, x' `S.member` fvs] ++ xes') fvs
+        -- TODO: no need to get FVs in this way (they are in Promise)
+        bindCapturedFloats' extra_statics' (optimiseLetBinds opt leftover_deeds bracketeds_deeded_heap (fvs `S.union` S.unions (map (fvedTermFreeVars . snd) hes))) $ \hes' (leftover_deeds, bracketeds_deeded_heap, fvs, xes') -> do
+            (if null hes' then (\a b c d -> return (a,b,c,d)) else go hes' extra_statics') leftover_deeds bracketeds_deeded_heap (xes ++ [(x', e') | (x', e') <- hes, x' `S.member` fvs] ++ xes') fvs
 
 
 -- We only want to drive (and residualise) as much as we actually refer to. This loop does this: it starts
