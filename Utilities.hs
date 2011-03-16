@@ -24,6 +24,7 @@ import Control.Arrow (first, second, (***), (&&&))
 import Control.DeepSeq (NFData(..), rnf)
 import Control.Monad hiding (join)
 
+import qualified Data.Graph.Wrapper as G
 import Data.Maybe
 import Data.Monoid
 import Data.List
@@ -642,6 +643,17 @@ zipWithEqual _ _ _ = fail "zipWithEqual"
 
 implies :: Bool -> Bool -> Bool
 implies cond consq = not cond || consq
+
+
+-- | Orders elements of a map into dependency order insofar as that is possible.
+--
+-- This function ignores any elements reported as reachable that are not present in the input.
+--
+-- An element (b1 :: b) strictly precedes (b2 :: b) in the output whenever b1 is reachable from b2 but not vice versa.
+-- Element b1 occurs in the same SCC as b2 whenever both b1 is reachable from b2 and b1 is reachable from b2.
+topologicalSort :: Ord a => (b -> S.Set a) -> M.Map a b -> [M.Map a b]
+topologicalSort f got = [M.fromList [(a, G.vertex g a) | a <- Foldable.toList scc] | scc <- G.stronglyConnectedComponents g]
+  where g = G.fromListLenient [(a, b, S.toList (f b)) | (a, b) <- M.toList got]
 
 
 mapAccumM :: (Traversable.Traversable t, Monoid m) => (a -> (m, b)) -> t a -> (m, t b)

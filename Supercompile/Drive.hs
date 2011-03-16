@@ -146,8 +146,55 @@ gc _state@(deeds0, Heap h ids, k, in_e) = assertRender ("gc", stateUncoveredVars
 
 type AlreadySpeculated = S.Set Var
 
-speculate :: AlreadySpeculated -> (SCStats, State) -> (AlreadySpeculated, (SCStats, State))
-speculate speculated (stats, _state@(deeds, Heap h ids, k, in_e)) = -- assertRender (hang (text "speculate: deeds lost or gained:") 2 (pPrintFullState _state $$ pPrintFullState state' $$ (case go True (mkHistory wQO) mempty deeds (M.toList h) (M.keysSet h) M.empty ids of (_, _, _) -> text "OK, fine")))
+speculate, old_speculate :: AlreadySpeculated -> (SCStats, State) -> (AlreadySpeculated, (SCStats, State))
+speculate speculated (stats, (deeds, Heap h ids, k, in_e)) = (M.keysSet h, (stats', (deeds', Heap (h_non_values_speculated `M.union` h_speculated_ok `M.union` h_speculated_failure) ids', k, in_e)))
+  where
+    (h_values, h_non_values) = M.partition (maybe False (termIsValue . snd) . heapBindingTerm) h
+    (h_non_values_unspeculated, h_non_values_speculated) = (h_non_values `exclude` speculated, h_non_values `restrict` speculated)
+
+    (stats', deeds', h_speculated_ok, h_speculated_failure, ids') = runSpecM (speculateManyMap (mkHistory (extra wQO)) h_non_values_unspeculated) (stats, deeds, h_values, M.empty, ids)
+    
+    speculateManyMap hist = speculateMany hist . concatMap M.toList . topologicalSort heapBindingFreeVars
+    speculateMany hist = mapM_ (speculateOne hist)
+    
+    speculateOne :: History (State, SpecM ()) (Generaliser, SpecM ()) -> (Out Var, HeapBinding) -> SpecM ()
+    speculateOne hist (x', hb)
+      | HB InternallyBound (Right in_e) <- hb
+      = (\rb -> try_speculation in_e rb) `catchSpecM` speculation_failure
+      | otherwise
+      = speculation_failure
+      where
+        speculation_failure = modifySpecState $ \(stats, deeds, h_speculated_ok, h_speculated_failure, ids) -> ((stats, deeds, h_speculated_ok, M.insert x' hb h_speculated_failure, ids), ())
+        try_speculation in_e rb = do
+          let go no_change@(stats, deeds, h_speculated_ok, h_speculated_failure, ids) = case terminate hist (state, rb) of
+                  Stop (_gen, rb) -> (no_change, rb)
+                  Continue hist -> case reduce state of
+                      (extra_stats, (deeds, Heap h_speculated_ok' ids, [], (rn, v@(annee -> Answer _)))) -> ((stats `mappend` extra_stats, deeds, M.insert x' (internallyBound (rn, fmap qaToAnnedTerm' v)) h_speculated_ok, h_speculated_failure, ids), speculateManyMap hist h_unspeculated)
+                        where h_unspeculated = h_speculated_ok' M.\\ h_speculated_ok
+                      _ -> (no_change, speculation_failure)
+                where state = normalise (deeds, Heap h_speculated_ok ids, [], in_e)
+          modifySpecState go >>= id
+
+type SpecState = (SCStats, Deeds, PureHeap, PureHeap, IdSupply)
+newtype SpecM a = SpecM { unSpecM :: SpecState -> (SpecState -> a -> SpecState) -> SpecState }
+
+instance Functor SpecM where
+    fmap = liftM
+
+instance Monad SpecM where
+    return x = SpecM $ \s k -> k s x
+    mx >>= fxmy = SpecM $ \s k -> unSpecM mx s (\s x -> unSpecM (fxmy x) s k)
+
+modifySpecState :: (SpecState -> (SpecState, a)) -> SpecM a
+modifySpecState f = SpecM $ \s k -> case f s of (s, x) -> k s x
+
+runSpecM :: SpecM () -> SpecState -> SpecState
+runSpecM spec state = unSpecM spec state (\state () -> state)
+
+catchSpecM :: ((forall b. SpecM b) -> SpecM ()) -> SpecM () -> SpecM ()
+catchSpecM mx mcatch = SpecM $ \s k -> unSpecM (mx (SpecM $ \_s _k -> unSpecM mcatch s k)) s k
+
+old_speculate speculated (stats, _state@(deeds, Heap h ids, k, in_e)) = -- assertRender (hang (text "speculate: deeds lost or gained:") 2 (pPrintFullState _state $$ pPrintFullState state' $$ (case go True (mkHistory wQO) mempty deeds (M.toList h) (M.keysSet h) M.empty ids of (_, _, _) -> text "OK, fine")))
                                                                      --              (noChange (releaseStateDeed _state) (releaseStateDeed state')) $
                                                                      (M.keysSet h',) $ (,state') $!! stats `mappend` stats'
   where
@@ -504,10 +551,10 @@ memo :: (AlreadySpeculated -> State -> State -> ScpM (Deeds, Out FVedTerm))
 memo opt speculated state0 = do
     let (_, state1) = gc state0 -- Necessary because normalisation might have made some stuff dead
         (_, (_, state2)) = (if mATCH_SPECULATION then speculate speculated else (speculated,)) $ reduce state1 -- FIXME: work sharing with sc'
-        (h_dead_promoted, state3, state4) = case gc state2 of
-            _ | not mATCH_REDUCED -> (M.empty, state1, state1)
+        (state3, state4) = case gc state2 of
+            _ | not mATCH_REDUCED -> (state1, state1)
             (h_junk, state2')     -> (if M.null h_dead_promoted then id else traceRender ("promoting", M.keysSet h_dead_promoted)) $
-                                     (h_dead_promoted, state2', state4)
+                                     (state2', state4)
               where h_dead_promoted = M.mapMaybe (\hb -> guard (howBound hb /= InternallyBound) >> return (hb { howBound = InternallyBound })) h_junk
                     state4 = case state0 of (deeds, Heap h ids, k, in_qa) -> (deeds, Heap (h_dead_promoted `M.union` h) ids, k, in_qa)
     
