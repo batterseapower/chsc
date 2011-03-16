@@ -176,3 +176,9 @@ mATCH_REDUCED = not $ "--no-match-reduced" `elem` unsafePerformIO getArgs
 {-# NOINLINE mATCH_SPECULATION #-}
 mATCH_SPECULATION :: Bool
 mATCH_SPECULATION = not $ "--no-match-speculation" `elem` unsafePerformIO getArgs
+
+-- Turning this on is a really bad idea because it tells us how to generalise a *post reduced* term, but
+-- we actually need to generalise a *pre-reduced* term. Oops!
+{-# NOINLINE rEDUCE_BEFORE_TEST #-}
+rEDUCE_BEFORE_TEST :: Bool
+rEDUCE_BEFORE_TEST = "--reduce-before-test" `elem` unsafePerformIO getArgs

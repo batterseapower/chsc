@@ -117,8 +117,8 @@ gc _state@(deeds0, Heap h ids, k, in_e) = assertRender ("gc", stateUncoveredVars
     live0 = stateAllFreeVars (deeds0, Heap M.empty ids, k, in_e)
     (deeds1, h_dead, h', live1) = inlineLiveHeap deeds0 h live0
     -- Collecting dead update frames doesn't make any new heap bindings dead since they don't refer to anything
-    (deeds2, k') | False     = pruneLiveStack deeds1 k live1 -- FIXME: Can't deal with this any longer in the Brave New World of using reduction+GC to prove deadness
-                 | otherwise = (deeds1, k)
+    (deeds2, k') | mATCH_REDUCED = (deeds1, k) -- FIXME: Can't deal with this any longer in the Brave New World of using reduction+GC to prove deadness
+                 | otherwise     = pruneLiveStack deeds1 k live1
     
     inlineLiveHeap :: Deeds -> PureHeap -> FreeVars -> (Deeds, PureHeap, PureHeap, FreeVars)
     inlineLiveHeap deeds h live = (deeds `releasePureHeapDeeds` h_dead, h_dead, h_live, live')
@@ -536,7 +536,7 @@ sc' :: History (State, RollbackScpM) (Generaliser, RollbackScpM) -> AlreadySpecu
 sc  hist = memo (sc' hist)
 sc' hist speculated state state' = (\raise -> check raise) `catchScpM` \gen -> stop gen hist -- TODO: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
   where
-    check this_rb = case terminate hist (if False && sPECULATION then state' else state {- FIXME: good idea? flag control? -}, this_rb) of
+    check this_rb = case terminate hist (if rEDUCE_BEFORE_TEST && sPECULATION then state' else state {- FIXME: good idea? flag control? -}, this_rb) of
                       Continue hist' -> continue hist'
                       Stop (gen, rb) -> maybe (stop gen hist) ($ gen) $ guard sC_ROLLBACK >> Just rb
     stop gen hist = do addStats $ mempty { stat_sc_stops = 1 }
