@@ -1,0 +1,17 @@
+-- Without speculation what used to happen was that the xs and ys lists got residualised outside
+-- the case for work-duplication reasons. This happened because the splitter erroneously believed
+-- that the value-recursive use of xs/ys made them non-linear.
+
+id x = x
+head xs = case xs of (y:ys) -> y
+
+root unk = case unk of 1 -> head xs + head ys
+                       _ -> head xs - head ys
+  where
+    xs = id (1 : xs)
+    ys = id (unk : ys)
+
+tests = [
+    (root 1, 2),
+    (root 2, -1)
+  ]
