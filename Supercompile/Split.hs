@@ -475,6 +475,8 @@ optimiseLetBinds opt leftover_deeds bracketeds_heap fvs' = -- traceRender ("opti
         (h_resid, bracketeds_deeded_heap_not_resid') = M.partitionWithKey (\x _br -> x `S.member` resid_fvs) bracketeds_deeded_heap_not_resid
         (xs_resid', bracks_resid) = unzip $ M.toList h_resid
 
+-- FIXME: I could use the improved entered info that comes from the final FVs to adjust the split and float more stuff inwards..
+
 type NamedStack = [(Int, Tagged StackFrame)]
 
 splitt :: (IS.IntSet, S.Set (Out Var))
@@ -514,8 +516,8 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
         -- We can use the same one for each context because there is no danger of shadowing.
         fill_ids :: Bracketed (Entered, IdSupply -> UnnormalisedState) -> Bracketed (Entered, UnnormalisedState) -- NB: do NOT normalise at this stage because in transitiveInline we assume that State heaps are droppable!
         fill_ids = fmap (\(ent, f) -> (ent, f ids_brack))
-        (deeds1, bracketeds_updated, bracketed_focus)
-          = (\(a, b, c) -> (a, M.map fill_ids b, fill_ids c)) $
+        (deeds1a, bracketeds_updated, bracketed_focus)
+          = (\(a, b, c) -> (a, M.map (second fill_ids) b, fill_ids c)) $
             pushStack ids deeds scruts [(need_not_resid_kf i kf, kf) | (i, kf) <- named_k] bracketed_qa
             
         need_not_resid_kf i kf
@@ -529,9 +531,13 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
         -- 2) Build a splitting for those elements of the heap we propose to residualise not in not_resid_xs
         -- TODO: I should residualise those Unfoldings whose free variables have become interesting due to intervening scrutinisation
         (h_not_residualised, h_residualised) = M.partitionWithKey (\x' _ -> x' `S.member` not_resid_xs) h
-        bracketeds_nonupdated = M.mapMaybeWithKey (\x' hb -> do { guard (howBound hb == InternallyBound); return $ case heapBindingTerm hb of Nothing -> noneBracketed (fvedTerm (Var (name "undefined"))); Just in_e -> fill_ids $ oneBracketed (Once (fromJust (name_id x')), \ids -> (0, Heap M.empty ids, [], in_e)) }) h_residualised
+        bracketeds_nonupdated = M.mapMaybeWithKey (\x' hb -> do { guard (howBound hb == InternallyBound); return $ case heapBindingTerm hb of Nothing -> (error "Unimplemented: no tag for undefined", noneBracketed (fvedTerm (Var (name "undefined")))); Just in_e@(_, e) -> (annedTag e, fill_ids $ oneBracketed (Once (fromJust (name_id x')), \ids -> (0, Heap M.empty ids, [], in_e))) }) h_residualised
         -- For every heap binding we ever need to deal with, contains a version of that heap binding as a concrete Bracketed thing
-        bracketeds_heap = bracketeds_updated `M.union` bracketeds_nonupdated
+        bracketeds_heap0 = bracketeds_updated `M.union` bracketeds_nonupdated
+        -- An idea from Arjan, which is sort of the dual of positive information propagation:
+        -- FIXME: this is too dangerous presently: we often end up adding an Update at the end just after we generalised it away, building ourselves a nice little loop :(
+        --(deeds1, bracketeds_heap) = M.mapAccumWithKey (\deeds x' (update_tg, brack) -> modifyTails (\states -> case claimDeeds deeds (length states) of Nothing -> (deeds, states); Just deeds -> (deeds, map (\(entered, (deeds, heap, k, in_e)) -> (entered, (deeds, heap, k ++ [Tagged update_tg (Update x')], in_e))) states)) brack `orElse` (deeds, brack)) deeds1a bracketeds_heap0
+        (deeds1, bracketeds_heap) = (deeds1a, M.map snd bracketeds_heap0)
         
         -- 3) Inline as much of the Heap as possible into the candidate splitting
         
@@ -830,7 +836,7 @@ pushStack :: IdSupply
           -> [(Bool, Tagged StackFrame)]
           -> Bracketed (Entered, IdSupply -> UnnormalisedState)
           -> (Deeds,
-              M.Map (Out Var) (Bracketed (Entered, IdSupply -> UnnormalisedState)),
+              M.Map (Out Var) (Tag, Bracketed (Entered, IdSupply -> UnnormalisedState)),
               Bracketed (Entered, IdSupply -> UnnormalisedState))
 pushStack _   deeds _      []                 bracketed_hole = (deeds, M.empty, bracketed_hole)
 pushStack ids deeds scruts ((may_push, kf):k) bracketed_hole = second3 (`M.union` bracketed_heap') $ pushStack ids2 deeds' scruts' k bracketed_hole'
@@ -862,7 +868,7 @@ splitStackFrame :: IdSupply
                 -> [Out Var]
                 -> Bracketed (Entered, IdSupply -> UnnormalisedState)
                 -> ([Out Var],
-                    M.Map (Out Var) (Bracketed (Entered, IdSupply -> UnnormalisedState)),
+                    M.Map (Out Var) (Tag, Bracketed (Entered, IdSupply -> UnnormalisedState)),
                     Bracketed (Entered, IdSupply -> UnnormalisedState))
 splitStackFrame ids kf scruts bracketed_hole
   | Update x' <- tagee kf = splitUpdate (tag kf) scruts x' bracketed_hole
@@ -907,8 +913,8 @@ splitStackFrame ids kf scruts bracketed_hole
 -- x into this hole in the bracketed. However, the fact that we do this is *critical* to the algorithm I use to ensure that
 -- we can make variables bound by update frames as non-residualised: see Note [Residualisation of things referred to in extraFvs]
 splitUpdate :: Tag -> [Out Var] -> Var -> Bracketed (Entered, IdSupply -> UnnormalisedState)
-            -> ([Out Var], M.Map (Out Var) (Bracketed (Entered, IdSupply -> UnnormalisedState)), Bracketed (Entered, IdSupply -> UnnormalisedState))
-splitUpdate tg_kf scruts x' bracketed_hole = (x' : scruts, M.singleton x' bracketed_hole,
+            -> ([Out Var], M.Map (Out Var) (Tag, Bracketed (Entered, IdSupply -> UnnormalisedState)), Bracketed (Entered, IdSupply -> UnnormalisedState))
+splitUpdate tg_kf scruts x' bracketed_hole = (x' : scruts, M.singleton x' (tg_kf, bracketed_hole),
                                               oneBracketed (Once ctxt_id, \ids -> (0, Heap M.empty ids, [], (mkIdentityRenaming [x'], annedTerm tg_kf (Var x')))))
   where
     ctxt_id = fromJust (name_id x')
