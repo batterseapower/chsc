@@ -3,7 +3,7 @@
 
 ./test-all ghc > results-ghc.tex
 
-BEST_OPTS="raw --no-deeds"
+BEST_OPTS="raw"
 
 # Straightforward single-flag tests
 ./test-all $BEST_OPTS > results-best.tex
@@ -25,11 +25,11 @@ BEST_OPTS="raw --no-deeds"
 ./test-all $BEST_OPTS --tag-collection=bags-strongest --generalisation=all-eligible > results-bags-strongest.tex
 ./test-all $BEST_OPTS --tag-collection=graphs --generalisation=all-eligible > results-graphs.tex
 
-./test-all $BEST_OPTS --no-local-tiebacks > results-no-local-tiebacks.tex
+./test-all $BEST_OPTS --local-tiebacks > results-local-tiebacks.tex
 
 # for bloat in 1 10 20 30 40 50; do
-#   ./test-all ${BEST_OPTS/--no-deeds/--deeds-policy=fcfs --bloat=$bloat} | tee results-deeds-fcfs+bloat-$bloat.tex
-#   ./test-all ${BEST_OPTS/--no-deeds/--deeds-policy=proportional --bloat=$bloat} | tee results-deeds-proportional+bloat-$bloat.tex
+#   ./test-all $BEST_OPTS --local-tiebacks --deeds --deeds-policy=fcfs --bloat=$bloat | tee results-deeds-fcfs+bloat-$bloat.tex
+#   ./test-all $BEST_OPTS --local-tiebacks --deeds --deeds-policy=proportional --bloat=$bloat | tee results-deeds-proportional+bloat-$bloat.tex
 # done
 
 # The options that we should use to make the supercompiler as close as possible to the SbE paper

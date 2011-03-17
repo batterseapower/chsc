@@ -51,7 +51,7 @@ eVALUATE_PRIMOPS = not $ "--no-primops" `elem` unsafePerformIO getArgs
 
 {-# NOINLINE dEEDS #-}
 dEEDS :: Bool
-dEEDS = not $ "--no-deeds" `elem` unsafePerformIO getArgs
+dEEDS = "--deeds" `elem` unsafePerformIO getArgs
 
 parseEnum :: String -> a -> [(String, a)] -> a
 parseEnum prefix def opts = fromMaybe def $ listToMaybe [parse opt | arg <- unsafePerformIO getArgs, Just ('=':opt) <- [stripPrefix prefix arg]]
@@ -125,7 +125,7 @@ sPECULATION = not $ "--no-speculation" `elem` unsafePerformIO getArgs
 
 {-# NOINLINE lOCAL_TIEBACKS #-}
 lOCAL_TIEBACKS :: Bool
-lOCAL_TIEBACKS = not $ "--no-local-tiebacks" `elem` unsafePerformIO getArgs
+lOCAL_TIEBACKS = "--local-tiebacks" `elem` unsafePerformIO getArgs
 
 {-# NOINLINE rEDUCE_ROLLBACK #-}
 rEDUCE_ROLLBACK :: Bool
