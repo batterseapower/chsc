@@ -9,79 +9,76 @@ import System.IO.Unsafe
 import System.Process
 
 
+{-# NOINLINE aRGS #-}
+aRGS :: [String]
+aRGS = unsafePerformIO getArgs
+
 {-# NOINLINE cODE_IDENTIFIER #-}
 cODE_IDENTIFIER :: String
 cODE_IDENTIFIER = head $ lines $ unsafePerformIO (readProcess "git" ["log", "--format=%H", "-1"] "")
 
-{-# NOINLINE rUN_IDENTIFIER #-}
 rUN_IDENTIFIER :: String
-rUN_IDENTIFIER = intercalate " " [filter (/= '-') arg | '-':'-':arg <- unsafePerformIO getArgs]
+rUN_IDENTIFIER = intercalate " " [filter (/= '-') arg | '-':'-':arg <- aRGS]
 
 tIMEOUT_SECONDS :: Int
 tIMEOUT_SECONDS = 120
 
-{-# NOINLINE tICKY #-}
 tICKY :: Bool
-tICKY = "--ticky" `elem` unsafePerformIO getArgs
+tICKY = "--ticky" `elem` aRGS
 
-{-# NOINLINE nO_OPTIMISATIONS #-}
 nO_OPTIMISATIONS :: Bool
-nO_OPTIMISATIONS = "-O0" `elem` unsafePerformIO getArgs
+nO_OPTIMISATIONS = "-O0" `elem` aRGS
 
-{-# NOINLINE gHC_OPTIONS #-}
 gHC_OPTIONS :: [String]
-gHC_OPTIONS = [opt | arg <- unsafePerformIO getArgs, Just ('=':opt) <- [stripPrefix "--ghc-option" arg]]
+gHC_OPTIONS = [opt | arg <- aRGS, Just ('=':opt) <- [stripPrefix "--ghc-option" arg]]
 
 
-{-# NOINLINE aSSERTIONS #-}
 aSSERTIONS :: Bool
-aSSERTIONS = not $ "--no-assertions" `elem` unsafePerformIO getArgs
+aSSERTIONS = not $ "--no-assertions" `elem` aRGS
 
-{-# NOINLINE qUIET #-}
 qUIET :: Bool
-qUIET = "-v0" `elem` unsafePerformIO getArgs
+qUIET = "-v0" `elem` aRGS
 
-{-# NOINLINE rEDUCE_TERMINATION_CHECK #-}
 rEDUCE_TERMINATION_CHECK :: Bool
-rEDUCE_TERMINATION_CHECK = not $ "--no-reduce-termination" `elem` unsafePerformIO getArgs
+rEDUCE_TERMINATION_CHECK = not $ "--no-reduce-termination" `elem` aRGS
 
-{-# NOINLINE eVALUATE_PRIMOPS #-}
 eVALUATE_PRIMOPS :: Bool
-eVALUATE_PRIMOPS = not $ "--no-primops" `elem` unsafePerformIO getArgs
+eVALUATE_PRIMOPS = not $ "--no-primops" `elem` aRGS
 
-{-# NOINLINE dEEDS #-}
 dEEDS :: Bool
-dEEDS = "--deeds" `elem` unsafePerformIO getArgs
+dEEDS = "--deeds" `elem` aRGS
 
 parseEnum :: String -> a -> [(String, a)] -> a
-parseEnum prefix def opts = fromMaybe def $ listToMaybe [parse opt | arg <- unsafePerformIO getArgs, Just ('=':opt) <- [stripPrefix prefix arg]]
+parseEnum prefix def opts = fromMaybe def $ listToMaybe [parse opt | arg <- aRGS, Just ('=':opt) <- [stripPrefix prefix arg]]
   where parse = fromJust . flip lookup opts . map toLower
 
 data DeedsPolicy = FCFS | Proportional
                  deriving (Read)
 
-{-# NOINLINE dEEDS_POLICY #-}
 dEEDS_POLICY :: DeedsPolicy
 dEEDS_POLICY = parseEnum "--deeds-policy" Proportional [("fcfs", FCFS), ("proportional", Proportional)]
 
-data TagBagType = TBT { tagBagPairwiseGrowth :: Bool, tagBagPartitionedRefinement :: Bool, tagBagSubGraph :: Bool }
+data TagBagType = TBT { tagBagPairwiseGrowth :: Bool }
                 deriving (Show)
 data TagCollectionType = TagBag TagBagType | TagGraph | TagSet
                    deriving (Show)
 
-{-# NOINLINE tAG_COLLECTION #-}
 tAG_COLLECTION :: TagCollectionType
-tAG_COLLECTION = parseEnum "--tag-collection" (TagBag (TBT False False True)) [("bags", TagBag (TBT False False False)), ("bags-strong", TagBag (TBT True False False)), ("bags-strongest", TagBag (TBT True True False)), ("bags-subgraph", TagBag (TBT False False True)), ("graphs", TagGraph), ("sets", TagSet)]
+tAG_COLLECTION = parseEnum "--tag-collection" (TagBag (TBT False)) [("bags", TagBag (TBT False)), ("bags-strong", TagBag (TBT True)), ("graphs", TagGraph), ("sets", TagSet)]
+
+pARTITIONED_REFINEMENT :: Bool
+pARTITIONED_REFINEMENT = "--partitioned-refinement" `elem` aRGS
+
+sUB_GRAPHS :: Bool
+sUB_GRAPHS = not $ "--no-sub-graphs" `elem` aRGS
 
 data GeneralisationType = NoGeneralisation | AllEligible | DependencyOrder Bool
 
-{-# NOINLINE gENERALISATION #-}
 gENERALISATION :: GeneralisationType
 gENERALISATION = parseEnum "--generalisation" (DependencyOrder True) [("none", NoGeneralisation), ("all-eligible", AllEligible), ("first-reachable", DependencyOrder True), ("last-reachable", DependencyOrder False)]
 
-{-# NOINLINE bLOAT_FACTOR #-}
 bLOAT_FACTOR :: Int
-bLOAT_FACTOR = fromMaybe 10 $ listToMaybe [read val | arg <- unsafePerformIO getArgs, Just val <- [stripPrefix "--bloat=" arg]]
+bLOAT_FACTOR = fromMaybe 10 $ listToMaybe [read val | arg <- aRGS, Just val <- [stripPrefix "--bloat=" arg]]
  -- NB: need a bloat factor of at least 5 to get append/append fusion to work. The critical point is:
  --
  --  let (++) = ...
@@ -104,81 +101,50 @@ bLOAT_FACTOR = fromMaybe 10 $ listToMaybe [read val | arg <- unsafePerformIO get
  -- hence need a bloat factor of 8 here (5 + 3 other case statements derived from (++))
  -- TODO: figure out how to reduce this number.
 
-{-# NOINLINE sPLITTER_CHEAPIFICATION #-}
-sPLITTER_CHEAPIFICATION :: Bool
-sPLITTER_CHEAPIFICATION = "--cheapification" `elem` unsafePerformIO getArgs
- -- TODO: test my hypothesis that given that we already do speculation, let-floating in the splitter won't make much difference
-
-{-# NOINLINE sPECULATION #-}
 sPECULATION :: Bool
-sPECULATION = not $ "--no-speculation" `elem` unsafePerformIO getArgs
+sPECULATION = "--speculation" `elem` aRGS
 
--- NB: may want to these definitions if you want to default speculation to off
-    
--- {-# NOINLINE sPLITTER_CHEAPIFICATION #-}
--- sPLITTER_CHEAPIFICATION :: Bool
--- sPLITTER_CHEAPIFICATION = not $ "--no-cheapification" `elem` unsafePerformIO getArgs
--- 
--- {-# NOINLINE sPECULATION #-}
--- sPECULATION :: Bool
--- sPECULATION = "--speculation" `elem` unsafePerformIO getArgs
-
-{-# NOINLINE lOCAL_TIEBACKS #-}
 lOCAL_TIEBACKS :: Bool
-lOCAL_TIEBACKS = "--local-tiebacks" `elem` unsafePerformIO getArgs
+lOCAL_TIEBACKS = "--local-tiebacks" `elem` aRGS
 
-{-# NOINLINE rEDUCE_ROLLBACK #-}
 rEDUCE_ROLLBACK :: Bool
-rEDUCE_ROLLBACK = not $ "--no-reduce-rollback" `elem` unsafePerformIO getArgs
+rEDUCE_ROLLBACK = not $ "--no-reduce-rollback" `elem` aRGS
 
-{-# NOINLINE sC_ROLLBACK #-}
 sC_ROLLBACK :: Bool
-sC_ROLLBACK = not $ "--no-sc-rollback" `elem` unsafePerformIO getArgs
+sC_ROLLBACK = not $ "--no-sc-rollback" `elem` aRGS
 
-{-# NOINLINE dISCARD_FULFILMENTS_ON_ROLLBACK #-}
 dISCARD_FULFILMENTS_ON_ROLLBACK :: Bool
-dISCARD_FULFILMENTS_ON_ROLLBACK = "--discard-fulfilments-on-rollback" `elem` unsafePerformIO getArgs
+dISCARD_FULFILMENTS_ON_ROLLBACK = "--discard-fulfilments-on-rollback" `elem` aRGS
 
-{-# NOINLINE eXPAND_CASE_DEFAULTS #-}
 eXPAND_CASE_DEFAULTS :: Bool
-eXPAND_CASE_DEFAULTS = "--expand-case-defaults" `elem` unsafePerformIO getArgs
+eXPAND_CASE_DEFAULTS = "--expand-case-defaults" `elem` aRGS
 
-{-# NOINLINE eXPAND_CASE_UNCOVEREDS #-}
 eXPAND_CASE_UNCOVEREDS :: Bool
-eXPAND_CASE_UNCOVEREDS = "--expand-case-uncovereds" `elem` unsafePerformIO getArgs
+eXPAND_CASE_UNCOVEREDS = "--expand-case-uncovereds" `elem` aRGS
 
-{-# NOINLINE cALL_BY_NAME #-}
 cALL_BY_NAME :: Bool
-cALL_BY_NAME = "--call-by-name" `elem` unsafePerformIO getArgs
+cALL_BY_NAME = "--call-by-name" `elem` aRGS
 
-{-# NOINLINE pRETTIFY #-}
 pRETTIFY :: Bool
-pRETTIFY = "--prettify" `elem` unsafePerformIO getArgs
+pRETTIFY = "--prettify" `elem` aRGS
 
-{-# NOINLINE dUPLICATE_VALUES_EVALUATOR #-}
-{-# NOINLINE dUPLICATE_VALUES_SPLITTER #-}
 dUPLICATE_VALUES_EVALUATOR, dUPLICATE_VALUES_SPLITTER :: Bool
-dUPLICATE_VALUES_EVALUATOR = "--duplicate-values-evaluator" `elem` unsafePerformIO getArgs
-dUPLICATE_VALUES_SPLITTER = "--duplicate-values-splitter" `elem` unsafePerformIO getArgs
+dUPLICATE_VALUES_EVALUATOR = "--duplicate-values-evaluator" `elem` aRGS
+dUPLICATE_VALUES_SPLITTER = "--duplicate-values-splitter" `elem` aRGS
 
-{-# NOINLINE rEFINE_FULFILMENT_FVS #-}
 rEFINE_FULFILMENT_FVS :: Bool
-rEFINE_FULFILMENT_FVS = not $ "--no-refine-fulfilment-fvs" `elem` unsafePerformIO getArgs
+rEFINE_FULFILMENT_FVS = not $ "--no-refine-fulfilment-fvs" `elem` aRGS
 
-{-# NOINLINE oCCURRENCE_GENERALISATION #-}
 oCCURRENCE_GENERALISATION :: Bool
-oCCURRENCE_GENERALISATION = not $ "--no-occurrence-generalisation" `elem` unsafePerformIO getArgs
+oCCURRENCE_GENERALISATION = not $ "--no-occurrence-generalisation" `elem` aRGS
 
-{-# NOINLINE mATCH_REDUCED #-}
 mATCH_REDUCED :: Bool
-mATCH_REDUCED = not $ "--no-match-reduced" `elem` unsafePerformIO getArgs
+mATCH_REDUCED = not $ "--no-match-reduced" `elem` aRGS
 
-{-# NOINLINE mATCH_SPECULATION #-}
 mATCH_SPECULATION :: Bool
-mATCH_SPECULATION = not $ "--no-match-speculation" `elem` unsafePerformIO getArgs
+mATCH_SPECULATION = not $ "--no-match-speculation" `elem` aRGS
 
 -- Turning this on is a really bad idea because it tells us how to generalise a *post reduced* term, but
 -- we actually need to generalise a *pre-reduced* term. Oops!
-{-# NOINLINE rEDUCE_BEFORE_TEST #-}
 rEDUCE_BEFORE_TEST :: Bool
-rEDUCE_BEFORE_TEST = "--reduce-before-test" `elem` unsafePerformIO getArgs
+rEDUCE_BEFORE_TEST = "--reduce-before-test" `elem` aRGS

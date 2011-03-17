@@ -11,7 +11,7 @@ BEST_OPTS="raw"
 ./test-all $BEST_OPTS --generalisation=none > results-no-generalisation.tex
 ./test-all $BEST_OPTS --generalisation=all-eligible > results-all-eligible-generalisation.tex
 ./test-all $BEST_OPTS --no-occurrence-generalisation > results-no-occurrence-generalisation.tex
-./test-all $BEST_OPTS --no-speculation > results-no-speculation.tex
+./test-all $BEST_OPTS --speculation > results-speculation.tex
 ./test-all $BEST_OPTS --no-reduce-rollback > results-no-reduce-rollback.tex
 ./test-all $BEST_OPTS --no-sc-rollback > results-no-sc-rollback.tex
 ./test-all $BEST_OPTS --discard-fulfilments-on-rollback > results-discard-fulfilments-on-rollback.tex
@@ -20,9 +20,9 @@ BEST_OPTS="raw"
 ./test-all $BEST_OPTS --no-refine-fulfilment-fvs > results-no-refine-fulfilment-fvs.tex
 ./test-all $BEST_OPTS --no-match-reduced > results-no-match-reduced.tex
 
+./test-all $BEST_OPTS --no-sub-graphs --generalisation=all-eligible > results-bags-no-sub-graphs.tex
 ./test-all $BEST_OPTS --tag-collection=sets --generalisation=all-eligible > results-sets.tex
-./test-all $BEST_OPTS --tag-collection=bags --generalisation=all-eligible > results-bags.tex
-./test-all $BEST_OPTS --tag-collection=bags-strongest --generalisation=all-eligible > results-bags-strongest.tex
+./test-all $BEST_OPTS --tag-collection=bags-strong --generalisation=all-eligible > results-bags-strong.tex
 ./test-all $BEST_OPTS --tag-collection=graphs --generalisation=all-eligible > results-graphs.tex
 
 ./test-all $BEST_OPTS --local-tiebacks > results-local-tiebacks.tex

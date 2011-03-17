@@ -792,7 +792,7 @@ transitiveInline init_h_inlineable _state@(deeds, Heap h ids, k, in_e)
 -- TODO: replace with a genuine evaluator. However, think VERY hard about the termination implications of this!
 -- I think we can only do it when the splitter is being invoked by a non-whistling invocation of sc.
 cheapifyHeap :: Deeds -> Heap -> (Deeds, Heap)
-cheapifyHeap deeds heap | not sPLITTER_CHEAPIFICATION = (deeds, heap)
+cheapifyHeap deeds heap | sPECULATION = (deeds, heap)
 cheapifyHeap deeds (Heap h (splitIdSupply -> (ids, ids'))) = (deeds', Heap (M.fromList [(x', internallyBound in_e) | (x', in_e) <- floats] `M.union` h') ids')
   where
     ((deeds', _, floats), h') = M.mapAccum (\(deeds, ids, floats0) hb -> case hb of HB InternallyBound (Right in_e) -> (case cheapify deeds ids in_e of (deeds, ids, floats1, in_e') -> ((deeds, ids, floats0 ++ floats1), HB InternallyBound (Right in_e'))); _ -> ((deeds, ids, floats0), hb)) (deeds, ids, []) h

@@ -17,6 +17,7 @@ import Evaluator.FreeVars
 import Evaluator.Residualise
 import Evaluator.Syntax
 
+import Termination.Extras
 import Termination.TagBag
 import Termination.TagGraph
 import Termination.TagSet
@@ -43,9 +44,15 @@ rEDUCE_WQO | not rEDUCE_TERMINATION_CHECK = postcomp (const generaliseNothing) u
            | otherwise                    = wQO
 
 wQO :: WQO State Generaliser
-wQO = case tAG_COLLECTION of TagBag tbt -> embedWithTagBags tbt
-                             TagGraph   -> embedWithTagGraphs
-                             TagSet     -> embedWithTagSets
+wQO = wqo2
+  where
+    wqo0 = case tAG_COLLECTION of TagBag tbt -> embedWithTagBags tbt
+                                  TagGraph   -> embedWithTagGraphs
+                                  TagSet     -> embedWithTagSets
+    wqo1 | pARTITIONED_REFINEMENT = partitionedRefinement wqo0
+         | otherwise              = wqo0
+    wqo2 | sUB_GRAPHS = subGraphGeneralisation wqo1
+         | otherwise  = wqo1
 
 
 data SCStats = SCStats {
