@@ -325,7 +325,7 @@ data Promise f = P {
   }
 
 instance MonadStatics ScpM where
-    bindCapturedFloats = bindFloats
+    bindCapturedFloats' = bindFloats
 
 -- Note [Floating h-functions past the let-bound variables to which they refer]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -416,12 +416,13 @@ partitionFulfilments p combine = go
 -- The right thing to do is to make sure that fulfilments created in different "branches" of the process tree aren't eligible for early binding in
 -- that manner, but we still want to tie back to them if possible. The bindFloats function achieves this by carefully shuffling information between the
 -- fulfilments and promises parts of the monadic-carried state.
-bindFloats :: FreeVars -> ScpM a -> ScpM (Out [(Var, FVedTerm)], a)
-bindFloats extra_statics mx
+bindFloats :: FreeVars -> ScpM a -> (Out [(Var, FVedTerm)] -> a -> ScpM r) {- These h-functions are still visible in this continuation! -} -> ScpM r
+bindFloats extra_statics mx mcont
   = ScpM $ \e s k -> unScpM mx (e { promises = mapMaybe fulfilmentPromise (fulfilments s) ++ promises e, fulfilmentStack = (fulfilments s, extra_statics) : fulfilmentStack e }) (s { fulfilments = [] }) (kontinue e s k)
   where
-    kontinue _e s k x s' = -- traceRender ("bindFloats", [(fun p, fvedTermFreeVars e) | (p, e) <- fs_now], [(fun p, fvedTermFreeVars e) | (p, e) <- fs_later]) $
-                           k (fulfilmentsToBinds fs_now, x) (s' { fulfilments = fs_later ++ fulfilments s })
+    kontinue e s k x s' = -- traceRender ("bindFloats", [(fun p, fvedTermFreeVars e) | (p, e) <- fs_now], [(fun p, fvedTermFreeVars e) | (p, e) <- fs_later]) $
+                          --k (fulfilmentsToBinds fs_now, x) (s' { fulfilments = fs_later ++ fulfilments s })
+                          unScpM (mcont (fulfilmentsToBinds fs_now) x) (e { promises = mapMaybe fulfilmentPromise fs_now ++ promises e }) (s' { fulfilments = fs_later ++ fulfilments s }) k
       where (fs_now, fs_later) = partitionFulfilments fulfilmentRefersTo S.fromList extra_statics (fulfilments s')
 
 fulfilmentsToBinds :: [Fulfilment] -> Out [(Var, FVedTerm)]
