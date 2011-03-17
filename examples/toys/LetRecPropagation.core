@@ -5,13 +5,19 @@
 id x = x
 head xs = case xs of (y:ys) -> y
 
-root unk = case unk of 1 -> head xs + head ys
-                       _ -> head xs - head ys
+root unk = case unk of 1 -> head xs + head ys + (head as * head bs)
+                       _ -> head xs - head ys + (head as * head bs)
   where
+    -- Direct recursion:
     xs = id (1 : xs)
     ys = id (unk : ys)
+    
+    -- Mutual recursion:
+    -- FIXME: this still doesn't work properly!
+    as = id (2 : bs)
+    bs = id (3 : as)
 
 tests = [
-    (root 1, 2),
-    (root 2, -1)
+    (root 1, 8),
+    (root 2, 5)
   ]

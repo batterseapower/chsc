@@ -589,6 +589,13 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
         inlineHeapT f deeds b = (deeds', entered', b')
           where ((deeds', entered'), b') = mapAccumT (\(deeds, entered) s -> case f deeds s of (deeds, entered', s) -> ((deeds, entered `join` entered'), s)) (deeds, bottom) b
 
+        -- Like inlineHeapT, but removes from the EnteredEnv any mention of the actual binder being analysed, so we push more stuff down
+        -- NB: this would be subsumed if we found a way to push an Update frame for such a thing into its Bracketed, since then it wouldn't even be a FV
+        inlineHeapWithKey :: (Deeds -> a                 -> (Deeds, EnteredEnv, b))
+                          ->  Deeds -> M.Map (Out Var) a -> (Deeds, EnteredEnv, M.Map (Out Var) b)
+        inlineHeapWithKey f deeds b = (deeds', entered', b')
+          where ((deeds', entered'), b') = M.mapAccumWithKey (\(deeds, entered) x' brack -> case f deeds brack of (deeds, entered', brack) -> ((deeds, entered `join` M.delete x' entered'), brack)) (deeds, bottom) b
+
         -- Inline what we can of the heap, and compute the Entered information for the resulting thing.
         -- See Note [transitiveInline and entered information] for the story about Entered information.
         --
@@ -614,8 +621,8 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
         
         -- 3c) Actually do the inlining of as much of the heap as possible into the proposed floats
         -- We also take this opportunity to strip out the Entered information from each context.
-        (deeds3, entered_focus, bracketed_focus') =             inlineBracketHeap deeds2 bracketed_focus
-        (deeds4, entered_heap,  bracketeds_heap') = inlineHeapT inlineBracketHeap deeds3 bracketeds_heap
+        (deeds3, entered_focus, bracketed_focus') =                   inlineBracketHeap deeds2 bracketed_focus
+        (deeds4, entered_heap,  bracketeds_heap') = inlineHeapWithKey inlineBracketHeap deeds3 bracketeds_heap
 
         -- 4) Construct the next element of the fixed point process:
         --  a) We should residualise:
