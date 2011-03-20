@@ -38,6 +38,9 @@ def show_round(x, dp):
     else:
         return s + '.' + ('0' * dp)
 
+def show_percentage_difference(x):
+    return str(round((x - 1) * 100, 0)) + "%"
+
 def assert_eq(left, right):
     assert left == right, repr(left) + " != " + repr(right)
 

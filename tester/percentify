@@ -1,0 +1,21 @@
+#!/usr/bin/env python
+
+from utilities import *
+
+def percentify_value(header, value):
+    # We don't want to show absolute values as percentages, however unlikely they are to show up
+    if "." in value:
+        try:
+            return show_percentage_difference(float(value))
+        except ValueError, e:
+            return value
+    else:
+        return value
+
+def percentify(results):
+    return Results(results.description, results.key_header, results.headers, map_dict_values(lambda results: map_dict(percentify_value, results),results.results))
+
+if __name__ == '__main__':
+    import sys
+    results = Results(readfile(sys.argv[1]))
+    print percentify(results)
