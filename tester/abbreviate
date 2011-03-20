@@ -2,19 +2,23 @@
 
 from utilities import *
 
-abbreviations = { "Filename" : "Test", "SC time" : "SC", "Compile time" : "Cmp.", "Run time" : "Run", "Heap size" : "Mem.", "Term size" : "Size" }
+abbreviations = { "Filename" : "Test", "SC time" : "SC", "Compile time" : "Cmp.", "Run time" : "Run", "Heap size" : "Mem.", "Term size" : "Size", "Reduce-stops" : None, "SC-stops" : None }
 def abbreviate(header):
-    return "\\textbf{" + abbreviations.get(header, header) + "}"
+    return bind_maybe(abbreviations[header], lambda header: "\\textbf{" + header + "}")
 
 def percentify(x):
-    # Simon wants percentages in output instead
-    try:
-        return str(round(float(x), 2) * 100) + "%"
-    except ValueError, e:
+    # We don't want to show absolute values as percentages, however unlikely they are to show up
+    if "." in x:
+        try:
+            # Simon wants percentages in output instead
+            return show_percentage_difference(float(x))
+        except ValueError, e:
+            return x
+    else:
         return x
 
 def abbreviated(self):
-    return Results(self.description, abbreviate(self.key_header), [abbreviate(header) for header in self.headers], map_dict(lambda filename, values: (filename, map_dict(lambda header, value: (abbreviate(header), percentify(value)), values)), self.results))
+    return Results(self.description, abbreviate(self.key_header), map_maybe(abbreviate, self.headers), map_dict(lambda filename, values: (filename, map_maybe_dict(lambda header, value: bind_maybe(abbreviate(header), lambda header: (header, percentify(value))), values)), self.results))
 
 
 if __name__ == '__main__':

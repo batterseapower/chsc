@@ -9,6 +9,18 @@ def load_source(name, module_name):
 
 mean = lambda xs: sum(xs) / len(xs)
 
+def bind_maybe(mx, fxmy):
+    if mx is None:
+        return None
+    else:
+        return fxmy(mx)
+
+def uncurry(f):
+    return lambda xs: f(xs[0], xs[1])
+
+def map_maybe(f, xs):
+    return [y for y in [f(x) for x in xs] if y is not None]
+
 # Like dict.get, but for lists
 def list_get(xs, i, default):
     if i < len(xs):
@@ -39,7 +51,7 @@ def show_round(x, dp):
         return s + '.' + ('0' * dp)
 
 def show_percentage_difference(x):
-    return str(round((x - 1) * 100, 0)) + "%"
+    return str(int(round((x - 1) * 100, 0))) + "%"
 
 def assert_eq(left, right):
     assert left == right, repr(left) + " != " + repr(right)
@@ -64,6 +76,9 @@ def restrict_dict(what, to):
 
 def map_dict(f, xs):
     return dict([f(k, v) for k, v in xs.items()])
+
+def map_maybe_dict(f, xs):
+    return dict(map_maybe(uncurry(f), xs.items()))
 
 def map_dict_values(f, xs):
     return dict([(k, f(k, v)) for k, v in xs.items()])
