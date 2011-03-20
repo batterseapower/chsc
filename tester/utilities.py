@@ -36,7 +36,10 @@ def format_latex_table(rows):
     
     rows = [[cell.ljust(col_width[col_i]) for col_i, cell in enumerate(row)] for row in rows]
     
-    return "\n".join([" & ".join(row) + " \\\\" for row in rows])    
+    return "\n".join([" & ".join(row) + " \\\\" for row in rows])
+    
+    # Output unparseable, so don't want to do this unconditionally:
+    #return "\n".join([["", "\hline\n"][prev_row is not None and (row[0][0].isupper() != prev_row[0][0].isupper())] + " & ".join(row) + " \\\\" for prev_row, row in zip([None] + rows, rows)])
 
 def format_csv(rows):
     return "\n".join([",".join(row) for row in rows])
@@ -51,7 +54,7 @@ def show_round(x, dp):
         return s + '.' + ('0' * dp)
 
 def show_percentage_difference(x):
-    return str(int(round((x - 1) * 100, 0))) + "%"
+    return str(int(round((x - 1) * 100, 0))) + "\%" # LaTeX escaped percentage..
 
 def assert_eq(left, right):
     assert left == right, repr(left) + " != " + repr(right)
