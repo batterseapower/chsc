@@ -3,6 +3,7 @@
 
 ./test-all ghc > results-ghc.tex
 
+# Has mATCH_REDUCED, mATCH_SPECULATION, rEFINE_FULFILMENT_FVS
 BEST_OPTS="raw"
 
 # Straightforward single-flag tests
@@ -11,7 +12,7 @@ BEST_OPTS="raw"
 ./test-all $BEST_OPTS --generalisation=none > results-no-generalisation.tex
 ./test-all $BEST_OPTS --generalisation=all-eligible > results-all-eligible-generalisation.tex
 ./test-all $BEST_OPTS --no-occurrence-generalisation > results-no-occurrence-generalisation.tex
-./test-all $BEST_OPTS --speculation > results-speculation.tex
+./test-all $BEST_OPTS --no-speculation > results-no-speculation.tex
 ./test-all $BEST_OPTS --no-reduce-rollback > results-no-reduce-rollback.tex
 ./test-all $BEST_OPTS --no-sc-rollback > results-no-sc-rollback.tex
 ./test-all $BEST_OPTS --discard-fulfilments-on-rollback > results-discard-fulfilments-on-rollback.tex

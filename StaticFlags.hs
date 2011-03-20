@@ -102,7 +102,7 @@ bLOAT_FACTOR = fromMaybe 10 $ listToMaybe [read val | arg <- aRGS, Just val <- [
  -- TODO: figure out how to reduce this number.
 
 sPECULATION :: Bool
-sPECULATION = "--speculation" `elem` aRGS
+sPECULATION = not $ "--no-speculation" `elem` aRGS
 
 lOCAL_TIEBACKS :: Bool
 lOCAL_TIEBACKS = "--local-tiebacks" `elem` aRGS
