@@ -21,7 +21,7 @@ def zip_values(header, left, right):
             # Return the integer change from left to right
             return str(int(right) - int(left))
         else:
-            # Result a dimensionless number representing the "right" quantity as a fraction of the "left" quantity
+            # Return a dimensionless number representing the "right" quantity as a fraction of the "left" quantity
             return show_round(float(right) / float(left), 2)
 
 def compare(results_a, results_b):
