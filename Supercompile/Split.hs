@@ -145,6 +145,10 @@ generalise gen (deeds, Heap h ids, k, (rn, qa)) = do
         AllEligible -> guard (not (IS.null gen_kfs) || not (S.null gen_xs')) >> return (gen_kfs, gen_xs')
           where gen_kfs = IS.fromList [i  | (i, kf) <- named_k, generaliseStackFrame gen kf]
                 gen_xs' = S.fromList  [x' | (x', hb) <- M.toList h, generaliseHeapBinding gen x' hb, assertRender ("Bad generalisation", x', hb, heapBindingTag hb) (not (howBound hb == LambdaBound && isNothing (heapBindingTerm hb))) True]
+        StackFirst -> (guard (not (IS.null gen_kfs)) >> return (gen_kfs, S.empty)) `mplus`
+                      (guard (not (S.null gen_xs'))  >> return (IS.empty, gen_xs'))
+          where gen_kfs = IS.fromList [i  | (i, kf) <- named_k, generaliseStackFrame gen kf]
+                gen_xs' = S.fromList  [x' | (x', hb) <- M.toList h, generaliseHeapBinding gen x' hb, assertRender ("Bad generalisation", x', hb, heapBindingTag hb) (not (howBound hb == LambdaBound && isNothing (heapBindingTerm hb))) True]
         DependencyOrder want_first -> listToMaybe ((if want_first then id else reverse) possibilities)
           where -- We consider possibilities starting from the root of the term -- i.e. the bottom of the stack.
                 -- This is motivated by how the interaction with subgraph generalisation for TreeFlip/TreeSum.

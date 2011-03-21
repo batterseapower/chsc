@@ -70,12 +70,12 @@ pARTITIONED_REFINEMENT :: Bool
 pARTITIONED_REFINEMENT = "--partitioned-refinement" `elem` aRGS
 
 sUB_GRAPHS :: Bool
-sUB_GRAPHS = not $ "--no-sub-graphs" `elem` aRGS
+sUB_GRAPHS = "--sub-graphs" `elem` aRGS
 
-data GeneralisationType = NoGeneralisation | AllEligible | DependencyOrder Bool
+data GeneralisationType = NoGeneralisation | AllEligible | DependencyOrder Bool | StackFirst
 
 gENERALISATION :: GeneralisationType
-gENERALISATION = parseEnum "--generalisation" (DependencyOrder True) [("none", NoGeneralisation), ("all-eligible", AllEligible), ("first-reachable", DependencyOrder True), ("last-reachable", DependencyOrder False)]
+gENERALISATION = parseEnum "--generalisation" StackFirst [("none", NoGeneralisation), ("all-eligible", AllEligible), ("first-reachable", DependencyOrder True), ("last-reachable", DependencyOrder False), ("stack-first", StackFirst)]
 
 bLOAT_FACTOR :: Int
 bLOAT_FACTOR = fromMaybe 10 $ listToMaybe [read val | arg <- aRGS, Just val <- [stripPrefix "--bloat=" arg]]
