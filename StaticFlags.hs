@@ -139,7 +139,7 @@ oCCURRENCE_GENERALISATION :: Bool
 oCCURRENCE_GENERALISATION = not $ "--no-occurrence-generalisation" `elem` aRGS
 
 mATCH_REDUCED :: Bool
-mATCH_REDUCED = not $ "--no-match-reduced" `elem` aRGS
+mATCH_REDUCED = "--match-reduced" `elem` aRGS
 
 mATCH_SPECULATION :: Bool
 mATCH_SPECULATION = not $ "--no-match-speculation" `elem` aRGS

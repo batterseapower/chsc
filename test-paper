@@ -3,7 +3,7 @@
 
 ./test-all ghc > results-ghc.tex
 
-# Has mATCH_REDUCED, mATCH_SPECULATION, rEFINE_FULFILMENT_FVS
+# Has rEFINE_FULFILMENT_FVS
 BEST_OPTS="raw"
 
 # Straightforward single-flag tests
@@ -19,7 +19,7 @@ BEST_OPTS="raw"
 ./test-all $BEST_OPTS --duplicate-values-splitter > results-duplicate-values-splitter.tex
 ./test-all $BEST_OPTS --duplicate-values-evaluator > results-duplicate-values-evaluator.tex
 ./test-all $BEST_OPTS --no-refine-fulfilment-fvs > results-no-refine-fulfilment-fvs.tex
-./test-all $BEST_OPTS --no-match-reduced > results-no-match-reduced.tex
+./test-all $BEST_OPTS --match-reduced > results-match-reduced.tex
 
 ./test-all $BEST_OPTS --no-sub-graphs --generalisation=all-eligible > results-bags-no-sub-graphs.tex
 ./test-all $BEST_OPTS --tag-collection=sets --generalisation=all-eligible > results-sets.tex
