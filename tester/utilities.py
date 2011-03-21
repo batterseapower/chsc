@@ -54,7 +54,8 @@ def show_round(x, dp):
         return s + '.' + ('0' * dp)
 
 def show_percentage_difference(x):
-    return str(int(round((x - 1) * 100, 0))) + "\%" # LaTeX escaped percentage..
+    diff = int(round((x - 1) * 100, 0))
+    return (diff >= 0 and "+" or "") + str(diff) + "\%" # LaTeX escaped percentage..
 
 def assert_eq(left, right):
     assert left == right, repr(left) + " != " + repr(right)
