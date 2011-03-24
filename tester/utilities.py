@@ -7,7 +7,13 @@ def load_source(name, module_name):
     import imp
     return imp.load_source(module_name, modulepath(__name__, module_name))
 
+product = lambda xs: reduce(lambda x, y:x*y, xs)
+
 mean = lambda xs: sum(xs) / len(xs)
+
+nth_root = lambda n, x: x ** (1.0/n)
+
+geometric_mean = lambda xs: nth_root(len(xs), product(xs))
 
 def bind_maybe(mx, fxmy):
     if mx is None:

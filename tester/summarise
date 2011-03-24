@@ -8,7 +8,7 @@ def float_maybe(x):
     except ValueError, e:
         return None # Typically happens because one of the source values is unavailable
 
-def summarised(self):
+def summarised(geometric, self):
     def lift_string(f, xs):
         ys = [float_maybe(x) for x in xs]
         zs = [y for y in ys if y != None]
@@ -18,11 +18,12 @@ def summarised(self):
             return show_round(f(zs), 2) # + ((len(zs) != len(ys)) and "*" or "")
 
     columns = self.columns()
-    summary_rows = [(summary, dict([(header, lift_string(summarise, columns[header])) for header in self.headers])) for summary, summarise in [("Maximum", max), ("Minimum", min), ("Average", mean)]]
+    summary_rows = [(summary, dict([(header, lift_string(summarise, columns[header])) for header in self.headers])) for summary, summarise in [("Maximum", max), ("Minimum", min), ("Average", [mean, geometric_mean][geometric])]]
     return Results(self.description, self.key_header, self.headers, union_dict(self.results, dict(summary_rows)))
 
 
 if __name__ == '__main__':
     import sys
-    results = Results(readfile(list_get(sys.argv, 1, '-')))
-    print summarised(results)
+    files, args = [arg for arg in sys.argv if not arg.startswith("--")], [arg for arg in sys.argv if arg.startswith("--")]
+    results = Results(readfile(list_get(files, 1, '-')))
+    print summarised("--geometric-mean" in args, results)
