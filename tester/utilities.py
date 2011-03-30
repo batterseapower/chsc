@@ -72,6 +72,10 @@ def zipwith_dict(f, left, right):
     
     return dict([(key, f(key, left[key], right[key])) for key in thekeys])
 
+def zipwith_dict_intersection(f, left, right):
+    thekeys = set(left.keys()).intersection(set(right.keys()))
+    return dict([(key, f(key, left[key], right[key])) for key in thekeys])
+
 def union_dict(left, right):
     new = dict(left)
     new.update(right)
@@ -139,7 +143,7 @@ class Results(object):
     @classmethod
     def zipresults(cls, zip_descriptions, zip_values, left, right):
         combine_files = lambda _filename, left_values, right_values: zipwith_dict(zip_values, left_values, right_values)
-        combine_results = lambda leftresults, rightresults: zipwith_dict(combine_files, leftresults, rightresults)
+        combine_results = lambda leftresults, rightresults: zipwith_dict_intersection(combine_files, leftresults, rightresults)
         return cls.combineresults(zip_descriptions, combine_results, left, right)
     
     @classmethod
