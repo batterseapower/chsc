@@ -49,7 +49,7 @@ fUEL :: Bool
 fUEL = "--fuel" `elem` aRGS
 
 wARP_FACTOR :: Int
-wARP_FACTOR = parseInt "--warp-factor" 10
+wARP_FACTOR = parseInt "--warp-factor" 25
 
 parseEnum :: String -> a -> [(String, a)] -> a
 parseEnum prefix def opts = maybe def (fromJust . flip lookup opts . map toLower) $ parseOption prefix
