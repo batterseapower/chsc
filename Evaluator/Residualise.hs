@@ -1,6 +1,7 @@
 {-# LANGUAGE ViewPatterns, TupleSections #-}
-module Evaluator.Residualise (pPrintHeap, pPrintFullState, pPrintFullUnnormalisedState) where
+module Evaluator.Residualise (residualiseState, pPrintHeap, pPrintFullState, pPrintFullUnnormalisedState) where
 
+import Evaluator.Deeds
 import Evaluator.Syntax
 
 import Core.FreeVars
@@ -12,6 +13,13 @@ import Utilities
 import Data.Either
 import qualified Data.Map as M
 
+
+residualiseState :: State -> (Deeds, Out [(Var, Doc)], Out FVedTerm)
+residualiseState = residualiseUnnormalisedState . denormalise
+
+residualiseUnnormalisedState :: UnnormalisedState -> (Deeds, Out [(Var, Doc)], Out FVedTerm)
+residualiseUnnormalisedState (deeds, heap, k, in_e) = (deeds, floats_static, e)
+  where (floats_static, e) = residualiseHeap heap (\ids -> residualiseStack ids k (residualiseTerm ids in_e))
 
 residualiseTerm :: IdSupply -> In AnnedTerm -> Out FVedTerm
 residualiseTerm ids = detagAnnedTerm . renameIn (renameAnnedTerm ids)
@@ -46,6 +54,5 @@ pPrintFullState :: State -> Doc
 pPrintFullState = pPrintFullUnnormalisedState . denormalise
 
 pPrintFullUnnormalisedState :: UnnormalisedState -> Doc
-pPrintFullUnnormalisedState (deeds, heap, k, in_e) = text "Deeds:" <+> pPrint deeds $$ pPrint (M.fromList floats_static) $$ pPrint e
-  where (floats_static, e) = residualiseHeap heap (\ids -> residualiseStack ids k (residualiseTerm ids in_e))
-
+pPrintFullUnnormalisedState state = text "Deeds:" <+> pPrint deeds $$ pPrint (M.fromList floats_static) $$ pPrint e
+  where (deeds, floats_static, e) = residualiseUnnormalisedState state

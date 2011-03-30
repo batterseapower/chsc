@@ -405,17 +405,7 @@ optimiseSplit :: MonadStatics m
               -> m (Deeds, Out FVedTerm)
 optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
     -- 0) The "process tree" splits at this point. We can choose to distribute the deeds between the children in a number of ways
-    let stateSize (_deeds, h, k, in_qa) = heapSize h + stackSize k + qaSize (snd in_qa)
-          where qaSize = annedSize . fmap qaToAnnedTerm'
-                heapBindingSize hb
-                  | InternallyBound <- howBound hb
-                  , Just (_, e) <- heapBindingTerm hb
-                  = annedSize e
-                  | otherwise
-                  = 0
-                heapSize (Heap h _) = sum (map heapBindingSize (M.elems h))
-                stackSize = sum . map (stackFrameSize . tagee)
-        bracketSizes = map stateSize . fillers
+    let bracketSizes = map stateSize . fillers
         
         (heap_xs, bracketeds_heap_elts) = unzip (M.toList bracketeds_heap)
         -- NB: it is *very important* that the list supplied to apportion contains at least one element and at least one non-zero weight, or some

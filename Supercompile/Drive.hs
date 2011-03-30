@@ -8,6 +8,7 @@ import Supercompile.Split
 import Core.FreeVars
 import Core.Prettify
 import Core.Renaming
+import Core.Size
 import Core.Syntax
 import Core.Tag
 
@@ -476,7 +477,7 @@ type RollbackScpM = Generaliser -> ScpM (Deeds, Out FVedTerm)
 
 sc :: History (State, RollbackScpM) (Generaliser, RollbackScpM) -> AlreadySpeculated -> State -> ScpM (Deeds, Out FVedTerm)
 sc' :: History (State, RollbackScpM) (Generaliser, RollbackScpM) -> AlreadySpeculated -> State -> State -> ScpM (Deeds, Out FVedTerm)
-sc  hist = memo (sc' hist)
+sc  hist = rollbackBig (memo (sc' hist))
 sc' hist speculated state state' = (\raise -> check raise) `catchScpM` \gen -> stop gen hist -- TODO: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
   where
     check this_rb = case terminate hist (if rEDUCE_BEFORE_TEST && sPECULATION then state' else state {- FIXME: good idea? flag control? -}, this_rb) of
@@ -535,6 +536,18 @@ memo opt speculated state0 = do
             res <- opt speculated state4 state2
             traceRenderScpM ("<sc", x, pPrintFullState state4, res)
             return res
+
+-- Several design choices here:
+--
+--  1. How to account for size of specialisations created during drive? Presumably ones that eventually get shared should be given a discount, but how?
+--
+--  2. How to continue if we do roll back. Currently I throw away any specialisations created in the process, but this seems uncool.
+rollbackBig :: (AlreadySpeculated -> State -> ScpM (Deeds, Out FVedTerm))
+            ->  AlreadySpeculated -> State -> ScpM (Deeds, Out FVedTerm)
+rollbackBig opt speculated state
+  | rOLLBACK_BIG = ScpM $ \e s k -> unScpM (opt speculated state) e s $ \(deeds', term') s' -> let too_big = fvedTermSize term' + sum [fvedTermSize term' | (p, term') <- fulfilments s', not (fun p `elem` map (fun . fst) (fulfilments s))] > bLOAT_FACTOR * stateSize state
+                                                                                               in if too_big then k (case residualiseState state of (deeds, _, e') -> (deeds, e')) s else k (deeds', term') s'
+  | otherwise = opt speculated state
 
 traceRenderScpM :: Pretty a => a -> ScpM ()
 traceRenderScpM x = ScpM (\e s k -> k (depth e) s) >>= \depth -> traceRenderM $ nest depth $ pPrint x

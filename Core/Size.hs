@@ -18,7 +18,8 @@ type TaggedSizedFVedAlt = AltF (Tagged :.: Sized :.: FVed)
 type TaggedSizedFVedValue = ValueF (Tagged :.: Sized :.: FVed)
 
 
-(termVarSize',            termSize,                termSize',                altsSize,                valueSize,                valueSize')                = mkSize (\f (I e) -> f e)
+(varSize',                termSize,                termSize',                altsSize,                valueSize,                valueSize')                = mkSize (\f (I e) -> f e)
+(fvedVarSize',            fvedTermSize,            fvedTermSize',            fvedAltsSize,            fvedValueSize,            fvedValueSize')            = mkSize (\f (FVed _ e) -> f e)
 (sizedVarSize',           sizedTermSize,           sizedTermSize',           sizedAltsSize,           sizedValueSize,           sizedValueSize')           = mkSize (\_ (Sized sz _) -> sz)
 (sizedFVedVarSize',       sizedFVedTermSize,       sizedFVedTermSize',       sizedFVedAltsSize,       sizedFVedValueSize,       sizedFVedValueSize')       = mkSize (\_ (Comp (Sized sz (FVed _ _))) -> sz)
 (taggedSizedFVedVarSize', taggedSizedFVedTermSize, taggedSizedFVedTermSize', taggedSizedFVedAltsSize, taggedSizedFVedValueSize, taggedSizedFVedValueSize') = mkSize (\_ (Comp (Tagged _ (Comp (Sized sz (FVed _ _))))) -> sz)

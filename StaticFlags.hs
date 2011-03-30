@@ -113,6 +113,9 @@ rEDUCE_ROLLBACK = not $ "--no-reduce-rollback" `elem` aRGS
 sC_ROLLBACK :: Bool
 sC_ROLLBACK = not $ "--no-sc-rollback" `elem` aRGS
 
+rOLLBACK_BIG :: Bool
+rOLLBACK_BIG = "--rollback-big" `elem` aRGS
+
 dISCARD_FULFILMENTS_ON_ROLLBACK :: Bool
 dISCARD_FULFILMENTS_ON_ROLLBACK = "--discard-fulfilments-on-rollback" `elem` aRGS
 

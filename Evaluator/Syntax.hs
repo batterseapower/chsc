@@ -178,6 +178,11 @@ stackFrameSize kf = 1 + case kf of
     PrimApply _ in_vs in_es -> sum (map (annedValueSize . snd) in_vs ++ map (annedTermSize . snd) in_es)
     Update _                -> 0
 
+stateSize :: State -> Size
+stateSize (_deeds, h, k, in_qa) = heapSize h + stackSize k + qaSize (snd in_qa)
+          where qaSize = annedSize . fmap qaToAnnedTerm'
+                heapSize (Heap h _) = sum (map heapBindingSize (M.elems h))
+                stackSize = sum . map (stackFrameSize . tagee)
 
 addStateDeeds :: Deeds -> (Deeds, Heap, Stack, In (Anned a)) -> (Deeds, Heap, Stack, In (Anned a))
 addStateDeeds extra_deeds (deeds, h, k, in_e) = (extra_deeds + deeds, h, k, in_e)
