@@ -252,7 +252,7 @@ reduce orig_state = go (mkHistory (extra rEDUCE_WQO)) orig_state
     -- NB: it is important that we ensure that reduce is idempotent if we have rollback on. I use this property to improve memoisation.
     go hist (fuel, state) = -- traceRender ("reduce:step", pPrintFullState state) $
                             case step state of
-        Just state' | fuel > 0 -> case terminate hist (state, state) of
+        Just state' | not fUEL || (fuel > 0) -> case terminate hist (state, state) of
           Continue hist'         -> go hist' (fuel - 1, state')
           Stop (_gen, old_state) -> trace "reduce-stop" $ (mempty { stat_reduce_stops = 1 }, (fuel, if rEDUCE_ROLLBACK then old_state else state')) -- TODO: generalise?
         _ -> (mempty, (fuel, state))
