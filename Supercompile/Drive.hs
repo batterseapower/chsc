@@ -153,7 +153,50 @@ gc _state@(deeds0, Heap h ids, k, in_e) = assertRender ("gc", stateUncoveredVars
 
 type AlreadySpeculated = S.Set Var
 
-speculate, old_speculate :: AlreadySpeculated -> (SCStats, State) -> (AlreadySpeculated, (SCStats, State))
+-- Note [Order of speculation]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+--
+-- It is quite important that are insensitive to dependency order. For example:
+--
+--  let id x = x
+--      idish = id id
+--  in e
+--
+-- If we speculated idish first without any information about what id is, it will be irreducible. If we do it the other way
+-- around (or include some information about id) then we will get a nice lambda. This is why we speculate each binding with
+-- *the entire rest of the heap* also present.
+--
+-- Note [Nested speculation]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~
+--
+-- Naturally, we want to speculate the nested lets that may arise from the speculation process itself. For example, when
+-- speculating this:
+--
+-- let x = let y = 1 + 1
+--         in Just y
+-- in \z -> ...
+--
+-- After we speculate to discover the Just we want to speculate the (1 + 1) computation so we can push it down into the lambda
+-- body along with the enclosing Just.
+--
+-- We do this by adding new let-bindings arising from speculation to the list of pending bindings. Importantly, we add them
+-- to the end of the pending list to implement a breadth-first search. This is important so that we tend to do more speculation
+-- towards the root of the group of let-bindings (which seems like a reasonable heuristic).
+--
+-- The classic important case to think about is:
+--
+-- let ones = 1 : ones
+--     xs = map (+1) ones
+--
+-- Speculating xs gives us:
+--
+-- let ones = 1 : ones
+--     xs = x0 : xs0
+--     x0 = 1 + 1
+--     xs0 = map (+1) ones
+--
+-- We can speculate x0 easily, but speculating xs0 gives rise to a x1 and xs1 of the same form. We must avoid looping here.
+speculate :: AlreadySpeculated -> (SCStats, State) -> (AlreadySpeculated, (SCStats, State))
 speculate speculated (stats, (deeds, Heap h ids, k, in_e)) = (M.keysSet h, (stats', (deeds', Heap (h_non_values_speculated `M.union` h_speculated_ok `M.union` h_speculated_failure) ids', k, in_e)))
   where
     (h_values, h_non_values) = M.partition (maybe False (termIsValue . snd) . heapBindingTerm) h
@@ -200,114 +243,6 @@ runSpecM spec state = unSpecM spec state (\state () -> state)
 
 catchSpecM :: ((forall b. SpecM b) -> SpecM ()) -> SpecM () -> SpecM ()
 catchSpecM mx mcatch = SpecM $ \s k -> unSpecM (mx (SpecM $ \_s _k -> unSpecM mcatch s k)) s k
-
-old_speculate speculated (stats, _state@(deeds, Heap h ids, k, in_e)) = -- assertRender (hang (text "speculate: deeds lost or gained:") 2 (pPrintFullState _state $$ pPrintFullState state' $$ (case go True (mkHistory wQO) mempty deeds (M.toList h) (M.keysSet h) M.empty ids of (_, _, _) -> text "OK, fine")))
-                                                                     --              (noChange (releaseStateDeed _state) (releaseStateDeed state')) $
-                                                                     (M.keysSet h',) $ (,state') $!! stats `mappend` stats'
-  where
-    state' = (deeds', heap', k, in_e)
-    (stats', deeds', heap'@(Heap h' _)) = go (mkHistory wQO) mempty deeds (M.toList h) (M.keysSet h) M.empty ids
-    
-    qaToValue :: In (Anned QA) -> Maybe (In (Anned AnnedValue))
-    qaToValue (rn, qa) | Answer _ <- annee qa = Just (rn, fmap (\(Answer v) -> v) qa)
-                       | otherwise            = Nothing
-    
-    -- Note [Controlling speculation]
-    -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    --
-    -- Speculation gets out of hand easily. A motivating example is DigitsOfE2: without some way to control
-    -- speculation, it blows up, and I have not observed it to terminate.
-    --
-    -- One approach is using "losers". In this approach, we prevent speculation from forcing heap-carried things
-    -- that have proved to be losers in the past, as indicated by their tags being part of an accumulated losers set.
-    -- The losers set was threaded through "go", and hence generated anew for each call to "speculate".
-    --
-    -- An attractive approach (inspired by Simon, as usual!) is to just thread the *history* through go. This *should* have a
-    -- similiar effect, but prevents multiplication of mechanisms.
-    --
-    -- However, in my tests, the losers set approach ensured that DigitsOfE2 terminated after ~13s. Changing to the threaded
-    -- history approach, I did not observe termination :-(. I think this is because the losers set is preventing an "obvious"
-    -- speculation from happening, which just coincidentally allows supercompilation to terminate.
-    --
-    -- Note [Order of speculation]
-    -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    --
-    -- It is quite important that are insensitive to dependency order. For example:
-    --
-    --  let id x = x
-    --      idish = id id
-    --  in e
-    --
-    -- If we speculated idish first without any information about what id is, it will be irreducible. If we do it the other way
-    -- around (or include some information about id) then we will get a nice lambda. This is why we speculate each binding with
-    -- *the entire rest of the heap* also present.
-    --
-    -- Note [Nested speculation]
-    -- ~~~~~~~~~~~~~~~~~~~~~~~~~
-    --
-    -- Naturally, we want to speculate the nested lets that may arise from the speculation process itself. For example, when
-    -- speculating this:
-    --
-    -- let x = let y = 1 + 1
-    --         in Just y
-    -- in \z -> ...
-    --
-    -- After we speculate to discover the Just we want to speculate the (1 + 1) computation so we can push it down into the lambda
-    -- body along with the enclosing Just.
-    --
-    -- We do this by adding new let-bindings arising from speculation to the list of pending bindings. Importantly, we add them
-    -- to the end of the pending list to implement a breadth-first search. This is important so that we tend to do more speculation
-    -- towards the root of the group of let-bindings (which seems like a reasonable heuristic).
-    --
-    -- The classic important case to think about is:
-    --
-    -- let ones = 1 : ones
-    --     xs = map (+1) ones
-    --
-    -- Speculating xs gives us:
-    --
-    -- let ones = 1 : ones
-    --     xs = x0 : xs0
-    --     x0 = 1 + 1
-    --     xs0 = map (+1) ones
-    --
-    -- We can speculate x0 easily, but speculating xs0 gives rise to a x1 and xs1 of the same form. We must avoid looping here.
-    
-    -- TODO: speculation could be more efficient if I could see the bindings that I speculated on the last invocation of the speculate function
-    -- NB: the xes_pending_set only has to be an overapproximation of the domain of xes_pending (as long as those extra names cannot be generated
-    -- from the ids, or otherwise we would lose some speculation).
-    go _    stats deeds []                     _xes_pending_set xes ids = (,deeds, Heap xes ids) $!! stats
-    go hist stats deeds ((x', hb):xes_pending) xes_pending_set  xes ids
-         -- If the termination test says we can, try to reduce this heap binding
-        | HB InternallyBound (Right in_e) <- hb
-        , not (x' `S.member` speculated)
-        , let state = normalise (deeds, Heap (xes `M.union` M.fromList xes_pending) ids, [], in_e)
-        , Continue hist <- terminate hist state
-        -- , traceRender ("speculating", x', pPrintFullState state, case snd (reduce state) of state'@(_, _, _, (_, e)) -> pPrintFullState state' $$ text (show e)) True
-        , (stats', (deeds', Heap h ids, [], qaToValue -> Just in_v)) <- reduce state
-        , let (xes', h_pending') = M.partitionWithKey (\x' _ -> x' `M.member` xes) h
-              xes'' = M.insert x' (HB InternallyBound (Right (fmap (fmap Value) in_v))) xes'
-              -- Split the updated pending heap into updated bindings for those things I've already added to the pending list (preserving order), and any newly pending bindings
-              xes_pending' = [(x', fromJust (M.lookup x' h_pending')) | (x', _) <- xes_pending] ++ M.toList (M.filterWithKey (\x' _ -> not (x' `S.member` xes_pending_set)) h_pending')
-        -- , not failure || 
-        --            (let everything_before = xes `M.union` M.fromList ((x', hb):xes_pending)
-        --                 everything_after = xes'' `M.union` M.fromList xes_pending'
-        --                 before = releasePureHeapDeeds deeds everything_before
-        --                 intermediate = releasePureHeapDeeds deeds' (M.insert x' (HB InternallyBound (Just (fmap (fmap Value) in_v))) h)
-        --                 after  = releasePureHeapDeeds deeds' everything_after
-        --             in assertRender (hang (text "speculate.go: deeds lost or gained:") 2 (pPrint x' $$ pPrint (before, intermediate, after) $$
-        --                                                                                   pPrintFullState _state $$ pPrintFullState state' $$
-        --                                                                                   text "BEFORE:" $$ pPrint everything_before $$
-        --                                                                                   text "AFTER:" $$ pPrint everything_after $$
-        --                                                                                   pPrint (deeds, deeds') $$
-        --                                                                                   pPrint (M.mapMaybe id $ combineMaps (\hb_l -> Just (Just hb_l, Nothing)) (\hb_r -> Just (Nothing, Just hb_r)) (\hb_l hb_r -> guard (heapBindingSize hb_l /= heapBindingSize hb_r) >> return (Just hb_l, Just hb_r)) everything_before everything_after)))
-        --                             (noChange before after)
-        --                             True)
-        = go hist (stats `mappend` stats') deeds' xes_pending' (M.keysSet h_pending') xes'' ids
-         -- We MUST NOT EVER reduce in this branch or speculation will loop on e.g. infinite map
-        | otherwise
-        -- , traceRender ("not speculating", x', howBound hb, isJust (heapBindingTerm hb)) True
-        = go hist stats deeds xes_pending xes_pending_set (M.insert x' hb xes) ids
 
 reduce :: State -> (SCStats, State)
 reduce orig_state = go (mkHistory (extra rEDUCE_WQO)) orig_state
