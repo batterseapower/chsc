@@ -24,7 +24,7 @@ claimDeeds deeds want = guard (not dEEDS || deeds >= want) >> return (deeds - wa
 --
 -- Annoyingly, it is important that this works properly if n is negative as well -- these can occur
 -- when we have turned off deed checking. I don't care about handling negative weights.
-apportion :: Deeds -> [Deeds] -> [Deeds]
+apportion :: Int -> [Int] -> [Int]
 apportion _      []        = error "apportion: empty list"
 apportion orig_n weighting
   | orig_n < 0 = map negate $ apportion (negate orig_n) weighting

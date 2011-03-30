@@ -1,7 +1,7 @@
 {-# LANGUAGE PatternGuards, ViewPatterns, TupleSections, DeriveFunctor, DeriveFoldable, DeriveTraversable,
              MultiParamTypeClasses, FlexibleInstances, GeneralizedNewtypeDeriving #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
-module Supercompile.Split (MonadStatics(..), split, generalise) where
+module Supercompile.Split (Fuel, MonadStatics(..), split, generalise) where
 
 import Core.FreeVars
 import Core.Renaming
@@ -27,6 +27,9 @@ import qualified Data.Traversable as Traversable
 import qualified Data.Map as M
 import qualified Data.Set as S
 import qualified Data.IntSet as IS
+
+
+type Fuel = Int
 
 
 class Monad m => MonadStatics m where
@@ -125,19 +128,19 @@ mkEnteredEnv = setToMap
 
 {-# INLINE split #-}
 split :: MonadStatics m
-      => State
-      -> (State -> m (Deeds, Out FVedTerm))
+      => (Fuel, State)
+      -> ((Fuel, State) -> m (Deeds, Out FVedTerm))
       -> m (Deeds, Out FVedTerm)
-split (deeds, Heap h ids, k, (rn, qa)) opt
-  = generaliseSplit opt bottom deeds (Heap h ids1, [0..] `zip` k, (case annee qa of Question x -> [rename rn x]; Answer _ -> [], splitQA ids2 (rn, annee qa)))
+split (fuel, (deeds, Heap h ids, k, (rn, qa))) opt
+  = generaliseSplit opt bottom fuel deeds (Heap h ids1, [0..] `zip` k, (case annee qa of Question x -> [rename rn x]; Answer _ -> [], splitQA ids2 (rn, annee qa)))
   where (ids1, ids2) = splitIdSupply ids
 
 {-# INLINE generalise #-}
 generalise :: MonadStatics m
            => Generaliser
-           -> State
-           -> Maybe ((State -> m (Deeds, Out FVedTerm)) -> m (Deeds, Out FVedTerm))
-generalise gen (deeds, Heap h ids, k, (rn, qa)) = do
+           -> (Fuel, State)
+           -> Maybe (((Fuel, State) -> m (Deeds, Out FVedTerm)) -> m (Deeds, Out FVedTerm))
+generalise gen (fuel, (deeds, Heap h ids, k, (rn, qa))) = do
     let named_k = [0..] `zip` k
     
     (gen_kfs, gen_xs') <- case gENERALISATION of
@@ -178,16 +181,16 @@ generalise gen (deeds, Heap h ids, k, (rn, qa)) = do
     traceRender ("gen_kfs", gen_kfs, "gen_xs'", gen_xs') $ return ()
     
     let (ids', ctxt_id) = stepIdSupply ids
-    return $ \opt -> generaliseSplit opt (gen_kfs, gen_xs') deeds (Heap h ids', named_k, ([], oneBracketed (Once ctxt_id, \ids -> (0, Heap M.empty ids, [], (rn, fmap qaToAnnedTerm' qa)))))
+    return $ \opt -> generaliseSplit opt (gen_kfs, gen_xs') fuel deeds (Heap h ids', named_k, ([], oneBracketed (Once ctxt_id, \ids -> (0, Heap M.empty ids, [], (rn, fmap qaToAnnedTerm' qa)))))
 
 {-# INLINE generaliseSplit #-}
 generaliseSplit :: MonadStatics m
-                => (State -> m (Deeds, Out FVedTerm))
+                => ((Fuel, State) -> m (Deeds, Out FVedTerm))
                 -> (IS.IntSet, S.Set (Out Var))
-                -> Deeds
+                -> Fuel -> Deeds
                 -> (Heap, NamedStack, ([Out Var], Bracketed (Entered, IdSupply -> UnnormalisedState)))
                 -> m (Deeds, Out FVedTerm)
-generaliseSplit opt split_from deeds prepared_state = optimiseSplit opt deeds' bracketeds_heap bracketed_focus
+generaliseSplit opt split_from fuel deeds prepared_state = optimiseSplit opt fuel deeds' bracketeds_heap bracketed_focus
   where (deeds', bracketeds_heap, bracketed_focus) = splitt split_from deeds prepared_state
 
 -- Discard dead bindings:
@@ -365,11 +368,11 @@ optimiseMany :: Monad m
 optimiseMany opt (deeds, xs) = mapAccumLM (curry opt) deeds xs
 
 optimiseBracketed :: MonadStatics m
-                  => (State -> m (Deeds, Out FVedTerm))
-                  -> (Deeds, Bracketed State)
+                  => ((Fuel, State) -> m (Deeds, Out FVedTerm))
+                  -> (Deeds, Bracketed (Fuel, State))
                   -> m (Deeds, Out FVedTerm)
 optimiseBracketed opt (deeds, b) = liftM (second (rebuild b)) $ optimiseMany optimise_one (deeds, extraBvs b `zip` fillers b)
-  where optimise_one (deeds, (extra_bvs, (s_deeds, s_heap, s_k, s_e))) = liftM (\(xes, (deeds, e)) -> (deeds, letRecSmart xes e)) $ bindCapturedFloats extra_bvs $ opt (deeds + s_deeds, s_heap, s_k, s_e)
+  where optimise_one (deeds, (extra_bvs, (fuel, (s_deeds, s_heap, s_k, s_e)))) = liftM (\(xes, (deeds, e)) -> (deeds, letRecSmart xes e)) $ bindCapturedFloats extra_bvs $ opt (fuel, (deeds + s_deeds, s_heap, s_k, s_e))
         -- Because h-functions might potentially refer to the lambda/case-alt bound variables around this hole,
         -- we use bindCapturedFloats to residualise such bindings within exactly this context.
         -- See Note [When to bind captured floats]
@@ -398,32 +401,36 @@ transformWholeList f xs yss = (xs', yss')
 -- don't create loops as a result...
 
 optimiseSplit :: MonadStatics m
-              => (State -> m (Deeds, Out FVedTerm))
-              -> Deeds
+              => ((Fuel, State) -> m (Deeds, Out FVedTerm))
+              -> Fuel -> Deeds
               -> M.Map (Out Var) (Bracketed State)
               -> Bracketed State
               -> m (Deeds, Out FVedTerm)
-optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
+optimiseSplit opt fuel deeds bracketeds_heap bracketed_focus = do
     -- 0) The "process tree" splits at this point. We can choose to distribute the deeds between the children in a number of ways
     let bracketSizes = map stateSize . fillers
+    
+        apportionProportionally what = transformWholeList (apportion what) (1 : bracketSizes bracketed_focus) (map bracketSizes bracketeds_heap_elts)
         
         (heap_xs, bracketeds_heap_elts) = unzip (M.toList bracketeds_heap)
         -- NB: it is *very important* that the list supplied to apportion contains at least one element and at least one non-zero weight, or some
         -- deeds will vanish in a puff of digital smoke. We deal with this in the proportional case by padding the input list with a 1
-        (deeds_initial:deeds_focus, deedss_heap)
-          | Proportional <- dEEDS_POLICY = transformWholeList (apportion deeds) (1 : bracketSizes bracketed_focus) (map bracketSizes bracketeds_heap_elts)
-          | otherwise                    = (deeds : [0 | _ <- bracketSizes bracketed_focus], [[0 | _ <- bracketSizes b] | b <- bracketeds_heap_elts])
+        (deeds_initial:deeds_focus, deedss_heap) = case dEEDS_POLICY of
+            Proportional -> apportionProportionally deeds
+            FCFS         -> (deeds : [0 | _ <- fillers bracketed_focus], [[0 | _ <- fillers b] | b <- bracketeds_heap_elts])
         
-        bracketeds_deeded_heap = M.fromList (heap_xs `zip` zipWith (\deeds_heap -> modifyFillers (zipWith addStateDeeds deeds_heap)) deedss_heap bracketeds_heap_elts)
-        bracketed_deeded_focus = modifyFillers (zipWith addStateDeeds deeds_focus) bracketed_focus
+        (_fuel_wasted:fuel_focus, fuels_heap) = apportionProportionally fuel
+        
+        bracketeds_deeded_heap = M.fromList (heap_xs `zip` zipWith (\(fuel_heap, deeds_heap) -> modifyFillers (zip fuel_heap . zipWith addStateDeeds deeds_heap)) (fuels_heap `zip` deedss_heap) bracketeds_heap_elts)
+        bracketed_deeded_focus = modifyFillers (zip fuel_focus . zipWith addStateDeeds deeds_focus) bracketed_focus
     
     assertRenderM (text "optimiseSplit: deeds lost or gained!", deeds, (deeds_initial, deeds_focus, deedss_heap))
-                  (noChange (sumMap (releaseBracketedDeeds releaseStateDeed) bracketeds_heap        + releaseBracketedDeeds releaseStateDeed bracketed_focus        + deeds)
-                            (sumMap (releaseBracketedDeeds releaseStateDeed) bracketeds_deeded_heap + releaseBracketedDeeds releaseStateDeed bracketed_deeded_focus + deeds_initial))
+                  (noChange (sumMap (releaseBracketedDeeds releaseStateDeed)         bracketeds_heap        + releaseBracketedDeeds releaseStateDeed         bracketed_focus        + deeds)
+                            (sumMap (releaseBracketedDeeds (releaseStateDeed . snd)) bracketeds_deeded_heap + releaseBracketedDeeds (releaseStateDeed . snd) bracketed_deeded_focus + deeds_initial))
     
     -- 1) Recursively drive the focus itself
     let extra_statics = M.keysSet bracketeds_heap
-    bindCapturedFloats' extra_statics (optimiseBracketed opt (deeds_initial, bracketed_deeded_focus)) $ \hes (leftover_deeds, e_focus) -> do    
+    bindCapturedFloats' extra_statics (optimiseBracketed opt (deeds_initial, bracketed_deeded_focus)) $ \hes (leftover_deeds, e_focus) -> do
         -- 2) We now need to think about how we are going to residualise the letrec. In fact, we need to loop adding
         -- stuff to the letrec because it might be the case that:
         --  * One of the hes from above refers to some heap binding that is not referred to by the let body
@@ -433,7 +440,7 @@ optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
         (leftover_deeds, bracketeds_deeded_heap, xes, _fvs) <- go hes extra_statics leftover_deeds bracketeds_deeded_heap [] (fvedTermFreeVars e_focus)
     
         -- 3) Combine the residualised let bindings with the let body
-        return (sumMap (releaseBracketedDeeds releaseStateDeed) bracketeds_deeded_heap + leftover_deeds,
+        return (sumMap (releaseBracketedDeeds (releaseStateDeed . snd)) bracketeds_deeded_heap + leftover_deeds,
                 letRecSmart xes e_focus)
   where
     -- TODO: clean up this incomprehensible loop
@@ -449,11 +456,11 @@ optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
 -- by residualising the free variables of the focus residualisation (or whatever is in the let body),
 -- and then transitively inlines any bindings whose corresponding binders become free.
 optimiseLetBinds :: MonadStatics m
-                 => (State -> m (Deeds, Out FVedTerm))
+                 => ((Fuel, State) -> m (Deeds, Out FVedTerm))
                  -> Deeds
-                 -> M.Map (Out Var) (Bracketed State)
+                 -> M.Map (Out Var) (Bracketed (Fuel, State))
                  -> FreeVars
-                 -> m (Deeds, M.Map (Out Var) (Bracketed State), FreeVars, Out [(Var, FVedTerm)])
+                 -> m (Deeds, M.Map (Out Var) (Bracketed (Fuel, State)), FreeVars, Out [(Var, FVedTerm)])
 optimiseLetBinds opt leftover_deeds bracketeds_heap fvs' = -- traceRender ("optimiseLetBinds", M.keysSet bracketeds_heap, fvs') $
                                                            go leftover_deeds bracketeds_heap [] fvs'
   where

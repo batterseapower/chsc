@@ -45,12 +45,23 @@ rEDUCE_TERMINATION_CHECK = not $ "--no-reduce-termination" `elem` aRGS
 eVALUATE_PRIMOPS :: Bool
 eVALUATE_PRIMOPS = not $ "--no-primops" `elem` aRGS
 
-dEEDS :: Bool
-dEEDS = "--deeds" `elem` aRGS
+fUEL :: Bool
+fUEL = "--fuel" `elem` aRGS
+
+wARP_FACTOR :: Int
+wARP_FACTOR = parseInt "--warp-factor" 10
 
 parseEnum :: String -> a -> [(String, a)] -> a
-parseEnum prefix def opts = fromMaybe def $ listToMaybe [parse opt | arg <- aRGS, Just ('=':opt) <- [stripPrefix prefix arg]]
-  where parse = fromJust . flip lookup opts . map toLower
+parseEnum prefix def opts = maybe def (fromJust . flip lookup opts . map toLower) $ parseOption prefix
+
+parseInt :: String -> Int -> Int
+parseInt prefix def = maybe def read $ parseOption prefix
+
+parseOption :: String -> Maybe String
+parseOption prefix = listToMaybe [opt | arg <- aRGS, Just ('=':opt) <- [stripPrefix prefix arg]]
+
+dEEDS :: Bool
+dEEDS = "--deeds" `elem` aRGS
 
 data DeedsPolicy = FCFS | Proportional
                  deriving (Read)
@@ -78,7 +89,7 @@ gENERALISATION :: GeneralisationType
 gENERALISATION = parseEnum "--generalisation" StackFirst [("none", NoGeneralisation), ("all-eligible", AllEligible), ("first-reachable", DependencyOrder True), ("last-reachable", DependencyOrder False), ("stack-first", StackFirst)]
 
 bLOAT_FACTOR :: Int
-bLOAT_FACTOR = fromMaybe 10 $ listToMaybe [read val | arg <- aRGS, Just val <- [stripPrefix "--bloat=" arg]]
+bLOAT_FACTOR = parseInt "--bloat" 10
  -- NB: need a bloat factor of at least 5 to get append/append fusion to work. The critical point is:
  --
  --  let (++) = ...

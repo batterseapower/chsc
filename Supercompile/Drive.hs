@@ -76,9 +76,10 @@ instance Monoid SCStats where
 
 
 supercompile :: Term -> (SCStats, Term)
-supercompile e = traceRender ("all input FVs", input_fvs) $ second (fVedTermToTerm . if pRETTIFY then prettify else id) $ runScpM $ liftM snd $ sc (mkHistory (extra wQO)) S.empty state
+supercompile e = traceRender ("all input FVs", input_fvs) $ second (fVedTermToTerm . if pRETTIFY then prettify else id) $ runScpM $ liftM snd $ sc (mkHistory (extra wQO)) S.empty (wARP_FACTOR * input_size, state)
   where input_fvs = annedTermFreeVars anned_e
-        state = normalise ((bLOAT_FACTOR - 1) * annedSize anned_e, Heap (M.fromDistinctAscList anned_h_kvs) reduceIdSupply, [], (mkIdentityRenaming $ S.toAscList input_fvs, anned_e))
+        input_size = annedSize anned_e
+        state = normalise ((bLOAT_FACTOR - 1) * input_size, Heap (M.fromDistinctAscList anned_h_kvs) reduceIdSupply, [], (mkIdentityRenaming $ S.toAscList input_fvs, anned_e))
         
         (tag_ids, anned_h_kvs) = mapAccumL (\tag_ids x' -> let (tag_ids', i) = stepIdSupply tag_ids in (tag_ids', (x', environmentallyBound (mkTag (hashedId i))))) tagIdSupply (S.toList input_fvs)
         anned_e = toAnnedTerm tag_ids e
@@ -197,13 +198,13 @@ type AlreadySpeculated = S.Set Var
 --     xs0 = map (+1) ones
 --
 -- We can speculate x0 easily, but speculating xs0 gives rise to a x1 and xs1 of the same form. We must avoid looping here.
-speculate :: AlreadySpeculated -> (SCStats, State) -> (AlreadySpeculated, (SCStats, State))
-speculate speculated (stats, (deeds, Heap h ids, k, in_e)) = (M.keysSet h, (stats', (deeds', Heap (h_non_values_speculated `M.union` h_speculated_ok `M.union` h_speculated_failure) ids', k, in_e)))
+speculate :: AlreadySpeculated -> (SCStats, (Fuel, State)) -> (AlreadySpeculated, (SCStats, (Fuel, State)))
+speculate speculated (stats, (fuel, (deeds, Heap h ids, k, in_e))) = (M.keysSet h, (stats', (fuel', (deeds', Heap (h_non_values_speculated `M.union` h_speculated_ok `M.union` h_speculated_failure) ids', k, in_e))))
   where
     (h_values, h_non_values) = M.partition (maybe False (termIsValue . snd) . heapBindingTerm) h
     (h_non_values_unspeculated, h_non_values_speculated) = (h_non_values `exclude` speculated, h_non_values `restrict` speculated)
 
-    (stats', deeds', h_speculated_ok, h_speculated_failure, ids') = runSpecM (speculateManyMap (mkHistory (extra wQO)) h_non_values_unspeculated) (stats, deeds, h_values, M.empty, ids)
+    (stats', fuel', deeds', h_speculated_ok, h_speculated_failure, ids') = runSpecM (speculateManyMap (mkHistory (extra wQO)) h_non_values_unspeculated) (stats, fuel, deeds, h_values, M.empty, ids)
     
     speculateManyMap hist = speculateMany hist . concatMap M.toList . topologicalSort heapBindingFreeVars
     speculateMany hist = mapM_ (speculateOne hist)
@@ -215,18 +216,18 @@ speculate speculated (stats, (deeds, Heap h ids, k, in_e)) = (M.keysSet h, (stat
       | otherwise
       = speculation_failure
       where
-        speculation_failure = modifySpecState $ \(stats, deeds, h_speculated_ok, h_speculated_failure, ids) -> ((stats, deeds, h_speculated_ok, M.insert x' hb h_speculated_failure, ids), ())
+        speculation_failure = modifySpecState $ \(stats, fuel, deeds, h_speculated_ok, h_speculated_failure, ids) -> ((stats, fuel, deeds, h_speculated_ok, M.insert x' hb h_speculated_failure, ids), ())
         try_speculation in_e rb = do
-          let go no_change@(stats, deeds, h_speculated_ok, h_speculated_failure, ids) = case terminate hist (state, rb) of
+          let go no_change@(stats, fuel, deeds, h_speculated_ok, h_speculated_failure, ids) = case terminate hist (state, rb) of
                   Stop (_gen, rb) -> (no_change, rb)
-                  Continue hist -> case reduce state of
-                      (extra_stats, (deeds, Heap h_speculated_ok' ids, [], (rn, v@(annee -> Answer _)))) -> ((stats `mappend` extra_stats, deeds, M.insert x' (internallyBound (rn, fmap qaToAnnedTerm' v)) h_speculated_ok, h_speculated_failure, ids), speculateManyMap hist h_unspeculated)
+                  Continue hist -> case reduce (fuel, state) of
+                      (extra_stats, (fuel, (deeds, Heap h_speculated_ok' ids, [], (rn, v@(annee -> Answer _))))) -> ((stats `mappend` extra_stats, fuel, deeds, M.insert x' (internallyBound (rn, fmap qaToAnnedTerm' v)) h_speculated_ok, h_speculated_failure, ids), speculateManyMap hist h_unspeculated)
                         where h_unspeculated = h_speculated_ok' M.\\ h_speculated_ok
                       _ -> (no_change, speculation_failure)
                 where state = normalise (deeds, Heap h_speculated_ok ids, [], in_e)
           modifySpecState go >>= id
 
-type SpecState = (SCStats, Deeds, PureHeap, PureHeap, IdSupply)
+type SpecState = (SCStats, Fuel, Deeds, PureHeap, PureHeap, IdSupply)
 newtype SpecM a = SpecM { unSpecM :: SpecState -> (SpecState -> a -> SpecState) -> SpecState }
 
 instance Functor SpecM where
@@ -245,16 +246,16 @@ runSpecM spec state = unSpecM spec state (\state () -> state)
 catchSpecM :: ((forall b. SpecM b) -> SpecM ()) -> SpecM () -> SpecM ()
 catchSpecM mx mcatch = SpecM $ \s k -> unSpecM (mx (SpecM $ \_s _k -> unSpecM mcatch s k)) s k
 
-reduce :: State -> (SCStats, State)
+reduce :: (Fuel, State) -> (SCStats, (Fuel, State))
 reduce orig_state = go (mkHistory (extra rEDUCE_WQO)) orig_state
   where
     -- NB: it is important that we ensure that reduce is idempotent if we have rollback on. I use this property to improve memoisation.
-    go hist state = -- traceRender ("reduce:step", pPrintFullState state) $
-                    case step state of
-        Nothing -> (mempty, state)
-        Just state' -> case terminate hist (state, state) of
-          Continue hist'         -> go hist' state'
-          Stop (_gen, old_state) -> trace "reduce-stop" $ (mempty { stat_reduce_stops = 1 }, if rEDUCE_ROLLBACK then old_state else state') -- TODO: generalise?
+    go hist (fuel, state) = -- traceRender ("reduce:step", pPrintFullState state) $
+                            case step state of
+        Just state' | fuel > 0 -> case terminate hist (state, state) of
+          Continue hist'         -> go hist' (fuel - 1, state')
+          Stop (_gen, old_state) -> trace "reduce-stop" $ (mempty { stat_reduce_stops = 1 }, (fuel, if rEDUCE_ROLLBACK then old_state else state')) -- TODO: generalise?
+        _ -> (mempty, (fuel, state))
 
 
 --
@@ -475,26 +476,26 @@ addStats scstats = ScpM $ \_e s k -> k () (let scstats' = stats s `mappend` scst
 
 type RollbackScpM = Generaliser -> ScpM (Deeds, Out FVedTerm)
 
-sc :: History (State, RollbackScpM) (Generaliser, RollbackScpM) -> AlreadySpeculated -> State -> ScpM (Deeds, Out FVedTerm)
-sc' :: History (State, RollbackScpM) (Generaliser, RollbackScpM) -> AlreadySpeculated -> State -> State -> ScpM (Deeds, Out FVedTerm)
+sc :: History (State, RollbackScpM) (Generaliser, RollbackScpM) -> AlreadySpeculated -> (Fuel, State) -> ScpM (Deeds, Out FVedTerm)
+sc' :: History (State, RollbackScpM) (Generaliser, RollbackScpM) -> AlreadySpeculated -> (Fuel, State) -> State -> ScpM (Deeds, Out FVedTerm)
 sc  hist = rollbackBig (memo (sc' hist))
-sc' hist speculated state state' = (\raise -> check raise) `catchScpM` \gen -> stop gen hist -- TODO: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
+sc' hist speculated (fuel, state) state' = (\raise -> check raise) `catchScpM` \gen -> stop gen hist -- TODO: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
   where
     check this_rb = case terminate hist (if rEDUCE_BEFORE_TEST && sPECULATION then state' else state {- FIXME: good idea? flag control? -}, this_rb) of
                       Continue hist' -> continue hist'
                       Stop (gen, rb) -> maybe (stop gen hist) ($ gen) $ guard sC_ROLLBACK >> Just rb
     stop gen hist = do addStats $ mempty { stat_sc_stops = 1 }
-                       trace "sc-stop" $ fromMaybe (trace "sc-stop: no generalisation" $ split state) (generalise gen state) (sc hist speculated) -- Keep the trace exactly here or it gets floated out by GHC
+                       trace "sc-stop" $ fromMaybe (trace "sc-stop: no generalisation" $ split (fuel, state)) (generalise gen (fuel, state)) (sc hist speculated) -- Keep the trace exactly here or it gets floated out by GHC
     continue hist = do traceRenderScpM ("reduce end (continue)", pPrintFullState state')
                        addStats stats
-                       split state' (sc hist speculated')
-      where (speculated', (stats, state')) = (if sPECULATION then speculate speculated else (speculated,)) $ reduce state -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
+                       split (fuel', state') (sc hist speculated')
+      where (speculated', (stats, (fuel', state'))) = (if sPECULATION then speculate speculated else (speculated,)) $ reduce (fuel, state) -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
 
-memo :: (AlreadySpeculated -> State -> State -> ScpM (Deeds, Out FVedTerm))
-     ->  AlreadySpeculated -> State -> ScpM (Deeds, Out FVedTerm)
-memo opt speculated state0 = do
+memo :: (AlreadySpeculated -> (Fuel, State) -> State -> ScpM (Deeds, Out FVedTerm))
+     ->  AlreadySpeculated -> (Fuel, State) -> ScpM (Deeds, Out FVedTerm)
+memo opt speculated (fuel0, state0) = do
     let (_, state1) = gc state0 -- Necessary because normalisation might have made some stuff dead
-        (_, (_, state2)) = (if mATCH_SPECULATION then speculate speculated else (speculated,)) $ reduce state1 -- FIXME: work sharing with sc'
+        (_, (_, (fuel1, state2))) = (if mATCH_SPECULATION then speculate speculated else (speculated,)) $ reduce (fuel0, state1) -- FIXME: work sharing with sc'
         (state3, state4) = case gc state2 of
             _ | not mATCH_REDUCED -> (state1, state1)
             (h_junk, state2')     -> (if M.null h_dead_promoted then id else traceRender ("promoting", M.keysSet h_dead_promoted)) $
@@ -533,7 +534,7 @@ memo opt speculated state0 = do
             -- Note that since the reducer only looks into non-internal *value* bindings doing this does not cause work duplication, only value duplication
             --
             -- FIXME: I'm not acquiring deeds for these....
-            res <- opt speculated state4 state2
+            res <- opt speculated (fuel1, state4) state2
             traceRenderScpM ("<sc", x, pPrintFullState state4, res)
             return res
 
@@ -542,12 +543,12 @@ memo opt speculated state0 = do
 --  1. How to account for size of specialisations created during drive? Presumably ones that eventually get shared should be given a discount, but how?
 --
 --  2. How to continue if we do roll back. Currently I throw away any specialisations created in the process, but this seems uncool.
-rollbackBig :: (AlreadySpeculated -> State -> ScpM (Deeds, Out FVedTerm))
-            ->  AlreadySpeculated -> State -> ScpM (Deeds, Out FVedTerm)
-rollbackBig opt speculated state
-  | rOLLBACK_BIG = ScpM $ \e s k -> unScpM (opt speculated state) e s $ \(deeds', term') s' -> let too_big = fvedTermSize term' + sum [fvedTermSize term' | (p, term') <- fulfilments s', not (fun p `elem` map (fun . fst) (fulfilments s))] > bLOAT_FACTOR * stateSize state
-                                                                                               in if too_big then k (case residualiseState state of (deeds, _, e') -> (deeds, e')) s else k (deeds', term') s'
-  | otherwise = opt speculated state
+rollbackBig :: (AlreadySpeculated -> (Fuel, State) -> ScpM (Deeds, Out FVedTerm))
+            ->  AlreadySpeculated -> (Fuel, State) -> ScpM (Deeds, Out FVedTerm)
+rollbackBig opt speculated (fuel, state)
+  | rOLLBACK_BIG = ScpM $ \e s k -> unScpM (opt speculated (fuel, state)) e s $ \(deeds', term') s' -> let too_big = fvedTermSize term' + sum [fvedTermSize term' | (p, term') <- fulfilments s', not (fun p `elem` map (fun . fst) (fulfilments s))] > bLOAT_FACTOR * stateSize state
+                                                                                                       in if too_big then k (case residualiseState state of (deeds, _, e') -> (deeds, e')) s else k (deeds', term') s'
+  | otherwise = opt speculated (fuel, state)
 
 traceRenderScpM :: Pretty a => a -> ScpM ()
 traceRenderScpM x = ScpM (\e s k -> k (depth e) s) >>= \depth -> traceRenderM $ nest depth $ pPrint x
